@@ -1,0 +1,25 @@
+# Docker ignore — exclude files not needed in the build context
+
+# Source control
+.git/
+.github/
+*.md
+
+# Dev artifacts
+node_modules/
+*/node_modules/
+backend/dist/
+frontend/dist/
+
+# Data
+data/
+*.db
+
+# Env
+.env
+.env.local
+
+# Editor
+.DS_Store
+.idea/
+.vscode/

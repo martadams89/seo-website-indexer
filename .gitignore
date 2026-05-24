@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build output
+backend/dist/
+frontend/dist/
+
+# Data (SQLite, logs)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+*.txt.log
+.index-log.txt
+.index-state.json
+
+# Environment
+.env
+.env.local
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

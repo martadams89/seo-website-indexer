@@ -1,0 +1,40 @@
+services:
+  seo-indexer:
+    image: ghcr.io/martadams89/seo-website-indexer:latest
+    # Or build locally:
+    # build: .
+    container_name: seo-indexer
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - seo-indexer-data:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATA_DIR=/data
+      # Optional: override default cron (can also be set via UI)
+      # - CRON_SCHEDULE=0 3 * * *
+
+volumes:
+  seo-indexer-data:
+    driver: local
+
+# ─── Usage ────────────────────────────────────────────────────────────────────
+#
+#  Start:  docker compose up -d
+#  Logs:   docker compose logs -f
+#  Stop:   docker compose down
+#
+#  Then open http://localhost:3000 in your browser.
+#
+#  If you want IndexNow to work WITHOUT manually placing key files on your site,
+#  route your domain through this container via a reverse proxy and forward the
+#  /{key}.txt path. Example nginx config:
+#
+#    location ~* ^/[a-f0-9]{8,128}\.txt$ {
+#        proxy_pass http://seo-indexer:3000;
+#    }
+#
+#  The container automatically serves the key file at /{key}.txt for all sites.
