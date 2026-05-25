@@ -44,27 +44,32 @@ Then open **http://localhost:3000** and follow the three-step setup wizard.
 
 ## Authentication
 
-### Option A: OAuth Device Flow ✅ Recommended
+This application uses the secure **Google OAuth 2.0 Device Flow** (which operates exactly like the `gcloud CLI` or tools like `rclone` authenticate). 
 
-Uses your real Google account — the same one that owns your Search Console properties. No service account or IAM setup needed.
+Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
 
-1. Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
-2. Click **Create Credentials → OAuth client ID → Desktop app**, give it any name
-3. Enable these two APIs in your project:
-   - [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com)
-   - [Web Search Indexing API](https://console.cloud.google.com/apis/library/indexing.googleapis.com)
-4. Copy the **Client ID** and **Client Secret** and paste them into the Setup wizard
-5. The wizard displays a short URL and a code — open the URL on any device, sign in, enter the code. Done.
-6. The container stores a refresh token and renews access tokens automatically.
+### How to set up your Google Cloud API credentials:
 
-### Option B: Service Account JSON
-
-> ⚠️ **Gotcha:** The Google Indexing API requires the service account email to be added as an **Owner** (not User) in Google Search Console. Standard "User" permission returns a 403.
-
-1. In [Google Cloud Console → IAM → Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts), create a service account
-2. Create and download a JSON key for it
-3. In **Google Search Console → your property → Settings → Users and permissions**, add the service account email as **Owner**
-4. Paste the downloaded JSON into the Setup wizard
+1. **Create an OAuth Client:**
+   - Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
+   - Click **Create Credentials** → **OAuth client ID**.
+   - Select **Desktop app** as the Application Type, name it (e.g. `SEO Indexer`), and click **Create**.
+2. **Enable the Google APIs:**
+   - Enable both of the following APIs in your Google Cloud Project:
+     - [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com)
+     - [Web Search Indexing API](https://console.cloud.google.com/apis/library/indexing.googleapis.com)
+3. **Configure the Container:**
+   - Copy your new **Client ID** and **Client Secret**.
+   - Paste them into the onboarding Setup wizard, OR bake them directly into your container via environment variables in your `docker-compose.yml`:
+     ```yaml
+     environment:
+       - GOOGLE_OAUTH_CLIENT_ID=your-client-id
+       - GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+     ```
+4. **One-Click Authorization:**
+   - The wizard will display a short verification code and link (e.g., `https://google.com/device`).
+   - Open the link on any device, log in with your Google account, and enter the code.
+   - The container securely saves the refresh token locally and automatically renews your access tokens in the background. Done!
 
 ---
 
