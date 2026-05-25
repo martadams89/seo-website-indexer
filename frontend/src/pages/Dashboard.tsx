@@ -14,11 +14,11 @@ export default function Dashboard() {
   const totalSubmitted = todayRuns.reduce((s, r) => s + r.total_submitted, 0);
   const totalFailed    = todayRuns.reduce((s, r) => s + r.total_failed, 0);
 
-  async function triggerRun() {
+  async function triggerRun(dryRun = false) {
     setRunError('');
     setRunning(true);
     try {
-      await api.triggerRun();
+      await api.triggerRun(dryRun ? { skipGoogle: true, skipIndexNow: true } : {});
       setTimeout(refresh, 1500);
     } catch (e) {
       setRunError(String(e).replace('Error: ', ''));
@@ -60,13 +60,22 @@ export default function Dashboard() {
               {stopping ? <><span className="spinner" /> Stopping…</> : <><XCircle size={13} /> Stop Run</>}
             </button>
           ) : (
-            <button
-              className="btn btn-primary"
-              disabled={running || !status?.auth.authenticated || sites.length === 0}
-              onClick={triggerRun}
-            >
-              <Play size={13} /> Run Now
-            </button>
+            <div className="flex gap-2">
+              <button
+                className="btn btn-secondary"
+                disabled={running || sites.length === 0}
+                onClick={() => triggerRun(true)}
+              >
+                <Zap size={13} /> Dry Run (Audits Only)
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={running || !status?.auth.authenticated || sites.length === 0}
+                onClick={() => triggerRun(false)}
+              >
+                <Play size={13} /> Run Now
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -207,8 +207,13 @@ async function _doRun(
         log(runId, 'warn', `${site.domain} — GEO audit failed: ${String(e)}`, site.id);
       }
 
-      // Audit JSON-LD schemas for new or modified pages
-      const targets = [...newUrls, ...changed];
+      // Audit JSON-LD schemas for new, modified, or never-audited pages
+      const allUrlStates = getUrlsBySite(site.id);
+      const neverAudited = entries.filter(e => {
+        const state = allUrlStates.find(s => s.url === e.url);
+        return state && state.has_schema === null;
+      });
+      const targets = [...newUrls, ...changed, ...neverAudited];
       if (targets.length > 0) {
         log(runId, 'info', `${site.domain} — auditing JSON-LD schemas for ${targets.length} pages`, site.id);
         for (const entry of targets) {

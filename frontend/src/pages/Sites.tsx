@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Edit } from 'lucide-react';
+import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Edit, Zap } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api, type Site, type GSCSite, type GoogleAccount, type UrlState } from '../api';
 
@@ -442,13 +442,24 @@ function IndexNowSetupCard({ site }: { site: Site }) {
     setVerifying(false);
   }
 
-  async function runSiteIndexing() {
+  async function runSiteIndexing(dryRun = false) {
     setRunning(true);
     setRunSuccess('');
     try {
-      await api.triggerRun({ siteIds: [site.id] });
-      setRunSuccess('Indexing run triggered successfully for this site! Check the dashboard or activity logs to view progress.');
+      await api.triggerRun(dryRun
+        ? { siteIds: [site.id], skipGoogle: true, skipIndexNow: true }
+        : { siteIds: [site.id] }
+      );
+      setRunSuccess(dryRun
+        ? 'SEO & schema audit run triggered successfully! We will auto-refresh the sitemap logs in a few seconds...'
+        : 'Indexing run triggered successfully for this site! Check the dashboard or activity logs to view progress.'
+      );
       setTimeout(() => setRunSuccess(''), 8000);
+      
+      // Auto-refresh the URL list after the run completes
+      setTimeout(() => {
+        api.getSiteUrls(site.id).then(setUrls).catch(() => {});
+      }, 5000);
     } catch (e) {
       setResult({
         reachable: false,
@@ -719,10 +730,17 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
           <ExternalLink size={12} /> Open Key File
         </a>
         <button
-          className="btn btn-primary btn-sm"
+          className="btn btn-secondary btn-sm"
           style={{ marginLeft: 'auto' }}
+          disabled={running || verifying}
+          onClick={() => runSiteIndexing(true)}
+        >
+          <Zap size={12} /> Dry Run (Audits Only)
+        </button>
+        <button
+          className="btn btn-primary btn-sm"
           disabled={running || verifying || (!site.indexNowVerified && !status?.auth.authenticated)}
-          onClick={runSiteIndexing}
+          onClick={() => runSiteIndexing(false)}
         >
           {running ? <><span className="spinner" /> Indexing…</> : <><Play size={12} /> Run Indexing Now</>}
         </button>
