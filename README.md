@@ -44,7 +44,7 @@ Then open **http://localhost:3000** and follow the three-step setup wizard.
 
 ## Authentication
 
-This application uses the secure **Google OAuth 2.0 Device Flow** (which operates exactly like the `gcloud CLI` or tools like `rclone` authenticate). 
+This application uses the secure **Google OAuth 2.0 Web Application Flow** (which is completely unrestricted by Google and operates using standard browser authorization redirects).
 
 Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
 
@@ -53,7 +53,10 @@ Because Service Accounts are highly restricted and often fail verification on Go
 1. **Create an OAuth Client:**
    - Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
    - Click **Create Credentials** → **OAuth client ID**.
-   - Select **Desktop app** as the Application Type, name it (e.g. `SEO Indexer`), and click **Create**.
+   - Select **Web application** as the Application Type and name it (e.g., `SEO Indexer`).
+   - Under **Authorized redirect URIs**, add your container's callback URL:
+     `http://localhost:3000/api/auth/google/callback` (or your domain callback URL, which is dynamically displayed inside the Setup wizard).
+   - Click **Create**.
 2. **Enable the Google APIs:**
    - Enable both of the following APIs in your Google Cloud Project:
      - [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com)
@@ -66,10 +69,10 @@ Because Service Accounts are highly restricted and often fail verification on Go
        - GOOGLE_OAUTH_CLIENT_ID=your-client-id
        - GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
      ```
-4. **One-Click Authorization:**
-   - The wizard will display a short verification code and link (e.g., `https://google.com/device`).
-   - Open the link on any device, log in with your Google account, and enter the code.
-   - The container securely saves the refresh token locally and automatically renews your access tokens in the background. Done!
+4. **Redirection Authorization:**
+   - Click **Start Google Sign-In**. This will launch a secure Google authorization popup.
+   - Grant permissions and log in with your Google account.
+   - Once authorized, Google will redirect to your container, which automatically saves the refresh token locally and self-closes the popup window. Done!
 
 ---
 
