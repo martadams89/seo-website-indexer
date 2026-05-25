@@ -775,6 +775,7 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
                           "Common GSC Indexing States:\n\n" +
                           "• INDEXED: The page is successfully indexed and appearing in Google Search results.\n\n" +
                           "• INDEXING_ALLOWED: Googlebot has crawled the page and indexing is allowed (no noindex tags), but it hasn't finished joining the public index yet.\n\n" +
+                          "• INDEXING_STATE_UNSPECIFIED: The status is unknown because Google has never crawled, discovered, or processed this URL before (e.g. newly created page).\n\n" +
                           "• NOT_INDEXED: The page is not in Google's index (could be crawled but not indexed, discovered but not crawled, or an actual 404).\n\n" +
                           "• BLOCKED_BY_ROBOTS: Googlebot is blocked from crawling this URL by your site's robots.txt directives.\n\n" +
                           "• BLOCKED_BY_NOINDEX: The page contains a 'noindex' tag or header, telling Google not to index it.\n\n" +
