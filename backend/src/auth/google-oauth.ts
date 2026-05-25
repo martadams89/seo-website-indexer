@@ -34,8 +34,8 @@ export const OAUTH_SCOPES = [
 // Default open-source Desktop Client ID and Secret to allow one-click setup
 // for all self-hosted instances out of the box.
 
-const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     || '1063688126786-gn7kgh2sk8gq8d1b11k1f2c2mshf7gfd.apps.googleusercontent.com';
-const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || 'GOCSPX-default-secret-placeholder';
+const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     || '';
+const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 
 export function hasBuiltinCredentials(): boolean {
   return !!(BUILTIN_CLIENT_ID && BUILTIN_CLIENT_SECRET);
