@@ -229,8 +229,23 @@ export function getSiteById(id: string): Site | null {
 
 export function upsertSite(site: Omit<Site, 'created_at'>): void {
   getDb().prepare(`
-    INSERT OR REPLACE INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path)
+    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path)
     VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      domain = excluded.domain,
+      sitemap_url = excluded.sitemap_url,
+      gsc_url = excluded.gsc_url,
+      enabled = excluded.enabled,
+      google_account_id = excluded.google_account_id,
+      robots_txt_status = COALESCE(excluded.robots_txt_status, sites.robots_txt_status),
+      llms_txt_status = COALESCE(excluded.llms_txt_status, sites.llms_txt_status),
+      deploy_webhook_url = excluded.deploy_webhook_url,
+      ftp_host = excluded.ftp_host,
+      ftp_port = excluded.ftp_port,
+      ftp_user = excluded.ftp_user,
+      ftp_pass = excluded.ftp_pass,
+      ftp_path = excluded.ftp_path
   `).run({
     google_account_id: null,
     robots_txt_status: null,
