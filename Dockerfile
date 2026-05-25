@@ -19,8 +19,8 @@ RUN npm run build
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS runtime
 
-# Install dumb-init for proper signal handling in Docker
-RUN apk add --no-cache dumb-init
+# Install dumb-init for proper signal handling and su-exec for privilege drop
+RUN apk add --no-cache dumb-init su-exec
 
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -40,6 +40,10 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN mkdir -p /data && chown appuser:appgroup /data
 VOLUME ["/data"]
 
+# Copy entrypoint script that fixes /data ownership then drops to appuser
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
@@ -47,7 +51,6 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000
 
-USER appuser
-
-ENTRYPOINT ["dumb-init", "--"]
+# Run as root so the entrypoint can chown /data, then su-exec drops to appuser
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/server.js"]

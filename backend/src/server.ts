@@ -74,7 +74,7 @@ import {
 } from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FRONTEND_DIST = path.join(__dirname, '../../frontend/dist');
+const FRONTEND_DIST = path.join(__dirname, '../frontend/dist');
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
