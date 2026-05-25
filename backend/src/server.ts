@@ -352,7 +352,6 @@ try {
   await app.register(fastifyStatic, {
     root: FRONTEND_DIST,
     prefix: '/',
-    decorateReply: false,
   });
 
   // SPA fallback for client-side routing (must come AFTER static + API routes)
