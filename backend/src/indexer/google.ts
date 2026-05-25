@@ -214,7 +214,7 @@ export async function inspectGoogleUrl(
     return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: 0, message: `Auth error: ${String(e)}` };
   }
 
-  const endpoint = `https://searchconsole.googleapis.com/v1/urlTestingTools/urlInspection/index:inspect`;
+  const endpoint = `https://searchconsole.googleapis.com/v1/urlInspection/index:inspect`;
   const payload = JSON.stringify({
     inspectionUrl: url,
     siteUrl: gscUrl,
