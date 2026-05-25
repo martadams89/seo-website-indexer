@@ -57,6 +57,8 @@ import {
   startDeviceFlow,
   pollDeviceFlow,
   clearAuth,
+  saveCredentials,
+  exchangeCodeForTokens,
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -137,6 +139,75 @@ app.post('/api/auth/device-flow/poll', async (req, reply) => {
 app.post('/api/auth/clear', async () => {
   clearAuth();
   return { ok: true };
+});
+
+app.post('/api/auth/save-credentials', async (req, reply) => {
+  const { clientId, clientSecret } = (req.body ?? {}) as { clientId?: string; clientSecret?: string };
+  if (!clientId || !clientSecret) {
+    return reply.status(400).send({ error: 'clientId and clientSecret are required.' });
+  }
+  try {
+    saveCredentials(clientId, clientSecret);
+    return { ok: true };
+  } catch (e) {
+    return reply.status(500).send({ error: String(e) });
+  }
+});
+
+app.get('/api/auth/google/callback', async (req, reply) => {
+  const { code, error } = req.query as { code?: string; error?: string };
+  if (error) {
+    return reply.type('text/html').send(`
+      <html>
+        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
+          <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
+          <h2 style="color: white; margin-bottom: 8px;">Authentication Failed</h2>
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${error}</p>
+          <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
+        </body>
+      </html>
+    `);
+  }
+  
+  if (!code) {
+    return reply.status(400).send({ error: 'Authorization code is required' });
+  }
+
+  // Construct standard redirect URI based on the request host (handles reverse proxies perfectly!)
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'http';
+  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+  const redirectUri = `${proto}://${host}/api/auth/google/callback`;
+
+  try {
+    await exchangeCodeForTokens(code, redirectUri);
+    return reply.type('text/html').send(`
+      <html>
+        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #00e676; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
+          <div style="font-size: 48px; margin-bottom: 20px;">🎉</div>
+          <h2 style="color: white; margin-bottom: 8px;">Authenticated Successfully!</h2>
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">Your Google account is now securely connected. You can return to the dashboard.</p>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS' }, '*');
+            }
+            setTimeout(() => window.close(), 1500);
+          </script>
+          <button onclick="window.close()" style="background: #00e676; color: #12131a; border: none; padding: 10px 24px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: opacity 0.2s;">Done</button>
+        </body>
+      </html>
+    `);
+  } catch (e) {
+    return reply.type('text/html').send(`
+      <html>
+        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
+          <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
+          <h2 style="color: white; margin-bottom: 8px;">Token Exchange Failed</h2>
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${String(e)}</p>
+          <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
+        </body>
+      </html>
+    `);
+  }
 });
 
 // List GSC properties (for onboarding site-picker)

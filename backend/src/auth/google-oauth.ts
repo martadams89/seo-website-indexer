@@ -70,6 +70,7 @@ export interface AuthStatus {
   /** true if env vars are set — user can click "Sign in" with no credential entry */
   hasBuiltinCredentials: boolean;
   expiresAt?: string;
+  clientId?: string;
   error?: string;
 }
 
@@ -77,6 +78,70 @@ export interface AuthStatus {
 
 let _cachedToken: string | null = null;
 let _cachedExpiry: Date | null  = null;
+
+// ── Save Credentials ──────────────────────────────────────────────────────────
+
+/** Persists custom client credentials entered by the user in the Setup wizard. */
+export function saveCredentials(clientId: string, clientSecret: string): void {
+  setSetting(SK_OAUTH_CLIENT_ID,     clientId.trim());
+  setSetting(SK_OAUTH_CLIENT_SECRET, clientSecret.trim());
+}
+
+// ── Web Flow Token Exchange ───────────────────────────────────────────────────
+
+/**
+ * Exchanges the authorization code received from Google for access/refresh tokens.
+ * Persists the tokens in SQLite.
+ */
+export async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<string> {
+  const clientId     = getSetting(SK_OAUTH_CLIENT_ID)     || BUILTIN_CLIENT_ID;
+  const clientSecret = getSetting(SK_OAUTH_CLIENT_SECRET) || BUILTIN_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('OAuth Client ID or Client Secret is missing. Please save credentials first.');
+  }
+
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:     clientId,
+      client_secret: clientSecret,
+      code,
+      grant_type:    'authorization_code',
+      redirect_uri:  redirectUri,
+    }).toString(),
+  });
+
+  const data = await res.json() as {
+    access_token?:  string;
+    refresh_token?: string;
+    expires_in?:    number;
+    error?:         string;
+    error_description?: string;
+  };
+
+  if (data.error) {
+    throw new Error(data.error_description ?? `Token exchange failed: ${data.error}`);
+  }
+
+  if (!data.access_token) {
+    throw new Error('No access token returned from Google.');
+  }
+
+  const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
+  setSetting(SK_OAUTH_ACCESS_TOKEN, data.access_token);
+  setSetting(SK_OAUTH_TOKEN_EXPIRY, expiryDate.toISOString());
+  if (data.refresh_token) {
+    setSetting(SK_OAUTH_REFRESH_TOKEN, data.refresh_token);
+  }
+  setSetting(SK_AUTH_OK, '1');
+
+  _cachedToken  = data.access_token;
+  _cachedExpiry = expiryDate;
+
+  return data.access_token;
+}
 
 // ── Device Flow — Start ───────────────────────────────────────────────────────
 
@@ -256,11 +321,13 @@ export function getAuthStatus(): AuthStatus {
   const authed       = getSetting(SK_AUTH_OK) === '1';
   const expiry       = getSetting(SK_OAUTH_TOKEN_EXPIRY);
   const hasRefresh   = !!getSetting(SK_OAUTH_REFRESH_TOKEN);
+  const clientId     = getSetting(SK_OAUTH_CLIENT_ID) || BUILTIN_CLIENT_ID;
 
   return {
     authenticated:        authed && hasRefresh,
     hasBuiltinCredentials: hasBuiltinCredentials(),
     expiresAt:            expiry ?? undefined,
+    clientId:             clientId || undefined,
   };
 }
 

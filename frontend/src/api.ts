@@ -32,6 +32,7 @@ export interface AuthStatus {
   authenticated: boolean;
   hasBuiltinCredentials: boolean;
   expiresAt?: string;
+  clientId?: string;
   error?: string;
 }
 
@@ -99,6 +100,10 @@ export const api = {
   getStatus: () => apiFetch<AppStatus>('/api/status'),
 
   // Auth
+  saveCredentials: (clientId: string, clientSecret: string) =>
+    apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
+      method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
+    }),
   startDeviceFlow: (clientId?: string, clientSecret?: string) =>
     apiFetch<DeviceFlowState>('/api/auth/device-flow/start', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
