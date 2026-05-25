@@ -101,7 +101,7 @@ export default function SetupPage() {
       {step === 'welcome' && (
         <div className="flex-col gap-4">
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            This application uses the **Google Indexing API** and **Search Console API** to automate indexing.
+            This application uses the <strong>Google Indexing API</strong> and <strong>Search Console API</strong> to automate indexing.
             We authenticate using secure Google OAuth Device Flow.
           </p>
 
@@ -149,11 +149,11 @@ export default function SetupPage() {
           <div className="alert alert-info" style={{ marginTop: 4 }}>
             <ShieldCheck size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <div className="alert-content">
-              <div className="alert-title">Why secure device flow is recommended</div>
+              <div className="alert-title">Secure &amp; Authorized Integration</div>
               <div style={{ fontSize: 12, marginTop: 2 }}>
-                Unlike Service Account JSONs which fail verification in Google Search Console for Domain properties,
-                Device Flow authenticates your regular Google Account directly. You gain full API access to
-                your Search Console properties instantly, with zero configuration changes inside Google Search Console.
+                This indexing tool connects directly to Google using secure OAuth Device Flow. 
+                Your credentials are stored safely in your local SQLite database, 
+                granting you direct API access to all your Search Console properties instantly.
               </div>
             </div>
           </div>

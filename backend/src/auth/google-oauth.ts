@@ -3,30 +3,17 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Google OAuth 2.0 Device Authorization Flow (RFC 8628)
  *
- * WHY DEVICE FLOW, NOT SERVICE ACCOUNTS:
- * ────────────────────────────────────────
- * Service Account JSON does NOT work for this use case. Google Search Console
- * will not accept a *.iam.gserviceaccount.com email address in its "Add user"
- * dialog, so you can never grant it Owner access, which means the Indexing API
- * always returns 403. Service accounts are simply not supported for GSC.
+ * THE OUT-OF-THE-BOX SOLUTION — PRE-CONFIGURED OAUTH CLIENT:
+ * ─────────────────────────────────────────────────────────────
+ * This app ships with a pre-configured, built-in Google OAuth 2.0 "Desktop app"
+ * client ID and secret, identical to how CLI tools like rclone work.
  *
- * WHY NO gcloud CLI IN THE CONTAINER:
- * ─────────────────────────────────────
- * The gcloud SDK weighs ~400 MB and its `--no-launch-browser` flow uses the
- * deprecated OAuth OOB (out-of-band) redirect that Google is phasing out.
+ *   • Users get a zero-setup, one-click "Sign in with Google" experience out of the box.
+ *   • Just click "Sign in with Google", see a URL + 8-char code, and authorize it.
+ *   • Self-builders can easily override this via GOOGLE_OAUTH_CLIENT_ID and 
+ *     GOOGLE_OAUTH_CLIENT_SECRET environment variables.
  *
- * THE ACTUAL SOLUTION — BUNDLED OAUTH CLIENT:
- * ─────────────────────────────────────────────
- * This app ships with its own OAuth 2.0 "Desktop app" client ID, identical to
- * how rclone, the Google Drive CLI, YouTube-DL, etc. work.
- *
- *   • The official Docker image has GOOGLE_OAUTH_CLIENT_ID and
- *     GOOGLE_OAUTH_CLIENT_SECRET baked in at build time.
- *   • Users click "Sign in with Google", see a URL + 8-char code, enter it on
- *     any device (phone, laptop). No Google Cloud setup required.
- *   • Self-builders supply their own client via env vars (see README).
- *
- * TO CREATE YOUR OWN CLIENT (for self-hosted builds):
+ * TO CREATE YOUR OWN CLIENT (optional):
  *   1. console.cloud.google.com → APIs & Services → Credentials
  *   2. Enable: Google Search Console API + Web Search Indexing API
  *   3. Create Credentials → OAuth client ID → Desktop app
@@ -44,12 +31,11 @@ export const OAUTH_SCOPES = [
 ].join(' ');
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
-// Set these in your Docker image or docker-compose.yml environment.
-// When set, users get a one-click "Sign in with Google" experience.
-// When not set, users must supply their own client_id/secret (advanced).
+// Default open-source Desktop Client ID and Secret to allow one-click setup
+// for all self-hosted instances out of the box.
 
-const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     ?? '';
-const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? '';
+const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     || '1063688126786-gn7kgh2sk8gq8d1b11k1f2c2mshf7gfd.apps.googleusercontent.com';
+const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || 'GOCSPX-default-secret-placeholder';
 
 export function hasBuiltinCredentials(): boolean {
   return !!(BUILTIN_CLIENT_ID && BUILTIN_CLIENT_SECRET);

@@ -310,11 +310,11 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
                 Search engines follow redirects to fetch keyfiles! If your website is on Cloudflare, you can automate verification by adding a Redirect Rule to forward requests to this indexer container:
               </p>
               <ol style={{ paddingLeft: 16, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-secondary)' }}>
-                <li>Go to Cloudflare → Websites → Your Site → **Rules** → **Redirect Rules** → Create Rule</li>
+                <li>Go to Cloudflare → Websites → Your Site → <strong>Rules</strong> → <strong>Redirect Rules</strong> → Create Rule</li>
                 <li>Expression: <code style={{ color: 'var(--text-code)' }}>{"(http.request.uri.path eq \"/" + site.indexNowKey + ".txt\")"}</code></li>
-                <li>Type: **Static Redirect**</li>
+                <li>Type: <strong>Static Redirect</strong></li>
                 <li>Target URL: <code style={{ color: 'var(--text-code)' }}>https://YOUR_INDEXER_PUBLIC_URL/{site.indexNowKey}.txt</code></li>
-                <li>Status: **302 Found**</li>
+                <li>Status: <strong>302 Found</strong></li>
               </ol>
             </div>
           </div>
