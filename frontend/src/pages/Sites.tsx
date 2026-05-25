@@ -765,7 +765,26 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
               <thead>
                 <tr style={{ background: 'var(--bg-overlay)', borderBottom: '1px solid var(--border)' }}>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>URL Path</th>
-                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>Google Index State</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      Google Index State
+                      <span 
+                        className="tooltip-trigger" 
+                        style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 4, color: 'var(--accent)', fontWeight: 'normal' }} 
+                        title={
+                          "Common GSC Indexing States:\n\n" +
+                          "• INDEXED: The page is successfully indexed and appearing in Google Search results.\n\n" +
+                          "• INDEXING_ALLOWED: Googlebot has crawled the page and indexing is allowed (no noindex tags), but it hasn't finished joining the public index yet.\n\n" +
+                          "• NOT_INDEXED: The page is not in Google's index (could be crawled but not indexed, discovered but not crawled, or an actual 404).\n\n" +
+                          "• BLOCKED_BY_ROBOTS: Googlebot is blocked from crawling this URL by your site's robots.txt directives.\n\n" +
+                          "• BLOCKED_BY_NOINDEX: The page contains a 'noindex' tag or header, telling Google not to index it.\n\n" +
+                          "• Pending GSC Check: A manual or scheduled indexing run has not inspected this URL yet."
+                        }
+                      >
+                        ⓘ Info
+                      </span>
+                    </div>
+                  </th>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>JSON-LD Schemas</th>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>Submissions</th>
                 </tr>
