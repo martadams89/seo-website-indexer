@@ -4,7 +4,7 @@ Self-hosted Docker container for Google Search Console + IndexNow SEO indexing a
 Works with **any number of sites** — add them all to the dashboard and it handles everything.
 
 [![Docker](https://img.shields.io/badge/ghcr.io-martadams89%2Fseo--website--indexer-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 ---
 
@@ -452,4 +452,4 @@ Google APIs         IndexNow API
 
 ## License
 
-MIT
+This project is licensed under the [GPL-3.0 License](LICENSE).
