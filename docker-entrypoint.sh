@@ -8,4 +8,4 @@ set -e
 mkdir -p /data
 chown appuser:appgroup /data
 
-exec su-exec appuser dumb-init -- "$@"
+exec dumb-init su-exec appuser "$@"
