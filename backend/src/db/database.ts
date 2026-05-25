@@ -97,10 +97,48 @@ function initSchema(db: Database.Database): void {
     );
   `);
 
-  // Backwards compatibility migration: add google_account_id column if sites already exists without it
-  const columns = db.prepare("PRAGMA table_info(sites)").all() as { name: string }[];
-  if (!columns.some(c => c.name === 'google_account_id')) {
+  // Backwards compatibility migrations
+  const siteCols = db.prepare("PRAGMA table_info(sites)").all() as { name: string }[];
+  if (!siteCols.some(c => c.name === 'google_account_id')) {
     db.exec("ALTER TABLE sites ADD COLUMN google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL;");
+  }
+  if (!siteCols.some(c => c.name === 'robots_txt_status')) {
+    db.exec("ALTER TABLE sites ADD COLUMN robots_txt_status TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'llms_txt_status')) {
+    db.exec("ALTER TABLE sites ADD COLUMN llms_txt_status TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'deploy_webhook_url')) {
+    db.exec("ALTER TABLE sites ADD COLUMN deploy_webhook_url TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'ftp_host')) {
+    db.exec("ALTER TABLE sites ADD COLUMN ftp_host TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'ftp_port')) {
+    db.exec("ALTER TABLE sites ADD COLUMN ftp_port INTEGER DEFAULT 21;");
+  }
+  if (!siteCols.some(c => c.name === 'ftp_user')) {
+    db.exec("ALTER TABLE sites ADD COLUMN ftp_user TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'ftp_pass')) {
+    db.exec("ALTER TABLE sites ADD COLUMN ftp_pass TEXT;");
+  }
+  if (!siteCols.some(c => c.name === 'ftp_path')) {
+    db.exec("ALTER TABLE sites ADD COLUMN ftp_path TEXT;");
+  }
+
+  const urlCols = db.prepare("PRAGMA table_info(url_state)").all() as { name: string }[];
+  if (!urlCols.some(c => c.name === 'gsc_indexing_state')) {
+    db.exec("ALTER TABLE url_state ADD COLUMN gsc_indexing_state TEXT;");
+  }
+  if (!urlCols.some(c => c.name === 'gsc_last_inspected')) {
+    db.exec("ALTER TABLE url_state ADD COLUMN gsc_last_inspected TEXT;");
+  }
+  if (!urlCols.some(c => c.name === 'has_schema')) {
+    db.exec("ALTER TABLE url_state ADD COLUMN has_schema INTEGER DEFAULT 0;");
+  }
+  if (!urlCols.some(c => c.name === 'schema_types')) {
+    db.exec("ALTER TABLE url_state ADD COLUMN schema_types TEXT;");
   }
 }
 
@@ -171,6 +209,14 @@ export interface Site {
   enabled: number;
   created_at: string;
   google_account_id?: string | null;
+  robots_txt_status?: string | null;
+  llms_txt_status?: string | null;
+  deploy_webhook_url?: string | null;
+  ftp_host?: string | null;
+  ftp_port?: number | null;
+  ftp_user?: string | null;
+  ftp_pass?: string | null;
+  ftp_path?: string | null;
 }
 
 export function getAllSites(): Site[] {
@@ -183,10 +229,18 @@ export function getSiteById(id: string): Site | null {
 
 export function upsertSite(site: Omit<Site, 'created_at'>): void {
   getDb().prepare(`
-    INSERT OR REPLACE INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id)
-    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id)
+    INSERT OR REPLACE INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path)
+    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path)
   `).run({
     google_account_id: null,
+    robots_txt_status: null,
+    llms_txt_status: null,
+    deploy_webhook_url: null,
+    ftp_host: null,
+    ftp_port: 21,
+    ftp_user: null,
+    ftp_pass: null,
+    ftp_path: null,
     ...site
   });
 }
@@ -205,6 +259,10 @@ export interface UrlState {
   submission_count: number;
   google_submitted: number;
   indexnow_submitted: number;
+  gsc_indexing_state?: string | null;
+  gsc_last_inspected?: string | null;
+  has_schema?: number | null;
+  schema_types?: string | null;
 }
 
 export function getUrlState(url: string, siteId: string): UrlState | null {

@@ -22,17 +22,21 @@ import {
   getSetting,
   getUrlState,
   upsertUrlState,
+  upsertSite,
+  getUrlsBySite,
   insertLog,
   insertRun,
   updateRun,
   getAllGoogleAccounts,
   type Site,
   type LogEntry,
+  type UrlState,
 } from './db/database.js';
 import { emitLog, subscribeToLogs } from './utils/logger.js';
 import { fetchSitemap, filterChangedEntries, type SitemapEntry } from './indexer/sitemap.js';
-import { notifyGoogle, submitSitemapToGSC } from './indexer/google.js';
+import { notifyGoogle, submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
+import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -144,33 +148,9 @@ async function _doRun(
 
   log(runId, 'info', `Starting indexing run — ${allSites.length} site(s) | Google limit: ${googleLimit} URLs | trigger: ${options.trigger ?? 'manual'}`);
 
-  // ── Step 1: Submit Sitemaps to GSC ────────────────────────────────────────
+  // ── Step 1: Fetch & diff sitemaps ─────────────────────────────────────────
 
-  if (!options.skipSitemaps) {
-    log(runId, 'info', '── Step 1: Submitting sitemaps to Google Search Console ──');
-    for (const site of allSites) {
-      if (_stopRequested) break;
-      try {
-        const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
-        if (!accountId) {
-          log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
-          continue;
-        }
-        const result = await submitSitemapToGSC(accountId, site.gsc_url, site.sitemap_url);
-        if (result.success) {
-          log(runId, 'ok', `${site.domain} — sitemap submitted to GSC`, site.id);
-        } else {
-          log(runId, 'warn', `${site.domain} — GSC sitemap submission: HTTP ${result.statusCode} (${result.message ?? 'may already be registered'})`, site.id);
-        }
-      } catch (e) {
-        log(runId, 'warn', `${site.domain} — GSC sitemap error: ${String(e)}`, site.id);
-      }
-    }
-  }
-
-  // ── Step 2: Fetch & diff sitemaps ─────────────────────────────────────────
-
-  log(runId, 'info', '── Step 2: Fetching live sitemaps and detecting changes ──');
+  log(runId, 'info', '── Step 1: Fetching live sitemaps and detecting changes ──');
 
   type SiteData = {
     site: Site;
@@ -213,12 +193,87 @@ async function _doRun(
         );
       }
 
+      // Run AI crawler checks
+      try {
+        const robotsStatus = await auditRobotsTxt(site.domain);
+        const llmsStatus = await probeLlmsTxt(site.domain);
+        upsertSite({
+          ...site,
+          robots_txt_status: robotsStatus,
+          llms_txt_status: llmsStatus
+        });
+        log(runId, 'info', `${site.domain} — GEO audit: robots.txt: [${robotsStatus}] | llms.txt: [${llmsStatus}]`, site.id);
+      } catch (e) {
+        log(runId, 'warn', `${site.domain} — GEO audit failed: ${String(e)}`, site.id);
+      }
+
+      // Audit JSON-LD schemas for new or modified pages
+      const targets = [...newUrls, ...changed];
+      if (targets.length > 0) {
+        log(runId, 'info', `${site.domain} — auditing JSON-LD schemas for ${targets.length} pages`, site.id);
+        for (const entry of targets) {
+          if (_stopRequested) break;
+          try {
+            const res = await fetch(entry.url, {
+              headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (schema-crawler)' },
+              signal: AbortSignal.timeout(5000)
+            });
+            if (res.ok) {
+              const html = await res.text();
+              const audit = parseSemanticSchema(html);
+              upsertUrlState({
+                url: entry.url,
+                site_id: site.id,
+                has_schema: audit.hasSchema,
+                schema_types: audit.schemaTypes
+              });
+              if (audit.hasSchema) {
+                log(runId, 'dim', `Schema detected: [${audit.schemaTypes}] on ${entry.url}`, site.id, entry.url);
+              }
+            }
+          } catch { /* ignore parsing errors */ }
+        }
+      }
+
       siteDataMap.set(site.id, { site, changed, newUrls, noLastmod });
     } catch (e) {
       log(runId, 'error', `${site.domain} — failed to fetch sitemap: ${String(e)}`, site.id);
       siteDataMap.set(site.id, { site, changed: [], newUrls: [], noLastmod: [], error: String(e) });
     }
   }));
+
+  // ── Step 2: GSC Sitemap Re-submission (Delta-Triggered) ───────────────────
+
+  if (!options.skipSitemaps) {
+    log(runId, 'info', '── Step 2: Re-submitting sitemaps to Google Search Console (delta-triggered) ──');
+    for (const site of allSites) {
+      if (_stopRequested) break;
+      const data = siteDataMap.get(site.id);
+      if (!data || data.error) continue;
+
+      const hasDelta = data.newUrls.length > 0 || data.changed.length > 0;
+      if (!hasDelta) {
+        log(runId, 'info', `${site.domain} — sitemap re-submission skipped: No new or changed pages detected`, site.id);
+        continue;
+      }
+
+      try {
+        const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
+        if (!accountId) {
+          log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
+          continue;
+        }
+        const result = await submitSitemapToGSC(accountId, site.gsc_url, site.sitemap_url);
+        if (result.success) {
+          log(runId, 'ok', `${site.domain} — sitemap re-submitted to GSC due to detected content changes`, site.id);
+        } else {
+          log(runId, 'warn', `${site.domain} — GSC sitemap submission: HTTP ${result.statusCode} (${result.message ?? 'may already be registered'})`, site.id);
+        }
+      } catch (e) {
+        log(runId, 'warn', `${site.domain} — GSC sitemap error: ${String(e)}`, site.id);
+      }
+    }
+  }
 
   // ── Step 3: Google Indexing API (round-robin) ─────────────────────────────
 
@@ -380,6 +435,62 @@ async function _doRun(
             );
           }
         }
+      }
+    }
+  }
+
+  // ── Step 5: Google URL Inspection & Real-Time Status Verification ────────
+
+  if (!options.skipGoogle) {
+    log(runId, 'info', '── Step 5: Google URL Inspection (5 oldest URLs per site) ──');
+
+    for (const site of allSites) {
+      if (_stopRequested) break;
+      const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
+      if (!accountId) {
+        log(runId, 'warn', `URL Inspection skipped: No Google Account linked for site ${site.domain}.`, site.id);
+        continue;
+      }
+
+      const urlStates = getUrlsBySite(site.id);
+      if (urlStates.length === 0) continue;
+
+      // Sort by gsc_last_inspected (null first, then oldest)
+      const oldestInspected = urlStates
+        .sort((a: UrlState, b: UrlState) => {
+          const timeA = a.gsc_last_inspected ? new Date(a.gsc_last_inspected).getTime() : 0;
+          const timeB = b.gsc_last_inspected ? new Date(b.gsc_last_inspected).getTime() : 0;
+          return timeA - timeB;
+        })
+        .slice(0, 5);
+
+      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs`, site.id);
+
+      for (const state of oldestInspected) {
+        if (_stopRequested) break;
+        try {
+          const result = await inspectGoogleUrl(accountId, site.gsc_url, state.url);
+          if (result.success) {
+            log(runId, 'ok', `GSC Inspection verdict: [${result.indexingState}] for ${state.url}`, site.id, state.url);
+            upsertUrlState({
+              url: state.url,
+              site_id: site.id,
+              gsc_indexing_state: result.indexingState,
+              gsc_last_inspected: new Date().toISOString()
+            });
+          } else {
+            log(runId, 'warn', `GSC Inspection failed for ${state.url}: ${result.message}`, site.id, state.url);
+            // Update timestamp so we cycle to other pages
+            upsertUrlState({
+              url: state.url,
+              site_id: site.id,
+              gsc_last_inspected: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          log(runId, 'warn', `GSC Inspection error for ${state.url}: ${String(e)}`, site.id, state.url);
+        }
+        await sleep(500); // Be polite
       }
     }
   }

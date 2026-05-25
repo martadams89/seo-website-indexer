@@ -13,10 +13,15 @@ Works with **any number of sites** — add them all to the dashboard and it hand
 - **Google Indexing API** — notify Google of URL changes (200 URLs/day per Google Cloud project)
 - **Google Search Console** — automatic sitemap submission per site
 - **IndexNow** — instantly alert Bing, Yandex, Yahoo, and other participating engines (all via one API call)
+- **Google URL Inspection API** — daily automated verification of indexing status, mobile usability, and actual search crawl time logs for sitemapped pages
+- **AI & Crawler GEO Audits** — automated rules auditing for key AI bots (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) in `robots.txt` + `llms.txt` existence validation
+- **Semantic JSON-LD Structured Schema Auditing** — extracts and catalogs page schemas (`SoftwareApplication`, `LocalBusiness`, etc.) during sitemap crawls
+- **Zero-Touch Key Deployments** — built-in pure-JS FTP/SFTP passive client + dynamic POST webhook callbacks to push IndexNow keys automatically
+- **Delta sitemap submission** — submits sitemaps to GSC only when changes (new/modified URLs) are detected to conserve Google quotas
 - **Multi-site round-robin** — interleaves URLs across all your sites `[A₀, B₀, C₀, A₁, B₁, C₁…]` so no single site monopolises the daily quota
 - **lastmod change detection** — fetches your live sitemap and only queues URLs whose `<lastmod>` has changed since the last run
 - **SQLite persistence** — URL state, submission history, and credentials survive container restarts
-- **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler
+- **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
 - **Single container** — no external database, no Redis, no separate workers
 
 ---
@@ -261,6 +266,48 @@ echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
 ```
 /:key.txt  https://your-seo-indexer.example.com/:key.txt  200
 ```
+
+---
+
+### Method 3 — Zero-Touch Auto-Deployment (FTP or Webhooks)
+
+This is the easiest option! Click **Edit Site** on any site in your dashboard, expand the **⚙️ Auto-Deploy Verification Key** settings details block, and choose one of these automated deployment methods:
+
+#### 1. FTP Key Upload
+Enter your FTP credentials (Host, Username, Password, Port, and Path to public root). On every site verification or IndexNow run, the indexer will connect via a secure standard FTP connection and upload the `{key}.txt` file directly into your website's root directory automatically!
+
+#### 2. Deployment Webhooks
+If your website uses a static site builder (Next.js/Astro/WP), a Headless CMS (Strapi/Sanity), or is hosted on modern hosts (Vercel/Netlify/GitHub Pages), enter your custom deploy trigger webhook URL. We will trigger an HTTP POST request to that URL containing the key details in the body:
+```json
+{
+  "key": "29e9ff3cfd814c8fb239c4a861ad9f81",
+  "filename": "29e9ff3cfd814c8fb239c4a861ad9f81.txt",
+  "content": "29e9ff3cfd814c8fb239c4a861ad9f81"
+}
+```
+You can capture this request inside your webhook handlers to trigger an automated rebuild or save the key dynamically!
+
+---
+
+### Enterprise SEO & GEO Audits
+
+The indexer also includes advanced enterprise-grade automation features to audit and validate your site's SEO/GEO friendliness:
+
+#### 📈 Google URL Inspection Audit logs
+When configured with GSC, the scheduler automatically inspects the 5 oldest URLs per site daily. It fetches:
+- **Indexing Verdict**: e.g., `Indexed`, `Crawled - currently not indexed`, or `Discovered - currently not indexed`.
+- **Crawl Timestamps**: The exact date and time the Googlebot crawler last crawled your page.
+- **Rich Results & Usability**: Full verification of mobile-friendliness.
+These audits are tracked dynamically inside the **Sitemap Crawl & Indexing Audit logs** table under each site's expanded card in the dashboard.
+
+#### 🤖 AI Crawler Robots.txt Audits
+Generates daily audits testing if standard AI parsers (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) are allowed to scrape your domain or if they are blocked. Status badges are shown directly on each site card.
+
+#### 📄 /llms.txt AI Specifications Audit
+Validates whether your website serves an `/llms.txt` file at the root to declare custom prompts and semantic datasets for Large Language Models.
+
+#### 🏷️ Semantic JSON-LD Structured Schema Auditing
+Automatically scans and identifies Inline JSON-LD schemas (such as `SoftwareApplication`, `LocalBusiness`, `Organization`, `FAQPage`, etc.) on all sitemap crawl runs. These extracted schemas are cataloged next to each sitemap URL in your logs.
 
 ---
 

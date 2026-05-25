@@ -39,7 +39,30 @@ export interface Site {
   indexNowKey: string;
   indexNowVerified: boolean;
   google_account_id?: string | null;
+  robots_txt_status?: string | null;
+  llms_txt_status?: string | null;
+  deploy_webhook_url?: string | null;
+  ftp_host?: string | null;
+  ftp_port?: number | null;
+  ftp_user?: string | null;
+  ftp_pass?: string | null;
+  ftp_path?: string | null;
 }
+
+export interface UrlState {
+  url: string;
+  site_id: string;
+  last_submitted: string | null;
+  last_seen_lastmod: string | null;
+  submission_count: number;
+  google_submitted: number;
+  indexnow_submitted: number;
+  gsc_indexing_state?: string | null;
+  gsc_last_inspected?: string | null;
+  has_schema?: number | null;
+  schema_types?: string | null;
+}
+
 
 export interface AuthStatus {
   authenticated: boolean;
@@ -135,11 +158,23 @@ export const api = {
 
   // Sites
   getSites: () => apiFetch<Site[]>('/api/sites'),
-  addSite: (data: { name: string; domain: string; sitemapUrl: string; gscUrl: string; googleAccountId?: string | null }) =>
+  addSite: (data: {
+    name: string;
+    domain: string;
+    sitemapUrl: string;
+    gscUrl: string;
+    googleAccountId?: string | null;
+    deploy_webhook_url?: string | null;
+    ftp_host?: string | null;
+    ftp_port?: number | null;
+    ftp_user?: string | null;
+    ftp_pass?: string | null;
+    ftp_path?: string | null;
+  }) =>
     apiFetch<{ ok: boolean; id: string; indexNowKey: string }>('/api/sites', {
       method: 'POST', body: JSON.stringify(data),
     }),
-  updateSite: (id: string, data: Partial<Site & { googleAccountId: string | null }>) =>
+  updateSite: (id: string, data: Partial<Site & { googleAccountId: string | null; sitemapUrl?: string; gscUrl?: string }>) =>
     apiFetch<{ ok: boolean }>(`/api/sites/${id}`, {
       method: 'PUT', body: JSON.stringify(data),
     }),
@@ -148,6 +183,8 @@ export const api = {
   probeSite: (id: string) => apiFetch<SiteProbe>(`/api/sites/${id}/probe`),
   verifyIndexNow: (id: string) =>
     apiFetch<KeyVerification>(`/api/sites/${id}/verify-indexnow`, { method: 'POST' }),
+  getSiteUrls: (id: string) =>
+    apiFetch<UrlState[]>(`/api/sites/${id}/urls`),
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),

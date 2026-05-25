@@ -52,6 +52,7 @@ import {
   getRecentRuns,
   getIndexNowKey,
   getAllGoogleAccounts,
+  getUrlsBySite,
 } from './db/database.js';
 import {
   getAuthStatus,
@@ -259,12 +260,30 @@ app.get('/api/sites', async () => {
 });
 
 app.post('/api/sites', async (req, reply) => {
-  const { name, domain, sitemapUrl, gscUrl, googleAccountId } = req.body as {
+  const {
+    name,
+    domain,
+    sitemapUrl,
+    gscUrl,
+    googleAccountId,
+    deploy_webhook_url,
+    ftp_host,
+    ftp_port,
+    ftp_user,
+    ftp_pass,
+    ftp_path,
+  } = req.body as {
     name?: string;
     domain?: string;
     sitemapUrl?: string;
     gscUrl?: string;
     googleAccountId?: string;
+    deploy_webhook_url?: string | null;
+    ftp_host?: string | null;
+    ftp_port?: number | null;
+    ftp_user?: string | null;
+    ftp_pass?: string | null;
+    ftp_path?: string | null;
   };
   if (!name || !domain || !sitemapUrl || !gscUrl) {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
@@ -278,6 +297,12 @@ app.post('/api/sites', async (req, reply) => {
     gsc_url: gscUrl,
     enabled: 1,
     google_account_id: googleAccountId || null,
+    deploy_webhook_url: deploy_webhook_url || null,
+    ftp_host: ftp_host || null,
+    ftp_port: ftp_port !== undefined && ftp_port !== null ? Number(ftp_port) : 21,
+    ftp_user: ftp_user || null,
+    ftp_pass: ftp_pass || null,
+    ftp_path: ftp_path || null,
   });
   // Pre-create IndexNow key
   const key = getOrCreateIndexNowKey(id);
@@ -292,18 +317,32 @@ app.put('/api/sites/:id', async (req, reply) => {
     name: string;
     domain: string;
     sitemapUrl: string;
+    sitemap_url: string;
     gscUrl: string;
+    gsc_url: string;
     enabled: number;
     googleAccountId: string | null;
+    deploy_webhook_url: string | null;
+    ftp_host: string | null;
+    ftp_port: number | null;
+    ftp_user: string | null;
+    ftp_pass: string | null;
+    ftp_path: string | null;
   }>;
   upsertSite({
     id,
     name: updates.name ?? existing.name,
     domain: updates.domain ?? existing.domain,
-    sitemap_url: updates.sitemapUrl ?? existing.sitemap_url,
-    gsc_url: updates.gscUrl ?? existing.gsc_url,
+    sitemap_url: updates.sitemap_url ?? updates.sitemapUrl ?? existing.sitemap_url,
+    gsc_url: updates.gsc_url ?? updates.gscUrl ?? existing.gsc_url,
     enabled: updates.enabled ?? existing.enabled,
     google_account_id: updates.googleAccountId !== undefined ? updates.googleAccountId : existing.google_account_id,
+    deploy_webhook_url: updates.deploy_webhook_url !== undefined ? updates.deploy_webhook_url : existing.deploy_webhook_url,
+    ftp_host: updates.ftp_host !== undefined ? updates.ftp_host : existing.ftp_host,
+    ftp_port: updates.ftp_port !== undefined && updates.ftp_port !== null ? Number(updates.ftp_port) : existing.ftp_port,
+    ftp_user: updates.ftp_user !== undefined ? updates.ftp_user : existing.ftp_user,
+    ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
+    ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
   });
   return { ok: true };
 });
@@ -323,6 +362,14 @@ app.get('/api/sites/:id/probe', async (req, reply) => {
   const indexNowKey = getOrCreateIndexNowKey(id);
   const indexNowVerified = getIndexNowKey(id)?.verified === 1;
   return { sitemap: probe, indexNowKey, indexNowVerified };
+});
+
+app.get('/api/sites/:id/urls', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const site = getSiteById(id);
+  if (!site) return reply.status(404).send({ error: 'Site not found.' });
+  const urls = getUrlsBySite(id);
+  return urls;
 });
 
 app.post('/api/sites/:id/verify-indexnow', async (req, reply) => {

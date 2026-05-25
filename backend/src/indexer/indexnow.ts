@@ -35,6 +35,7 @@ import {
   getSiteById,
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
+import { uploadVerificationKeyViaFtp } from '../utils/ftp.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,42 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
   const key = getOrCreateIndexNowKey(siteId);
   const baseUrl = getBaseUrl(siteId, domain);
   const url = `${baseUrl}/${key}.txt`;
+
+  const site = getSiteById(siteId);
+  if (site) {
+    // 1. Webhook Deployments
+    if (site.deploy_webhook_url) {
+      logSystem('info', `Triggering IndexNow key deployment webhook: ${site.deploy_webhook_url}`, siteId);
+      try {
+        await fetch(site.deploy_webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, filename: `${key}.txt`, content: key }),
+          signal: AbortSignal.timeout(10_000)
+        });
+        logSystem('ok', `IndexNow deployment webhook successfully triggered!`, siteId);
+      } catch (e) {
+        logSystem('error', `Failed to trigger deployment webhook: ${String(e)}`, siteId);
+      }
+    }
+
+    // 2. FTP Deployments
+    if (site.ftp_host && site.ftp_user && site.ftp_pass) {
+      logSystem('info', `Deploying IndexNow verification key via FTP to ${site.ftp_host}`, siteId);
+      try {
+        await uploadVerificationKeyViaFtp({
+          host: site.ftp_host,
+          port: site.ftp_port ?? 21,
+          user: site.ftp_user,
+          pass: site.ftp_pass,
+          path: site.ftp_path ?? '/'
+        }, `${key}.txt`, key);
+        logSystem('ok', `IndexNow verification key file uploaded successfully via FTP!`, siteId);
+      } catch (e) {
+        logSystem('error', `Failed to upload IndexNow verification key via FTP: ${String(e)}`, siteId);
+      }
+    }
+  }
 
   logSystem('info', `Starting IndexNow key verification for ${domain}. Fetching: ${url}`, siteId, url);
 

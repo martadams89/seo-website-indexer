@@ -187,3 +187,80 @@ export async function listGSCSites(accountId: string): Promise<Array<{ siteUrl: 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
+
+export interface GscInspectionResult {
+  indexingState: string;
+  verdict: string;
+  lastCrawlTime?: string;
+  pageFetchState?: string;
+  success: boolean;
+  statusCode: number;
+  message?: string;
+}
+
+/**
+ * Inspects a URL using the GSC URL Inspection API.
+ * Requires the google account token and verified GSC ownership.
+ */
+export async function inspectGoogleUrl(
+  accountId: string,
+  gscUrl: string,
+  url: string
+): Promise<GscInspectionResult> {
+  let token: string;
+  try {
+    token = await getAccessTokenForAccount(accountId);
+  } catch (e) {
+    return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: 0, message: `Auth error: ${String(e)}` };
+  }
+
+  const endpoint = `https://searchconsole.googleapis.com/v1/urlTestingTools/urlInspection/index:inspect`;
+  const payload = JSON.stringify({
+    inspectionUrl: url,
+    siteUrl: gscUrl,
+    languageCode: 'en-US'
+  });
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: payload
+    });
+
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const body = await res.json() as { error?: { message?: string } };
+        msg = body?.error?.message ?? msg;
+      } catch { /* ignore */ }
+      return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: res.status, message: msg };
+    }
+
+    const data = await res.json() as {
+      inspectionResult?: {
+        indexStatusResult?: {
+          indexingState?: string;
+          verdict?: string;
+          lastCrawlTime?: string;
+          pageFetchState?: string;
+        }
+      }
+    };
+
+    const statusResult = data.inspectionResult?.indexStatusResult;
+    return {
+      indexingState: statusResult?.indexingState ?? 'UNKNOWN',
+      verdict: statusResult?.verdict ?? 'NEUTRAL',
+      lastCrawlTime: statusResult?.lastCrawlTime,
+      pageFetchState: statusResult?.pageFetchState,
+      success: true,
+      statusCode: res.status
+    };
+  } catch (e) {
+    return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: 0, message: `Network error: ${String(e)}` };
+  }
+}

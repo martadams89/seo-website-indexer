@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Edit } from 'lucide-react';
 import { useApp } from '../AppContext';
-import { api, type Site, type GSCSite, type GoogleAccount } from '../api';
+import { api, type Site, type GSCSite, type GoogleAccount, type UrlState } from '../api';
+
 
 // ── Add Site Modal ────────────────────────────────────────────────────────────
 
@@ -11,6 +12,12 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
   const [sitemapUrl, setSitemapUrl] = useState('');
   const [gscUrl, setGscUrl]       = useState('');
   const [googleAccountId, setGoogleAccountId] = useState(() => accounts.length > 0 ? accounts[0].id : '');
+  const [deployWebhookUrl, setDeployWebhookUrl] = useState('');
+  const [ftpHost, setFtpHost]                   = useState('');
+  const [ftpPort, setFtpPort]                   = useState(21);
+  const [ftpUser, setFtpUser]                   = useState('');
+  const [ftpPass, setFtpPass]                   = useState('');
+  const [ftpPath, setFtpPath]                   = useState('');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
 
@@ -39,7 +46,19 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
     setError('');
     setLoading(true);
     try {
-      await api.addSite({ name, domain, sitemapUrl, gscUrl, googleAccountId: googleAccountId || null });
+      await api.addSite({
+        name,
+        domain,
+        sitemapUrl,
+        gscUrl,
+        googleAccountId: googleAccountId || null,
+        deploy_webhook_url: deployWebhookUrl || null,
+        ftp_host: ftpHost || null,
+        ftp_port: ftpPort ? Number(ftpPort) : 21,
+        ftp_user: ftpUser || null,
+        ftp_pass: ftpPass || null,
+        ftp_path: ftpPath || null,
+      });
       onSaved();
       onClose();
     } catch (e) {
@@ -50,7 +69,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
 
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
         <h2 className="modal-title">Add Site</h2>
         <p className="modal-subtitle">Add a website to monitor and submit to search engines.</p>
 
@@ -149,6 +168,59 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
             </div>
           )}
 
+          {/* Advanced Auto-Deployment Options */}
+          <details className="mt-2" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-card)' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--accent)' }}>
+              ⚙️ Auto-Deploy Verification Key (FTP / Webhooks)
+            </summary>
+            <div className="flex-col gap-3 mt-3" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: 0, lineHeight: '1.4' }}>
+                Automate ownership verification by letting this tool upload your IndexNow <code>.txt</code> keyfile directly to your website directory via FTP, or POST it to a custom deployment webhook!
+              </p>
+
+              <div className="input-group">
+                <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Deploy Webhook URL</span>
+                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless headless CMS or Jamstack setups to automatically deploy the key.">ⓘ What is this?</span>
+                </label>
+                <input className="input" placeholder="https://api.yourhosting.com/deploy" value={deployWebhookUrl} onChange={e => setDeployWebhookUrl(e.target.value)} />
+                <span className="input-hint">HTTP POST triggered with key details. Great for serverless deployment triggers.</span>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+
+              <div className="input-group">
+                <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>FTP Host Address</span>
+                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload keyfile to this server.">ⓘ What is this?</span>
+                </label>
+                <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: 12 }}>
+                <div className="input-group">
+                  <label className="input-label">FTP Username</label>
+                  <input className="input" placeholder="ftpuser" value={ftpUser} onChange={e => setFtpUser(e.target.value)} />
+                </div>
+                <div className="input-group">
+                  <label className="input-label">FTP Port</label>
+                  <input className="input" type="number" placeholder="21" value={ftpPort || 21} onChange={e => setFtpPort(Number(e.target.value))} />
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label className="input-label">FTP Password</label>
+                <input className="input" type="password" placeholder="••••••••" value={ftpPass} onChange={e => setFtpPass(e.target.value)} />
+              </div>
+
+              <div className="input-group">
+                <label className="input-label">FTP Remote Path</label>
+                <input className="input" placeholder="/public_html/" value={ftpPath} onChange={e => setFtpPath(e.target.value)} />
+                <span className="input-hint">Path to your website's public document root directory (e.g. /public_html/ or /www/).</span>
+              </div>
+            </div>
+          </details>
+
           {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
         </div>
 
@@ -171,6 +243,12 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
   const [sitemapUrl, setSitemapUrl] = useState(site.sitemap_url);
   const [gscUrl, setGscUrl]       = useState(site.gsc_url);
   const [googleAccountId, setGoogleAccountId] = useState(site.google_account_id || '');
+  const [deployWebhookUrl, setDeployWebhookUrl] = useState(site.deploy_webhook_url || '');
+  const [ftpHost, setFtpHost]                   = useState(site.ftp_host || '');
+  const [ftpPort, setFtpPort]                   = useState(site.ftp_port || 21);
+  const [ftpUser, setFtpUser]                   = useState(site.ftp_user || '');
+  const [ftpPass, setFtpPass]                   = useState(site.ftp_pass || '');
+  const [ftpPath, setFtpPath]                   = useState(site.ftp_path || '');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
 
@@ -183,7 +261,13 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
         domain,
         sitemap_url: sitemapUrl,
         gsc_url: gscUrl,
-        googleAccountId: googleAccountId || null
+        googleAccountId: googleAccountId || null,
+        deploy_webhook_url: deployWebhookUrl || null,
+        ftp_host: ftpHost || null,
+        ftp_port: ftpPort ? Number(ftpPort) : 21,
+        ftp_user: ftpUser || null,
+        ftp_pass: ftpPass || null,
+        ftp_path: ftpPath || null,
       });
       onSaved();
       onClose();
@@ -195,7 +279,7 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
 
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
         <h2 className="modal-title">Edit Site</h2>
         <p className="modal-subtitle">Modify site configuration and Google Account association.</p>
 
@@ -238,6 +322,59 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
             </span>
           </div>
 
+          {/* Advanced Auto-Deployment Options */}
+          <details className="mt-2" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-card)' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--accent)' }}>
+              ⚙️ Auto-Deploy Verification Key (FTP / Webhooks)
+            </summary>
+            <div className="flex-col gap-3 mt-3" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: 0, lineHeight: '1.4' }}>
+                Automate ownership verification by letting this tool upload your IndexNow <code>.txt</code> keyfile directly to your website directory via FTP, or POST it to a custom deployment webhook!
+              </p>
+
+              <div className="input-group">
+                <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Deploy Webhook URL</span>
+                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless headless CMS or Jamstack setups to automatically deploy the key.">ⓘ What is this?</span>
+                </label>
+                <input className="input" placeholder="https://api.yourhosting.com/deploy" value={deployWebhookUrl} onChange={e => setDeployWebhookUrl(e.target.value)} />
+                <span className="input-hint">HTTP POST triggered with key details. Great for serverless deployment triggers.</span>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+
+              <div className="input-group">
+                <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>FTP Host Address</span>
+                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload keyfile to this server.">ⓘ What is this?</span>
+                </label>
+                <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: 12 }}>
+                <div className="input-group">
+                  <label className="input-label">FTP Username</label>
+                  <input className="input" placeholder="ftpuser" value={ftpUser} onChange={e => setFtpUser(e.target.value)} />
+                </div>
+                <div className="input-group">
+                  <label className="input-label">FTP Port</label>
+                  <input className="input" type="number" placeholder="21" value={ftpPort || 21} onChange={e => setFtpPort(Number(e.target.value))} />
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label className="input-label">FTP Password</label>
+                <input className="input" type="password" placeholder="••••••••" value={ftpPass} onChange={e => setFtpPass(e.target.value)} />
+              </div>
+
+              <div className="input-group">
+                <label className="input-label">FTP Remote Path</label>
+                <input className="input" placeholder="/public_html/" value={ftpPath} onChange={e => setFtpPath(e.target.value)} />
+                <span className="input-hint">Path to your website's public document root directory (e.g. /public_html/ or /www/).</span>
+              </div>
+            </div>
+          </details>
+
           {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
         </div>
 
@@ -259,9 +396,19 @@ function IndexNowSetupCard({ site }: { site: Site }) {
   const [verifying, setVerifying] = useState(false);
   const [result, setResult]       = useState<{ reachable: boolean; keyMatch: boolean; error?: string } | null>(null);
   const [copied, setCopied]       = useState(false);
-  const [activeTab, setActiveTab] = useState<'manual' | 'frameworks' | 'proxy' | 'cloudflare'>('manual');
+  const [activeTab, setActiveTab] = useState<'manual' | 'frameworks' | 'proxy' | 'cloudflare' | 'autodeploy'>('manual');
   const [running, setRunning]     = useState(false);
   const [runSuccess, setRunSuccess] = useState('');
+  const [urls, setUrls]           = useState<UrlState[]>([]);
+  const [loadingUrls, setLoadingUrls] = useState(false);
+
+  useEffect(() => {
+    setLoadingUrls(true);
+    api.getSiteUrls(site.id)
+      .then(setUrls)
+      .catch(err => console.warn('Could not load site URLs:', err))
+      .finally(() => setLoadingUrls(false));
+  }, [site.id]);
 
   async function verify() {
     setVerifying(true);
@@ -270,6 +417,8 @@ function IndexNowSetupCard({ site }: { site: Site }) {
       const r = await api.verifyIndexNow(site.id);
       setResult(r);
       await refresh();
+      // Also reload URL lists
+      api.getSiteUrls(site.id).then(setUrls).catch(() => {});
     } catch (e) {
       setResult({
         reachable: false,
@@ -316,7 +465,7 @@ function IndexNowSetupCard({ site }: { site: Site }) {
       </div>
 
       {/* Guide Tabs */}
-      <div className="flex gap-1 mb-3 border-b pb-2" style={{ borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
+      <div className="flex gap-1 mb-3 border-b pb-2" style={{ borderBottom: '1px solid var(--border)', overflowX: 'auto', whiteSpace: 'nowrap' }}>
         <button
           className="btn btn-sm"
           style={{
@@ -329,6 +478,19 @@ function IndexNowSetupCard({ site }: { site: Site }) {
           onClick={() => setActiveTab('manual')}
         >
           Manual Upload
+        </button>
+        <button
+          className="btn btn-sm"
+          style={{
+            background: activeTab === 'autodeploy' ? 'var(--accent-dim)' : 'transparent',
+            color: activeTab === 'autodeploy' ? 'var(--accent)' : 'var(--text-secondary)',
+            borderColor: activeTab === 'autodeploy' ? 'var(--accent)' : 'transparent',
+            padding: '4px 10px',
+            fontSize: 11
+          }}
+          onClick={() => setActiveTab('autodeploy')}
+        >
+          🚀 Auto-Deploy (FTP/Webhook)
         </button>
         <button
           className="btn btn-sm"
@@ -385,6 +547,36 @@ function IndexNowSetupCard({ site }: { site: Site }) {
                 <li>Write exactly this key as its contents (no spaces, no newlines): <code style={{ color: 'var(--text-code)' }}>{site.indexNowKey}</code></li>
                 <li>Make sure the file is publicly readable at: <a href={keyFileUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{site.indexNowKey}.txt <ExternalLink size={10} style={{ display: 'inline' }} /></a></li>
               </ol>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'autodeploy' && (
+          <div className="alert alert-info">
+            <div className="alert-content" style={{ fontSize: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Option 2: Automatic Key Upload (Highly Recommended)</div>
+              <p style={{ color: 'var(--text-secondary)', margin: '4px 0 10px 0' }}>
+                Don't waste time uploading files manually! Click <strong>Edit Site</strong> at the top right of this site card, configure your FTP credentials or webhook URL, and the indexer will automatically push and verify your keys.
+              </p>
+              <div style={{ borderTop: '1px solid var(--border)', margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>FTP Auto-Deployment: </span>
+                  {site.ftp_host ? (
+                    <span style={{ color: 'var(--ok)', fontWeight: 600 }}>Active (Host: {site.ftp_host})</span>
+                  ) : (
+                    <span style={{ color: 'var(--text-dim)' }}>Inactive (Click Edit to configure)</span>
+                  )}
+                </div>
+                <div>
+                  <span style={{ fontWeight: 600 }}>Webhook Deployment Trigger: </span>
+                  {site.deploy_webhook_url ? (
+                    <span style={{ color: 'var(--ok)', fontWeight: 600 }}>Active (URL: {site.deploy_webhook_url})</span>
+                  ) : (
+                    <span style={{ color: 'var(--text-dim)' }}>Inactive (Click Edit to configure)</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -450,7 +642,7 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         {activeTab === 'cloudflare' && (
           <div className="alert alert-info">
             <div className="alert-content" style={{ fontSize: 12 }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Cloudflare CDN Dynamic Redirect</div>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Cloudflare CDN Redirect Rule</div>
               <p style={{ color: 'var(--text-secondary)' }}>
                 Search engines follow redirects to fetch keyfiles! If your website is on Cloudflare, you can automate verification by adding a Redirect Rule to forward requests to this indexer container:
               </p>
@@ -501,7 +693,7 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         </div>
       )}
 
-      <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
+      <div className="flex gap-2 items-center mb-3" style={{ flexWrap: 'wrap' }}>
         <button className="btn btn-secondary btn-sm" disabled={verifying || running} onClick={verify}>
           {verifying ? <><span className="spinner" /> Verifying…</> : <><ShieldCheck size={12} /> Verify Key File</>}
         </button>
@@ -521,6 +713,83 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         >
           {running ? <><span className="spinner" /> Indexing…</> : <><Play size={12} /> Run Indexing Now</>}
         </button>
+      </div>
+
+      {/* Crawled URL States & Audits */}
+      <div className="mt-4 border-t pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+        <h4 style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          🔍 Sitemap Crawl & Indexing Audit logs ({urls.length} URLs)
+        </h4>
+
+        {loadingUrls ? (
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: 12 }}><span className="spinner" /> Loading audit history...</div>
+        ) : urls.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: 12 }}>No URL crawl history yet. Run an indexing run to populate.</div>
+        ) : (
+          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-overlay)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>URL Path</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>Google Index State</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>JSON-LD Schemas</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 600 }}>Submissions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {urls.map(u => {
+                  const path = u.url.replace(`https://${site.domain}`, '').replace(`http://${site.domain}`, '');
+                  return (
+                    <tr key={u.url} style={{ borderBottom: '1px solid var(--border)', background: 'transparent' }}>
+                      <td style={{ padding: '6px 8px', wordBreak: 'break-all' }}>
+                        <a href={u.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 500 }}>
+                          {path || '/'} <ExternalLink size={8} style={{ display: 'inline', marginLeft: 3 }} />
+                        </a>
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        {u.gsc_indexing_state ? (
+                          <span className={`badge ${u.gsc_indexing_state.toLowerCase().includes('indexed') ? 'badge-ok' : 'badge-warn'}`} style={{ fontSize: 9, padding: '1px 5px' }}>
+                            {u.gsc_indexing_state}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>Pending GSC Check</span>
+                        )}
+                        {u.gsc_last_inspected && (
+                          <div style={{ fontSize: 8, color: 'var(--text-dim)', marginTop: 2 }}>
+                            Inspected: {new Date(u.gsc_last_inspected).toLocaleDateString()}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        {u.has_schema ? (
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                            {u.schema_types?.split(',').map(st => (
+                              <span key={st} className="badge badge-info" style={{ fontSize: 9, padding: '1px 5px', background: 'var(--accent-dim)', color: 'var(--accent)' }}>
+                                {st.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>None Detected</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <span className={`badge ${u.google_submitted ? 'badge-ok' : 'badge-warn'}`} style={{ fontSize: 8, padding: '1px 4px' }}>
+                            G: {u.google_submitted ? 'Yes' : 'No'}
+                          </span>
+                          <span className={`badge ${u.indexnow_submitted ? 'badge-ok' : 'badge-warn'}`} style={{ fontSize: 8, padding: '1px 4px' }}>
+                            IN: {u.indexnow_submitted ? 'Yes' : 'No'}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -617,6 +886,28 @@ export default function SitesPage() {
                       )}
                     </div>
                   )}
+                  {/* Robots.txt and llms.txt audit badges */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                    {site.robots_txt_status ? (
+                      <span className={`badge ${site.robots_txt_status === 'ALLOWED' ? 'badge-ok' : 'badge-warn'}`} style={{ fontSize: 9, padding: '1px 6px', fontWeight: 500 }}>
+                        🤖 Robots: {site.robots_txt_status}
+                      </span>
+                    ) : (
+                      <span className="badge" style={{ fontSize: 9, padding: '1px 6px', background: 'var(--bg-input)', color: 'var(--text-dim)' }}>
+                        🤖 Robots: Auditing...
+                      </span>
+                    )}
+
+                    {site.llms_txt_status ? (
+                      <span className={`badge ${site.llms_txt_status === 'OK' ? 'badge-ok' : 'badge-warn'}`} style={{ fontSize: 9, padding: '1px 6px', fontWeight: 500 }}>
+                        📄 llms.txt: {site.llms_txt_status}
+                      </span>
+                    ) : (
+                      <span className="badge" style={{ fontSize: 9, padding: '1px 6px', background: 'var(--bg-input)', color: 'var(--text-dim)' }}>
+                        📄 llms.txt: Auditing...
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button
