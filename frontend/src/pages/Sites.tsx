@@ -22,19 +22,27 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
   const [error, setError]         = useState('');
 
   const [gscSites, setGscSites]           = useState<GSCSite[]>([]);
+  const [loadingGsc, setLoadingGsc]       = useState(false);
 
-  // Load properties from Google Search Console
+  // Load properties from Google Search Console when selected account changes
   useEffect(() => {
-    api.listGSCSites()
+    if (!googleAccountId) {
+      setGscSites([]);
+      return;
+    }
+    setLoadingGsc(true);
+    api.listGSCSites(googleAccountId)
       .then(sites => {
-        // Filter out properties where the user is just a user if they want owner actions,
-        // but since they have authenticated, let's show all of them!
         setGscSites(sites);
       })
       .catch(err => {
         console.warn('Could not load GSC properties:', err);
+        setGscSites([]);
+      })
+      .finally(() => {
+        setLoadingGsc(false);
       });
-  }, []);
+  }, [googleAccountId]);
 
   // Auto-fill sitemap and GSC URLs from domain
   function handleDomainBlur() {
@@ -74,10 +82,35 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
         <p className="modal-subtitle">Add a website to monitor and submit to search engines.</p>
 
         <div className="flex-col gap-3">
-          {/* Search Console Site Picker */}
-          {gscSites.length > 0 && (
+          {/* Google Account Selector at the top */}
+          {accounts.length > 0 && (
             <div className="input-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 8, border: '1px solid var(--border)' }}>
-              <label className="input-label" style={{ color: 'var(--accent)', fontWeight: 600 }}>Import from Google Search Console</label>
+              <label className="input-label" style={{ fontWeight: 600, color: 'var(--accent)' }}>Linked Google Account</label>
+              <select
+                className="input mt-1"
+                value={googleAccountId}
+                onChange={e => setGoogleAccountId(e.target.value)}
+              >
+                <option value="">None (IndexNow Only)</option>
+                {accounts.map(acc => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.email || `Account (${acc.id.slice(0, 8)})`}
+                  </option>
+                ))}
+              </select>
+              <span className="input-hint" style={{ marginTop: 4 }}>
+                Select which Google Account handles Search Console for this website.
+              </span>
+            </div>
+          )}
+
+          {/* Search Console Site Picker */}
+          {googleAccountId && (
+            <div className="input-group" style={{ background: 'var(--bg-input)', padding: 12, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <label className="input-label" style={{ color: 'var(--accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Import from Google Search Console</span>
+                {loadingGsc && <span className="spinner" style={{ width: 12, height: 12 }} />}
+              </label>
               <select
                 className="input mt-1"
                 value=""
@@ -101,23 +134,25 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
                   setDomain(parsedDomain);
                   setSitemapUrl(`https://${parsedDomain}/sitemap.xml`);
                   setGscUrl(val);
-
-                  // Dynamically pre-select the Google Account that returned this property
-                  const selectedGscSite = gscSites.find(s => s.siteUrl === val);
-                  if (selectedGscSite?.googleAccountId) {
-                    setGoogleAccountId(selectedGscSite.googleAccountId);
-                  }
                 }}
               >
-                <option value="">-- Select a Search Console property to import --</option>
-                {gscSites.map(s => (
-                  <option key={s.siteUrl} value={s.siteUrl}>
-                    {s.siteUrl}
-                  </option>
-                ))}
+                {loadingGsc ? (
+                  <option value="">-- Loading properties... --</option>
+                ) : gscSites.length === 0 ? (
+                  <option value="">-- No verified Search Console properties found --</option>
+                ) : (
+                  <>
+                    <option value="">-- Select a Search Console property to import --</option>
+                    {gscSites.map(s => (
+                      <option key={s.siteUrl} value={s.siteUrl}>
+                        {s.siteUrl}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
               <span className="input-hint" style={{ marginTop: 4 }}>
-                Selecting a verified GSC property will automatically configure the details and linked Google Account below.
+                Selecting a verified GSC property will automatically pre-fill the fields below.
               </span>
             </div>
           )}
@@ -145,28 +180,6 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
               Use "sc-domain:example.com" for domain properties, or the full URL for URL-prefix properties.
             </span>
           </div>
-
-          {/* Google Account Selector */}
-          {accounts.length > 0 && (
-            <div className="input-group">
-              <label className="input-label">Google Account</label>
-              <select
-                className="input mt-1"
-                value={googleAccountId}
-                onChange={e => setGoogleAccountId(e.target.value)}
-              >
-                <option value="">None (IndexNow Only)</option>
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.email || `Account (${acc.id.slice(0, 8)})`}
-                  </option>
-                ))}
-              </select>
-              <span className="input-hint" style={{ marginTop: 4 }}>
-                Select which Google Account manages this site's Search Console access.
-              </span>
-            </div>
-          )}
 
           {/* Advanced Auto-Deployment Options */}
           <details className="mt-2" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-card)' }}>
@@ -458,7 +471,7 @@ function IndexNowSetupCard({ site }: { site: Site }) {
     <div className="card mt-3" style={{ border: '1px solid var(--border)', background: 'var(--bg-card-hover)' }}>
       <div className="flex items-center gap-2 mb-3">
         <ShieldCheck size={14} style={{ color: site.indexNowVerified ? 'var(--ok)' : 'var(--warn)' }} />
-        <span style={{ fontWeight: 600, fontSize: 13 }}>IndexNow Key Verification</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>SEO Audit & IndexNow Setup</span>
         {site.indexNowVerified
           ? <span className="badge badge-ok ml-auto">Verified ✓</span>
           : <span className="badge badge-warn ml-auto">Verification Required</span>}
@@ -914,7 +927,7 @@ export default function SitesPage() {
                     className="btn btn-ghost btn-sm"
                     onClick={() => setExpanded(expanded === site.id ? null : site.id)}
                   >
-                    {expanded === site.id ? 'Hide' : 'IndexNow Setup'}
+                    {expanded === site.id ? 'Hide Details' : 'SEO Audits & Key Setup'}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm flex items-center gap-1"
