@@ -25,6 +25,7 @@ import {
   insertLog,
   insertRun,
   updateRun,
+  getAllGoogleAccounts,
   type Site,
   type LogEntry,
 } from './db/database.js';
@@ -147,7 +148,12 @@ async function _doRun(
     log(runId, 'info', '── Step 1: Submitting sitemaps to Google Search Console ──');
     for (const site of allSites) {
       try {
-        const result = await submitSitemapToGSC(site.gsc_url, site.sitemap_url);
+        const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
+        if (!accountId) {
+          log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
+          continue;
+        }
+        const result = await submitSitemapToGSC(accountId, site.gsc_url, site.sitemap_url);
         if (result.success) {
           log(runId, 'ok', `${site.domain} — sitemap submitted to GSC`, site.id);
         } else {
@@ -235,7 +241,13 @@ async function _doRun(
         if (sq.pos >= sq.queue.length || quotaHit) continue;
 
         const entry = sq.queue[sq.pos++];
-        const result = await notifyGoogle(entry.url);
+        const accountId = sq.site.google_account_id || getAllGoogleAccounts()[0]?.id;
+        if (!accountId) {
+          log(runId, 'error', `Google Submission skipped: No Google Account linked for site ${sq.site.domain}.`, sq.site.id, entry.url);
+          run.total_failed++;
+          continue;
+        }
+        const result = await notifyGoogle(accountId, entry.url);
 
         if (result.statusCode === 429) {
           log(runId, 'warn', `Google daily quota exhausted after ${googleSubmitted} URLs this run. Remaining URLs will be picked up on the next run.`);

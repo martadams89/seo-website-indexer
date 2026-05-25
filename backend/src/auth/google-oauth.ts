@@ -21,18 +21,25 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { getSetting, setSetting } from '../db/database.js';
+import {
+  getSetting,
+  setSetting,
+  getAllGoogleAccounts,
+  getGoogleAccountById,
+  upsertGoogleAccount,
+  deleteGoogleAccount,
+  type GoogleAccount
+} from '../db/database.js';
 
 // ── OAuth Scopes ──────────────────────────────────────────────────────────────
 
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/webmasters',
   'https://www.googleapis.com/auth/indexing',
+  'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
-// Default open-source Desktop Client ID and Secret to allow one-click setup
-// for all self-hosted instances out of the box.
 
 const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     || '';
 const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
@@ -43,27 +50,9 @@ export function hasBuiltinCredentials(): boolean {
 
 // ── Google OAuth Endpoints ────────────────────────────────────────────────────
 
-const DEVICE_CODE_URL = 'https://oauth2.googleapis.com/device/code';
-const TOKEN_URL       = 'https://oauth2.googleapis.com/token';
-
-// ── Settings Keys (SQLite) ────────────────────────────────────────────────────
-
-const SK_OAUTH_CLIENT_ID     = 'oauth_client_id';
-const SK_OAUTH_CLIENT_SECRET = 'oauth_client_secret';
-const SK_OAUTH_REFRESH_TOKEN = 'oauth_refresh_token';
-const SK_OAUTH_ACCESS_TOKEN  = 'oauth_access_token';
-const SK_OAUTH_TOKEN_EXPIRY  = 'oauth_token_expiry';
-const SK_AUTH_OK             = 'oauth_authenticated';  // '1' once authed
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface DeviceFlowState {
-  device_code:      string;
-  user_code:        string;
-  verification_url: string;
-  expires_in:       number;
-  interval:         number;
-}
 
 export interface AuthStatus {
   authenticated: boolean;
@@ -74,28 +63,48 @@ export interface AuthStatus {
   error?: string;
 }
 
-// ── In-memory token cache ─────────────────────────────────────────────────────
+// ── In-Memory Token Cache ─────────────────────────────────────────────────────
 
-let _cachedToken: string | null = null;
-let _cachedExpiry: Date | null  = null;
+interface CachedToken {
+  token: string;
+  expiry: Date;
+}
+const _tokenCache = new Map<string, CachedToken>();
 
-// ── Save Credentials ──────────────────────────────────────────────────────────
+// ── Temporary Custom Credentials Cache ────────────────────────────────────────
 
-/** Persists custom client credentials entered by the user in the Setup wizard. */
+let _tempClientId: string | null = null;
+let _tempClientSecret: string | null = null;
+
+/** Temporarily caches custom credentials before popup authentication begins. */
 export function saveCredentials(clientId: string, clientSecret: string): void {
-  setSetting(SK_OAUTH_CLIENT_ID,     clientId.trim());
-  setSetting(SK_OAUTH_CLIENT_SECRET, clientSecret.trim());
+  _tempClientId = clientId.trim();
+  _tempClientSecret = clientSecret.trim();
 }
 
 // ── Web Flow Token Exchange ───────────────────────────────────────────────────
 
+async function fetchUserEmail(accessToken: string): Promise<string> {
+  const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch user email (HTTP ${res.status})`);
+  }
+  const data = await res.json() as { email?: string };
+  if (!data.email) {
+    throw new Error('Google did not return user email address.');
+  }
+  return data.email;
+}
+
 /**
  * Exchanges the authorization code received from Google for access/refresh tokens.
- * Persists the tokens in SQLite.
+ * Persists the credentials inside SQLite.
  */
 export async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<string> {
-  const clientId     = getSetting(SK_OAUTH_CLIENT_ID)     || BUILTIN_CLIENT_ID;
-  const clientSecret = getSetting(SK_OAUTH_CLIENT_SECRET) || BUILTIN_CLIENT_SECRET;
+  const clientId     = _tempClientId     || BUILTIN_CLIENT_ID;
+  const clientSecret = _tempClientSecret || BUILTIN_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
     throw new Error('OAuth Client ID or Client Secret is missing. Please save credentials first.');
@@ -128,223 +137,117 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string): 
   if (!data.access_token) {
     throw new Error('No access token returned from Google.');
   }
+  if (!data.refresh_token) {
+    throw new Error('Google did not return a refresh token. If you previously connected, please go to Google Account Settings -> Security -> Third-party apps -> Remove access for this app and sign in again.');
+  }
 
   const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
-  setSetting(SK_OAUTH_ACCESS_TOKEN, data.access_token);
-  setSetting(SK_OAUTH_TOKEN_EXPIRY, expiryDate.toISOString());
-  if (data.refresh_token) {
-    setSetting(SK_OAUTH_REFRESH_TOKEN, data.refresh_token);
-  }
-  setSetting(SK_AUTH_OK, '1');
+  
+  // Fetch Google email address to identify account
+  const email = await fetchUserEmail(data.access_token);
 
-  _cachedToken  = data.access_token;
-  _cachedExpiry = expiryDate;
+  // Save the new account (uses email as account ID for extreme simplicity and clarity)
+  upsertGoogleAccount({
+    id: email,
+    email,
+    client_id: clientId,
+    client_secret: clientSecret,
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    token_expiry: expiryDate.toISOString(),
+  });
+
+  // Clear in-memory temp custom credentials
+  _tempClientId = null;
+  _tempClientSecret = null;
 
   return data.access_token;
 }
 
-// ── Device Flow — Start ───────────────────────────────────────────────────────
-
-/**
- * Starts the OAuth Device Authorization flow.
- * If clientId/clientSecret are omitted or empty, falls back to the bundled credentials.
- * Returns the state needed to show the user the URL + code.
- */
-export async function startDeviceFlow(
-  clientId?: string,
-  clientSecret?: string,
-): Promise<DeviceFlowState> {
-  const activeClientId     = clientId || BUILTIN_CLIENT_ID;
-  const activeClientSecret = clientSecret || BUILTIN_CLIENT_SECRET;
-
-  if (!activeClientId || !activeClientSecret) {
-    throw new Error(
-      'No OAuth client credentials available. ' +
-      'Either set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET environment variables, ' +
-      'or provide your own credentials in the setup form.',
-    );
-  }
-
-  const res = await fetch(DEVICE_CODE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: activeClientId, scope: OAUTH_SCOPES }).toString(),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to start device flow (HTTP ${res.status}): ${body}`);
-  }
-
-  const data = await res.json() as DeviceFlowState;
-
-  // Persist client credentials so polling + refresh can use them
-  setSetting(SK_OAUTH_CLIENT_ID,     activeClientId);
-  setSetting(SK_OAUTH_CLIENT_SECRET, activeClientSecret);
-
-  return data;
-}
-
-// ── Device Flow — Poll ────────────────────────────────────────────────────────
-
-/**
- * Polls the token endpoint until the user authorises or the code expires.
- * Resolves with the access token on success, throws on timeout/error.
- */
-export async function pollDeviceFlow(
-  deviceCode:  string,
-  intervalSecs: number,
-  expirySecs:  number,
-): Promise<string> {
-  const clientId     = getSetting(SK_OAUTH_CLIENT_ID)     || BUILTIN_CLIENT_ID;
-  const clientSecret = getSetting(SK_OAUTH_CLIENT_SECRET) || BUILTIN_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error('Client credentials missing. Re-start the auth flow.');
-  }
-
-  const deadline = Date.now() + expirySecs * 1_000;
-  const pollMs   = Math.max(intervalSecs, 5) * 1_000;
-
-  while (Date.now() < deadline) {
-    await sleep(pollMs);
-
-    const res = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id:     clientId,
-        client_secret: clientSecret,
-        device_code:   deviceCode,
-        grant_type:    'urn:ietf:params:oauth:grant-type:device_code',
-      }).toString(),
-    });
-
-    const data = await res.json() as {
-      access_token?:  string;
-      refresh_token?: string;
-      expires_in?:    number;
-      error?:         string;
-    };
-
-    if (data.error === 'authorization_pending') continue;
-    if (data.error === 'slow_down')             { await sleep(pollMs); continue; }
-    if (data.error)                             throw new Error(`Auth error: ${data.error}`);
-
-    if (data.access_token) {
-      const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
-      setSetting(SK_OAUTH_ACCESS_TOKEN, data.access_token);
-      setSetting(SK_OAUTH_TOKEN_EXPIRY, expiryDate.toISOString());
-      if (data.refresh_token) setSetting(SK_OAUTH_REFRESH_TOKEN, data.refresh_token);
-      setSetting(SK_AUTH_OK, '1');
-      _cachedToken  = data.access_token;
-      _cachedExpiry = expiryDate;
-      return data.access_token;
-    }
-  }
-
-  throw new Error('Authorisation timed out — the code expired. Please try again.');
-}
-
 // ── Token Refresh ─────────────────────────────────────────────────────────────
 
-async function refreshToken(): Promise<string> {
-  const clientId     = getSetting(SK_OAUTH_CLIENT_ID)     || BUILTIN_CLIENT_ID;
-  const clientSecret = getSetting(SK_OAUTH_CLIENT_SECRET) || BUILTIN_CLIENT_SECRET;
-  const refreshTok   = getSetting(SK_OAUTH_REFRESH_TOKEN);
-
-  if (!clientId || !clientSecret || !refreshTok) {
-    throw new Error('Session expired and no refresh token stored. Please sign in again.');
-  }
-
+async function refreshAccountToken(account: GoogleAccount): Promise<string> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id:     clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshTok,
+      client_id:     account.client_id,
+      client_secret: account.client_secret,
+      refresh_token: account.refresh_token,
       grant_type:    'refresh_token',
     }).toString(),
   });
 
   const data = await res.json() as { access_token?: string; expires_in?: number; error?: string };
   if (!data.access_token) {
-    // Refresh token revoked — clear auth state
-    clearAuth();
     throw new Error(
-      `Token refresh failed (${data.error ?? 'unknown'}). ` +
-      'You have been signed out — please sign in again.',
+      `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}). ` +
+      'Please re-connect this account on the Google Accounts tab.'
     );
   }
 
-  const expiry = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
-  setSetting(SK_OAUTH_ACCESS_TOKEN, data.access_token);
-  setSetting(SK_OAUTH_TOKEN_EXPIRY, expiry.toISOString());
-  _cachedToken  = data.access_token;
-  _cachedExpiry = expiry;
+  const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
+  
+  account.access_token = data.access_token;
+  account.token_expiry = expiryDate.toISOString();
+  upsertGoogleAccount(account);
+
+  _tokenCache.set(account.id, { token: data.access_token, expiry: expiryDate });
+
   return data.access_token;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Returns a valid access token, refreshing automatically if needed.
- * Throws if the user has not authenticated yet.
+ * Returns a valid access token for a specific Google account, refreshing automatically if needed.
  */
-export async function getAccessToken(): Promise<string> {
-  // In-memory cache hit
-  if (_cachedToken && _cachedExpiry && _cachedExpiry > new Date()) {
-    return _cachedToken;
+export async function getAccessTokenForAccount(accountId: string): Promise<string> {
+  const cached = _tokenCache.get(accountId);
+  if (cached && cached.expiry > new Date()) {
+    return cached.token;
   }
 
-  // Persisted token still valid
-  const stored = getSetting(SK_OAUTH_ACCESS_TOKEN);
-  const expiry = getSetting(SK_OAUTH_TOKEN_EXPIRY);
-  if (stored && expiry && new Date(expiry) > new Date()) {
-    _cachedToken  = stored;
-    _cachedExpiry = new Date(expiry);
-    return stored;
+  const account = getGoogleAccountById(accountId);
+  if (!account) {
+    throw new Error(`Google Account "${accountId}" not found. Link your account first.`);
   }
 
-  // Refresh
-  const hasRefresh = !!getSetting(SK_OAUTH_REFRESH_TOKEN);
-  if (!hasRefresh) {
-    throw new Error('Not authenticated. Please sign in with Google first.');
+  if (account.access_token && account.token_expiry && new Date(account.token_expiry) > new Date()) {
+    const expiryDate = new Date(account.token_expiry);
+    _tokenCache.set(accountId, { token: account.access_token, expiry: expiryDate });
+    return account.access_token;
   }
 
-  return refreshToken();
+  return refreshAccountToken(account);
 }
 
 /** Returns the current authentication status for the API/UI. */
 export function getAuthStatus(): AuthStatus {
-  const authed       = getSetting(SK_AUTH_OK) === '1';
-  const expiry       = getSetting(SK_OAUTH_TOKEN_EXPIRY);
-  const hasRefresh   = !!getSetting(SK_OAUTH_REFRESH_TOKEN);
-  const clientId     = getSetting(SK_OAUTH_CLIENT_ID) || BUILTIN_CLIENT_ID;
+  const accounts = getAllGoogleAccounts();
+  const hasBuiltin = hasBuiltinCredentials();
+  const authenticated = accounts.length > 0;
+  
+  // Return the active client ID (built-in has priority for new setups)
+  const activeClientId = hasBuiltin ? BUILTIN_CLIENT_ID : (accounts[0]?.client_id || '');
 
   return {
-    authenticated:        authed && hasRefresh,
-    hasBuiltinCredentials: hasBuiltinCredentials(),
-    expiresAt:            expiry ?? undefined,
-    clientId:             clientId || undefined,
+    authenticated,
+    hasBuiltinCredentials: hasBuiltin,
+    clientId: activeClientId || undefined,
   };
 }
 
-/** Wipes all stored auth tokens and credentials. */
-export function clearAuth(): void {
-  for (const k of [
-    SK_AUTH_OK, SK_OAUTH_ACCESS_TOKEN, SK_OAUTH_TOKEN_EXPIRY,
-    SK_OAUTH_REFRESH_TOKEN, SK_OAUTH_CLIENT_ID, SK_OAUTH_CLIENT_SECRET,
-  ]) {
-    setSetting(k, '');
-  }
-  _cachedToken  = null;
-  _cachedExpiry = null;
+/** Wipes all stored credentials for a specific account. */
+export function disconnectGoogleAccount(id: string): void {
+  deleteGoogleAccount(id);
+  _tokenCache.delete(id);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
+/** Backward-compatible stub: wipes all accounts and tokens */
+export function clearAuth(): void {
+  const accounts = getAllGoogleAccounts();
+  for (const acc of accounts) {
+    disconnectGoogleAccount(acc.id);
+  }
 }

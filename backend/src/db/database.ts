@@ -20,12 +20,24 @@ export function getDb(): Database.Database {
     _db.pragma('journal_mode = WAL');
     _db.pragma('foreign_keys = ON');
     initSchema(_db);
+    migrateSettingsToAccounts(_db);
   }
   return _db;
 }
 
 function initSchema(db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS google_accounts (
+      id            TEXT PRIMARY KEY,
+      email         TEXT UNIQUE,
+      client_id     TEXT NOT NULL,
+      client_secret TEXT NOT NULL,
+      access_token  TEXT,
+      refresh_token TEXT NOT NULL,
+      token_expiry  TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS sites (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -33,7 +45,8 @@ function initSchema(db: Database.Database): void {
       sitemap_url TEXT NOT NULL,
       gsc_url     TEXT NOT NULL,
       enabled     INTEGER NOT NULL DEFAULT 1,
-      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS url_state (
@@ -83,6 +96,51 @@ function initSchema(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Backwards compatibility migration: add google_account_id column if sites already exists without it
+  const columns = db.prepare("PRAGMA table_info(sites)").all() as { name: string }[];
+  if (!columns.some(c => c.name === 'google_account_id')) {
+    db.exec("ALTER TABLE sites ADD COLUMN google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL;");
+  }
+}
+
+function migrateSettingsToAccounts(db: Database.Database): void {
+  const getSettingFn = (k: string) => {
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string } | undefined;
+      return row?.value ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const oldRefreshToken = getSettingFn('oauth_refresh_token');
+  if (oldRefreshToken) {
+    const oldClientId = getSettingFn('oauth_client_id') || process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+    const oldClientSecret = getSettingFn('oauth_client_secret') || process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+    const oldAccessToken = getSettingFn('oauth_access_token');
+    const oldTokenExpiry = getSettingFn('oauth_token_expiry');
+
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        'default',
+        'Primary Account',
+        oldClientId,
+        oldClientSecret,
+        oldAccessToken,
+        oldRefreshToken,
+        oldTokenExpiry
+      );
+
+      db.exec("UPDATE sites SET google_account_id = 'default' WHERE google_account_id IS NULL;");
+      db.prepare("DELETE FROM settings WHERE key IN ('oauth_refresh_token', 'oauth_access_token', 'oauth_token_expiry', 'oauth_authenticated')").run();
+    } catch (e) {
+      console.error('Failed to run settings to google_accounts migration:', e);
+    }
+  }
 }
 
 // ── Settings helpers ─────────────────────────────────────────────────────────
@@ -112,6 +170,7 @@ export interface Site {
   gsc_url: string;
   enabled: number;
   created_at: string;
+  google_account_id?: string | null;
 }
 
 export function getAllSites(): Site[] {
@@ -124,9 +183,12 @@ export function getSiteById(id: string): Site | null {
 
 export function upsertSite(site: Omit<Site, 'created_at'>): void {
   getDb().prepare(`
-    INSERT OR REPLACE INTO sites(id, name, domain, sitemap_url, gsc_url, enabled)
-    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled)
-  `).run(site);
+    INSERT OR REPLACE INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id)
+    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id)
+  `).run({
+    google_account_id: null,
+    ...site
+  });
 }
 
 export function deleteSite(id: string): void {
@@ -259,4 +321,40 @@ export function upsertIndexNowKey(siteId: string, keyValue: string, verified = f
 
 export function markIndexNowKeyVerified(siteId: string): void {
   getDb().prepare('UPDATE indexnow_keys SET verified = 1 WHERE site_id = ?').run(siteId);
+}
+
+// ── Google Accounts Helpers ───────────────────────────────────────────────────
+
+export interface GoogleAccount {
+  id: string;
+  email: string | null;
+  client_id: string;
+  client_secret: string;
+  access_token: string | null;
+  refresh_token: string;
+  token_expiry: string | null;
+  created_at?: string;
+}
+
+export function getAllGoogleAccounts(): GoogleAccount[] {
+  return getDb().prepare('SELECT * FROM google_accounts ORDER BY created_at').all() as GoogleAccount[];
+}
+
+export function getGoogleAccountById(id: string): GoogleAccount | null {
+  return (getDb().prepare('SELECT * FROM google_accounts WHERE id = ?').get(id) as GoogleAccount | undefined) ?? null;
+}
+
+export function getGoogleAccountByEmail(email: string): GoogleAccount | null {
+  return (getDb().prepare('SELECT * FROM google_accounts WHERE email = ?').get(email) as GoogleAccount | undefined) ?? null;
+}
+
+export function upsertGoogleAccount(acc: GoogleAccount): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry)
+    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry)
+  `).run(acc);
+}
+
+export function deleteGoogleAccount(id: string): void {
+  getDb().prepare('DELETE FROM google_accounts WHERE id = ?').run(id);
 }

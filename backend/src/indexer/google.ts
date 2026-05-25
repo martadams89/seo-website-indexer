@@ -5,12 +5,12 @@
  *  1. Google Indexing API  — URL_UPDATED notifications (200 quota/day/project)
  *  2. Google Search Console — sitemap submission
  *
- * All calls go through `getAccessToken()` from google-oauth.ts so any auth
- * strategy (SA / Device Flow) works transparently.
+ * All calls go through `getAccessTokenForAccount(accountId)` from google-oauth.ts
+ * so any auth strategy works transparently.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { getAccessToken } from '../auth/google-oauth.js';
+import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,15 +35,11 @@ const INDEXING_ENDPOINT = 'https://indexing.googleapis.com/v3/urlNotifications:p
 /**
  * Notifies Google of an updated URL via the Indexing API.
  * Requires the service account / OAuth user to be a verified owner in GSC.
- *
- * NOTE: This API is officially documented for job posting / livestream structured
- * data, but it also works for general URLs when the site has been verified.
- * The 200 URLs/day quota is per Google Cloud project (all sites combined).
  */
-export async function notifyGoogle(url: string, type: 'URL_UPDATED' | 'URL_DELETED' = 'URL_UPDATED'): Promise<IndexingResult> {
+export async function notifyGoogle(accountId: string, url: string, type: 'URL_UPDATED' | 'URL_DELETED' = 'URL_UPDATED'): Promise<IndexingResult> {
   let token: string;
   try {
-    token = await getAccessToken();
+    token = await getAccessTokenForAccount(accountId);
   } catch (e) {
     return { url, success: false, statusCode: 0, message: `Auth error: ${String(e)}` };
   }
@@ -76,9 +72,9 @@ export async function notifyGoogle(url: string, type: 'URL_UPDATED' | 'URL_DELET
     }
     if (res.status === 401 && attempt < 3) {
       // Token may have just expired — wait briefly and let the next iteration
-      // call getAccessToken() again (which will refresh)
+      // call getAccessTokenForAccount() again (which will refresh)
       await sleep(1000);
-      try { token = await getAccessToken(); } catch { /* ignore */ }
+      try { token = await getAccessTokenForAccount(accountId); } catch { /* ignore */ }
       continue;
     }
     if (res.status >= 500 && attempt < 3) {
@@ -108,10 +104,10 @@ const GSC_BASE = 'https://www.googleapis.com/webmasters/v3';
  *   - "https://prosurvey.app/"  (URL-prefix property)
  *   - "sc-domain:dampsurvey.pro" (domain property)
  */
-export async function submitSitemapToGSC(gscUrl: string, sitemapUrl: string): Promise<SitemapSubmitResult> {
+export async function submitSitemapToGSC(accountId: string, gscUrl: string, sitemapUrl: string): Promise<SitemapSubmitResult> {
   let token: string;
   try {
-    token = await getAccessToken();
+    token = await getAccessTokenForAccount(accountId);
   } catch (e) {
     return { sitemapUrl, success: false, statusCode: 0, message: `Auth error: ${String(e)}` };
   }
@@ -150,8 +146,8 @@ export async function submitSitemapToGSC(gscUrl: string, sitemapUrl: string): Pr
  * Lists all sitemaps registered in GSC for the given site.
  * Returns an array of sitemap objects or throws on error.
  */
-export async function listGSCSitemaps(gscUrl: string): Promise<Array<{ path: string; lastSubmitted?: string; isPending?: boolean }>> {
-  const token = await getAccessToken();
+export async function listGSCSitemaps(accountId: string, gscUrl: string): Promise<Array<{ path: string; lastSubmitted?: string; isPending?: boolean }>> {
+  const token = await getAccessTokenForAccount(accountId);
   const siteEnc = encodeURIComponent(gscUrl);
 
   const res = await fetch(`${GSC_BASE}/sites/${siteEnc}/sitemaps`, {
@@ -170,8 +166,8 @@ export async function listGSCSitemaps(gscUrl: string): Promise<Array<{ path: str
  * Lists all sites/properties the authenticated user has access to in GSC.
  * Useful for onboarding — lets users pick from their existing properties.
  */
-export async function listGSCSites(): Promise<Array<{ siteUrl: string; permissionLevel: string }>> {
-  const token = await getAccessToken();
+export async function listGSCSites(accountId: string): Promise<Array<{ siteUrl: string; permissionLevel: string }>> {
+  const token = await getAccessTokenForAccount(accountId);
 
   const res = await fetch(`${GSC_BASE}/sites`, {
     headers: { Authorization: `Bearer ${token}` },

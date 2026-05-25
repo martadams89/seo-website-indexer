@@ -16,6 +16,13 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+export interface GoogleAccount {
+  id: string;
+  email: string | null;
+  client_id: string;
+  created_at: string;
+}
+
 export interface Site {
   id: string;
   name: string;
@@ -26,6 +33,7 @@ export interface Site {
   created_at: string;
   indexNowKey: string;
   indexNowVerified: boolean;
+  google_account_id?: string | null;
 }
 
 export interface AuthStatus {
@@ -91,6 +99,7 @@ export interface KeyVerification {
 export interface GSCSite {
   siteUrl: string;
   permissionLevel: string;
+  googleAccountId?: string;
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────────
@@ -113,15 +122,19 @@ export const api = {
       method: 'POST', body: JSON.stringify({ deviceCode, interval, expiresIn }),
     }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
-  listGSCSites: () => apiFetch<GSCSite[]>('/api/auth/gsc-sites'),
+  listGSCSites: (accountId?: string) => 
+    apiFetch<GSCSite[]>(`/api/auth/gsc-sites${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''}`),
+  getAccounts: () => apiFetch<GoogleAccount[]>('/api/auth/accounts'),
+  disconnectAccount: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/auth/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Sites
   getSites: () => apiFetch<Site[]>('/api/sites'),
-  addSite: (data: { name: string; domain: string; sitemapUrl: string; gscUrl: string }) =>
+  addSite: (data: { name: string; domain: string; sitemapUrl: string; gscUrl: string; googleAccountId?: string | null }) =>
     apiFetch<{ ok: boolean; id: string; indexNowKey: string }>('/api/sites', {
       method: 'POST', body: JSON.stringify(data),
     }),
-  updateSite: (id: string, data: Partial<Site>) =>
+  updateSite: (id: string, data: Partial<Site & { googleAccountId: string | null }>) =>
     apiFetch<{ ok: boolean }>(`/api/sites/${id}`, {
       method: 'PUT', body: JSON.stringify(data),
     }),

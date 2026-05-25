@@ -9,6 +9,7 @@ import SitesPage from './pages/Sites'
 import LogsPage from './pages/Logs'
 import SettingsPage from './pages/Settings'
 import SetupPage from './pages/Setup'
+import AccountsPage from './pages/Accounts'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
           <Route element={<Layout />}>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/sites"    element={<SitesPage />} />
+            <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/logs"     element={<LogsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
+  LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { createLogStream } from './api';
@@ -11,6 +11,7 @@ import { createLogStream } from './api';
 const NAV = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/sites',    icon: Globe,           label: 'Sites' },
+  { to: '/accounts', icon: Users,           label: 'Accounts' },
   { to: '/logs',     icon: ScrollText,      label: 'Live Logs' },
   { to: '/settings', icon: Settings,        label: 'Settings' },
 ];

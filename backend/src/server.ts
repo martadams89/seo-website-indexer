@@ -51,14 +51,14 @@ import {
   getLogsForRun,
   getRecentRuns,
   getIndexNowKey,
+  getAllGoogleAccounts,
 } from './db/database.js';
 import {
   getAuthStatus,
-  startDeviceFlow,
-  pollDeviceFlow,
   clearAuth,
   saveCredentials,
   exchangeCodeForTokens,
+  disconnectGoogleAccount,
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -111,29 +111,20 @@ app.get('/api/status', async () => {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-app.post('/api/auth/device-flow/start', async (req, reply) => {
-  const { clientId, clientSecret } = (req.body ?? {}) as { clientId?: string; clientSecret?: string };
-  try {
-    const state = await startDeviceFlow(clientId, clientSecret);
-    return state;
-  } catch (e) {
-    return reply.status(400).send({ error: String(e) });
-  }
+app.get('/api/auth/accounts', async () => {
+  const accounts = getAllGoogleAccounts();
+  return accounts.map(acc => ({
+    id: acc.id,
+    email: acc.email,
+    client_id: acc.client_id,
+    created_at: acc.created_at,
+  }));
 });
 
-app.post('/api/auth/device-flow/poll', async (req, reply) => {
-  const { deviceCode, interval, expiresIn } = req.body as {
-    deviceCode?: string;
-    interval?: number;
-    expiresIn?: number;
-  };
-  if (!deviceCode) return reply.status(400).send({ error: 'deviceCode required' });
-  try {
-    await pollDeviceFlow(deviceCode, interval ?? 5, expiresIn ?? 1800);
-    return { ok: true, message: 'Authenticated successfully via Device Flow.' };
-  } catch (e) {
-    return reply.status(400).send({ error: String(e) });
-  }
+app.delete('/api/auth/accounts/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  disconnectGoogleAccount(id);
+  return { ok: true };
 });
 
 app.post('/api/auth/clear', async () => {
@@ -226,10 +217,30 @@ app.get('/api/auth/google/callback', async (req, reply) => {
 });
 
 // List GSC properties (for onboarding site-picker)
-app.get('/api/auth/gsc-sites', async (_req, reply) => {
+app.get('/api/auth/gsc-sites', async (req, reply) => {
+  const { accountId } = req.query as { accountId?: string };
   try {
-    const sites = await listGSCSites();
-    return sites;
+    if (accountId) {
+      const sites = await listGSCSites(accountId);
+      return sites.map(s => ({ ...s, googleAccountId: accountId }));
+    }
+    const accounts = getAllGoogleAccounts();
+    const allSites: Array<{ siteUrl: string; permissionLevel: string; googleAccountId: string }> = [];
+    const seen = new Set<string>();
+    for (const acc of accounts) {
+      try {
+        const sites = await listGSCSites(acc.id);
+        for (const s of sites) {
+          if (!seen.has(s.siteUrl)) {
+            seen.add(s.siteUrl);
+            allSites.push({ ...s, googleAccountId: acc.id });
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to list GSC sites for account ${acc.email}:`, e);
+      }
+    }
+    return allSites;
   } catch (e) {
     return reply.status(400).send({ error: String(e) });
   }
@@ -247,17 +258,26 @@ app.get('/api/sites', async () => {
 });
 
 app.post('/api/sites', async (req, reply) => {
-  const { name, domain, sitemapUrl, gscUrl } = req.body as {
+  const { name, domain, sitemapUrl, gscUrl, googleAccountId } = req.body as {
     name?: string;
     domain?: string;
     sitemapUrl?: string;
     gscUrl?: string;
+    googleAccountId?: string;
   };
   if (!name || !domain || !sitemapUrl || !gscUrl) {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
   }
   const id = randomUUID();
-  upsertSite({ id, name, domain, sitemap_url: sitemapUrl, gsc_url: gscUrl, enabled: 1 });
+  upsertSite({
+    id,
+    name,
+    domain,
+    sitemap_url: sitemapUrl,
+    gsc_url: gscUrl,
+    enabled: 1,
+    google_account_id: googleAccountId || null,
+  });
   // Pre-create IndexNow key
   const key = getOrCreateIndexNowKey(id);
   return { ok: true, id, indexNowKey: key };
@@ -273,6 +293,7 @@ app.put('/api/sites/:id', async (req, reply) => {
     sitemapUrl: string;
     gscUrl: string;
     enabled: number;
+    googleAccountId: string | null;
   }>;
   upsertSite({
     id,
@@ -281,6 +302,7 @@ app.put('/api/sites/:id', async (req, reply) => {
     sitemap_url: updates.sitemapUrl ?? existing.sitemap_url,
     gsc_url: updates.gscUrl ?? existing.gsc_url,
     enabled: updates.enabled ?? existing.enabled,
+    google_account_id: updates.googleAccountId !== undefined ? updates.googleAccountId : existing.google_account_id,
   });
   return { ok: true };
 });

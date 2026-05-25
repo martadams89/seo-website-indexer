@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play } from 'lucide-react';
+import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Edit } from 'lucide-react';
 import { useApp } from '../AppContext';
-import { api, type Site, type GSCSite } from '../api';
+import { api, type Site, type GSCSite, type GoogleAccount } from '../api';
 
 // ── Add Site Modal ────────────────────────────────────────────────────────────
 
-function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[]; onClose: () => void; onSaved: () => void }) {
   const [name, setName]           = useState('');
   const [domain, setDomain]       = useState('');
   const [sitemapUrl, setSitemapUrl] = useState('');
   const [gscUrl, setGscUrl]       = useState('');
+  const [googleAccountId, setGoogleAccountId] = useState(() => accounts.length > 0 ? accounts[0].id : '');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
 
@@ -38,7 +39,7 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     setError('');
     setLoading(true);
     try {
-      await api.addSite({ name, domain, sitemapUrl, gscUrl });
+      await api.addSite({ name, domain, sitemapUrl, gscUrl, googleAccountId: googleAccountId || null });
       onSaved();
       onClose();
     } catch (e) {
@@ -81,6 +82,12 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
                   setDomain(parsedDomain);
                   setSitemapUrl(`https://${parsedDomain}/sitemap.xml`);
                   setGscUrl(val);
+
+                  // Dynamically pre-select the Google Account that returned this property
+                  const selectedGscSite = gscSites.find(s => s.siteUrl === val);
+                  if (selectedGscSite?.googleAccountId) {
+                    setGoogleAccountId(selectedGscSite.googleAccountId);
+                  }
                 }}
               >
                 <option value="">-- Select a Search Console property to import --</option>
@@ -91,7 +98,7 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
                 ))}
               </select>
               <span className="input-hint" style={{ marginTop: 4 }}>
-                Selecting a verified GSC property will automatically configure the details below.
+                Selecting a verified GSC property will automatically configure the details and linked Google Account below.
               </span>
             </div>
           )}
@@ -120,6 +127,28 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
             </span>
           </div>
 
+          {/* Google Account Selector */}
+          {accounts.length > 0 && (
+            <div className="input-group">
+              <label className="input-label">Google Account</label>
+              <select
+                className="input mt-1"
+                value={googleAccountId}
+                onChange={e => setGoogleAccountId(e.target.value)}
+              >
+                <option value="">None (IndexNow Only)</option>
+                {accounts.map(acc => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.email || `Account (${acc.id.slice(0, 8)})`}
+                  </option>
+                ))}
+              </select>
+              <span className="input-hint" style={{ marginTop: 4 }}>
+                Select which Google Account manages this site's Search Console access.
+              </span>
+            </div>
+          )}
+
           {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
         </div>
 
@@ -127,6 +156,95 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={!name || !domain || !sitemapUrl || !gscUrl || loading} onClick={save}>
             {loading ? <><span className="spinner" /> Saving…</> : 'Add Site'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Edit Site Modal ───────────────────────────────────────────────────────────
+
+function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accounts: GoogleAccount[]; onClose: () => void; onSaved: () => void }) {
+  const [name, setName]           = useState(site.name);
+  const [domain, setDomain]       = useState(site.domain);
+  const [sitemapUrl, setSitemapUrl] = useState(site.sitemap_url);
+  const [gscUrl, setGscUrl]       = useState(site.gsc_url);
+  const [googleAccountId, setGoogleAccountId] = useState(site.google_account_id || '');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+
+  async function save() {
+    setError('');
+    setLoading(true);
+    try {
+      await api.updateSite(site.id, {
+        name,
+        domain,
+        sitemap_url: sitemapUrl,
+        gsc_url: gscUrl,
+        googleAccountId: googleAccountId || null
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(String(e).replace('Error: ', ''));
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <h2 className="modal-title">Edit Site</h2>
+        <p className="modal-subtitle">Modify site configuration and Google Account association.</p>
+
+        <div className="flex-col gap-3">
+          <div className="input-group">
+            <label className="input-label">Site Name</label>
+            <input className="input" placeholder="My Website" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div className="input-group">
+            <label className="input-label">Domain</label>
+            <input className="input" placeholder="example.com" value={domain} onChange={e => setDomain(e.target.value)} />
+            <span className="input-hint">Without https:// or trailing slash</span>
+          </div>
+          <div className="input-group">
+            <label className="input-label">Sitemap URL</label>
+            <input className="input" placeholder="https://example.com/sitemap.xml" value={sitemapUrl} onChange={e => setSitemapUrl(e.target.value)} />
+          </div>
+          <div className="input-group">
+            <label className="input-label">Google Search Console URL</label>
+            <input className="input" placeholder="https://example.com/ or sc-domain:example.com" value={gscUrl} onChange={e => setGscUrl(e.target.value)} />
+          </div>
+
+          {/* Google Account Selector */}
+          <div className="input-group">
+            <label className="input-label">Google Account</label>
+            <select
+              className="input mt-1"
+              value={googleAccountId}
+              onChange={e => setGoogleAccountId(e.target.value)}
+            >
+              <option value="">None (IndexNow Only)</option>
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.email || `Account (${acc.id.slice(0, 8)})`}
+                </option>
+              ))}
+            </select>
+            <span className="input-hint" style={{ marginTop: 4 }}>
+              Select which Google Account manages this site's Search Console access.
+            </span>
+          </div>
+
+          {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={!name || !domain || !sitemapUrl || !gscUrl || loading} onClick={save}>
+            {loading ? <><span className="spinner" /> Saving…</> : 'Save Changes'}
           </button>
         </div>
       </div>
@@ -412,9 +530,17 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
 
 export default function SitesPage() {
   const { sites, refresh } = useApp();
+  const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
   const [showAdd, setShowAdd]     = useState(false);
+  const [editingSite, setEditingSite] = useState<Site | null>(null);
   const [expanded, setExpanded]   = useState<string | null>(null);
   const [deleting, setDeleting]   = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getAccounts()
+      .then(setAccounts)
+      .catch(err => console.warn('Could not load Google Accounts:', err));
+  }, []);
 
   async function deleteSite(id: string) {
     if (!confirm('Delete this site? All stored URL state will be lost.')) return;
@@ -440,8 +566,18 @@ export default function SitesPage() {
 
       {showAdd && (
         <AddSiteModal
+          accounts={accounts}
           onClose={() => setShowAdd(false)}
           onSaved={() => { setShowAdd(false); refresh(); }}
+        />
+      )}
+
+      {editingSite && (
+        <EditSiteModal
+          site={editingSite}
+          accounts={accounts}
+          onClose={() => setEditingSite(null)}
+          onSaved={() => { setEditingSite(null); refresh(); }}
         />
       )}
 
@@ -466,7 +602,21 @@ export default function SitesPage() {
                 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{site.name}</div>
-                  <div className="text-dim text-xs">{site.domain}</div>
+                  <div className="text-dim text-xs" style={{ marginBottom: 4 }}>{site.domain}</div>
+                  {accounts.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span className="text-dim" style={{ fontSize: 11 }}>Account:</span>
+                      {site.google_account_id ? (
+                        <span className="badge" style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--border)', fontWeight: 500 }}>
+                          {accounts.find(a => a.id === site.google_account_id)?.email || 'Unknown Profile'}
+                        </span>
+                      ) : (
+                        <span className="badge" style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'var(--bg-input)', color: 'var(--text-dim)', border: '1px solid var(--border)' }}>
+                          None (IndexNow Only)
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -474,6 +624,12 @@ export default function SitesPage() {
                     onClick={() => setExpanded(expanded === site.id ? null : site.id)}
                   >
                     {expanded === site.id ? 'Hide' : 'IndexNow Setup'}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm flex items-center gap-1"
+                    onClick={() => setEditingSite(site)}
+                  >
+                    <Edit size={12} /> Edit
                   </button>
                   <button
                     className="btn btn-danger btn-sm"
