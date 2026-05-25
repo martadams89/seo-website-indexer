@@ -29,6 +29,7 @@ import {
   type Site,
   type LogEntry,
 } from './db/database.js';
+import { emitLog, subscribeToLogs } from './utils/logger.js';
 import { fetchSitemap, filterChangedEntries, type SitemapEntry } from './indexer/sitemap.js';
 import { notifyGoogle, submitSitemapToGSC } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
@@ -37,30 +38,23 @@ import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/ind
 
 const GOOGLE_DAILY_LIMIT = 200; // hard per-project limit
 
-// ── SSE Event Bus ─────────────────────────────────────────────────────────────
-
-type LogListener = (entry: LogEntry) => void;
-const _listeners = new Set<LogListener>();
-
-export function subscribeToLogs(fn: LogListener): () => void {
-  _listeners.add(fn);
-  return () => _listeners.delete(fn);
-}
-
-function emit(entry: LogEntry): void {
-  for (const fn of _listeners) {
-    try { fn(entry); } catch { /* ignore dead listeners */ }
-  }
-}
+export { subscribeToLogs };
 
 // ── Run State ─────────────────────────────────────────────────────────────────
 
 let _running = false;
+let _stopRequested = false;
 let _currentRunId: string | null = null;
 let _scheduledTask: cron.ScheduledTask | null = null;
 
 export function isRunning(): boolean { return _running; }
 export function getCurrentRunId(): string | null { return _currentRunId; }
+
+export function forceStopRun(): void {
+  if (_running) {
+    _stopRequested = true;
+  }
+}
 
 // ── Log Helper ────────────────────────────────────────────────────────────────
 
@@ -73,7 +67,14 @@ function log(
 ): void {
   const entry: LogEntry = { run_id: runId, level, message, site_id: siteId, url };
   insertLog(entry);
-  emit(entry);
+  emitLog(entry);
+
+  const prefix = `[${level.toUpperCase()}]`;
+  if (level === 'error') {
+    console.error(`${prefix} [Run: ${runId}] ${message} ${url ? `(${url})` : ''}`);
+  } else {
+    console.log(`${prefix} [Run: ${runId}] ${message} ${url ? `(${url})` : ''}`);
+  }
 }
 
 // ── Main Run ──────────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
   const googleLimit = options.googleLimit ?? GOOGLE_DAILY_LIMIT;
 
   _running = true;
+  _stopRequested = false;
   _currentRunId = runId;
 
   const run = {
@@ -147,6 +149,7 @@ async function _doRun(
   if (!options.skipSitemaps) {
     log(runId, 'info', '── Step 1: Submitting sitemaps to Google Search Console ──');
     for (const site of allSites) {
+      if (_stopRequested) break;
       try {
         const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
         if (!accountId) {
@@ -180,6 +183,7 @@ async function _doRun(
   const siteDataMap = new Map<string, SiteData>();
 
   await Promise.all(allSites.map(async (site) => {
+    if (_stopRequested) return;
     try {
       const entries = await fetchSitemap(site.sitemap_url);
       log(runId, 'info', `${site.domain} — fetched ${entries.length} URLs from sitemap`, site.id);
@@ -237,7 +241,9 @@ async function _doRun(
     let quotaHit = false;
 
     while (!quotaHit && queues.some(q => q.pos < q.queue.length)) {
+      if (_stopRequested) break;
       for (const sq of queues) {
+        if (_stopRequested) break;
         if (sq.pos >= sq.queue.length || quotaHit) continue;
 
         const entry = sq.queue[sq.pos++];
@@ -293,6 +299,7 @@ async function _doRun(
     log(runId, 'info', '── Step 4: IndexNow (Bing / Yandex / Yahoo) ──');
 
     for (const site of allSites) {
+      if (_stopRequested) break;
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
@@ -311,6 +318,7 @@ async function _doRun(
       const results = await submitToIndexNowInBatches(site.id, site.domain, indexNowUrls);
 
       for (const r of results) {
+        if (_stopRequested) break;
         if (r.success) {
           run.total_submitted += r.urlCount;
           log(runId, 'ok', `IndexNow ✓ ${site.domain} — ${r.urlCount} URLs accepted${r.statusCode === 202 ? ' (queued, key verification pending)' : ''}`, site.id);
@@ -343,11 +351,17 @@ async function _doRun(
 
   // ── Finalize ──────────────────────────────────────────────────────────────
 
-  log(runId, 'ok',
-    `Run complete — ${run.total_submitted} submitted, ${run.total_skipped} skipped, ${run.total_failed} failed.`
-  );
+  const isStopped = _stopRequested;
+  const status = isStopped ? 'failed' : (run.total_failed > 0 && run.total_submitted === 0 ? 'failed' : 'completed');
+
+  if (isStopped) {
+    log(runId, 'error', `Run force-stopped by user request — ${run.total_submitted} submitted, ${run.total_failed} failed.`);
+  } else {
+    log(runId, 'ok', `Run complete — ${run.total_submitted} submitted, ${run.total_skipped} skipped, ${run.total_failed} failed.`);
+  }
+
   updateRun(runId, {
-    status: run.total_failed > 0 && run.total_submitted === 0 ? 'failed' : 'completed',
+    status,
     finished_at: new Date().toISOString(),
     total_submitted: run.total_submitted,
     total_skipped: run.total_skipped,

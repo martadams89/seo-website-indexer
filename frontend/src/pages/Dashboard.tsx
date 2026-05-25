@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns';
 export default function Dashboard() {
   const { status, sites, runs, logs, refresh } = useApp();
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [runError, setRunError] = useState('');
 
   const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
@@ -25,6 +26,18 @@ export default function Dashboard() {
     setRunning(false);
   }
 
+  async function stopRun() {
+    setRunError('');
+    setStopping(true);
+    try {
+      await api.stopRun();
+      setTimeout(refresh, 1500);
+    } catch (e) {
+      setRunError(String(e).replace('Error: ', ''));
+    }
+    setStopping(false);
+  }
+
   const isCurrentlyRunning = status?.scheduler.running;
 
   return (
@@ -38,15 +51,23 @@ export default function Dashboard() {
           <button className="btn btn-secondary btn-sm" onClick={refresh}>
             <RefreshCw size={13} /> Refresh
           </button>
-          <button
-            className="btn btn-primary"
-            disabled={isCurrentlyRunning || running || !status?.auth.authenticated || sites.length === 0}
-            onClick={triggerRun}
-          >
-            {isCurrentlyRunning
-              ? <><span className="spinner" /> Running…</>
-              : <><Play size={13} /> Run Now</>}
-          </button>
+          {isCurrentlyRunning ? (
+            <button
+              className="btn btn-danger"
+              disabled={stopping}
+              onClick={stopRun}
+            >
+              {stopping ? <><span className="spinner" /> Stopping…</> : <><XCircle size={13} /> Stop Run</>}
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              disabled={running || !status?.auth.authenticated || sites.length === 0}
+              onClick={triggerRun}
+            >
+              <Play size={13} /> Run Now
+            </button>
+          )}
         </div>
       </div>
 

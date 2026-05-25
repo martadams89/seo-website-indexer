@@ -3,9 +3,14 @@
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers);
+  if (options?.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
@@ -150,6 +155,7 @@ export const api = {
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),
+  stopRun: () => apiFetch<{ ok: boolean }>('/api/runs/stop', { method: 'POST' }),
   getRunLogs: (id: string) => apiFetch<LogEntry[]>(`/api/runs/${id}/logs`),
 
   // Logs

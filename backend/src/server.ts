@@ -73,6 +73,7 @@ import {
   subscribeToLogs,
   startScheduler,
   restartScheduler,
+  forceStopRun,
 } from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -352,6 +353,14 @@ app.post('/api/runs', async (req, reply) => {
   } catch (e) {
     return reply.status(500).send({ error: String(e) });
   }
+});
+
+app.post('/api/runs/stop', async (req, reply) => {
+  if (!isRunning()) {
+    return reply.status(400).send({ error: 'No run is currently in progress.' });
+  }
+  forceStopRun();
+  return { ok: true, message: 'Stop request sent successfully.' };
 });
 
 app.get('/api/runs/:id/logs', async (req) => {

@@ -33,6 +33,7 @@ import {
   upsertIndexNowKey,
   markIndexNowKeyVerified,
 } from '../db/database.js';
+import { logSystem } from '../utils/logger.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,8 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
   const key = getOrCreateIndexNowKey(siteId);
   const url = `https://${domain}/${key}.txt`;
 
+  logSystem('info', `Starting IndexNow key verification for ${domain}. Fetching: ${url}`, siteId, url);
+
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (indexnow-verifier)' },
@@ -96,11 +99,13 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
     });
 
     if (!res.ok) {
+      const errMsg = `Key file returned HTTP ${res.status}. Make sure the container is publicly reachable at ${domain}.`;
+      logSystem('error', `IndexNow verification failed for ${domain}: ${errMsg}`, siteId, url);
       return {
         reachable: false,
         keyMatch: false,
         url,
-        error: `Key file returned HTTP ${res.status}. Make sure the container is publicly reachable at ${domain}.`,
+        error: errMsg,
       };
     }
 
@@ -109,6 +114,10 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
 
     if (keyMatch) {
       markIndexNowKeyVerified(siteId);
+      logSystem('ok', `IndexNow key file successfully verified for ${domain}!`, siteId, url);
+    } else {
+      const mismatchMsg = `Key file content mismatch. Expected "${key}", got "${body.slice(0, 64)}".`;
+      logSystem('warn', `IndexNow verification mismatch for ${domain}: ${mismatchMsg}`, siteId, url);
     }
 
     return {
@@ -118,11 +127,13 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
       error: keyMatch ? undefined : `Key file content mismatch. Expected "${key}", got "${body.slice(0, 64)}".`,
     };
   } catch (e) {
+    const errMsg = `Cannot reach key file: ${String(e)}. The container must be accessible from the internet (or from Bing's crawlers) at https://${domain}.`;
+    logSystem('error', `IndexNow verification network error for ${domain}: ${errMsg}`, siteId, url);
     return {
       reachable: false,
       keyMatch: false,
       url,
-      error: `Cannot reach key file: ${String(e)}. The container must be accessible from the internet (or from Bing's crawlers) at https://${domain}.`,
+      error: errMsg,
     };
   }
 }
