@@ -173,7 +173,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
               value={sitemapUrl} onChange={e => setSitemapUrl(e.target.value)} />
           </div>
           <div className="input-group">
-            <label className="input-label">Google Search Console URL</label>
+            <label className="input-label">Search Console Property (URL or Domain)</label>
             <input className="input" placeholder="https://example.com/ or sc-domain:example.com"
               value={gscUrl} onChange={e => setGscUrl(e.target.value)} />
             <span className="input-hint">
@@ -311,8 +311,11 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
             <input className="input" placeholder="https://example.com/sitemap.xml" value={sitemapUrl} onChange={e => setSitemapUrl(e.target.value)} />
           </div>
           <div className="input-group">
-            <label className="input-label">Google Search Console URL</label>
+            <label className="input-label">Search Console Property (URL or Domain)</label>
             <input className="input" placeholder="https://example.com/ or sc-domain:example.com" value={gscUrl} onChange={e => setGscUrl(e.target.value)} />
+            <span className="input-hint">
+              Use "sc-domain:example.com" for domain properties, or the full URL for URL-prefix properties.
+            </span>
           </div>
 
           {/* Google Account Selector */}
