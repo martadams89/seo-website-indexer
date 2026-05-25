@@ -198,6 +198,9 @@ async function _doRun(
       const { changed, unchanged, newUrls } = filterChangedEntries(entries, knownLastmods);
       const noLastmod = entries.filter(e => !e.lastmod);
 
+      // Increment skipped statistics
+      run.total_skipped += unchanged.length;
+
       log(runId, 'info',
         `${site.domain} — ${newUrls.length} new, ${changed.length} changed, ${unchanged.length} unchanged, ${noLastmod.length} no-lastmod`,
         site.id
@@ -229,7 +232,17 @@ async function _doRun(
     for (const site of allSites) {
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
-      const queue = [...data.newUrls, ...data.changed, ...data.noLastmod];
+      
+      // Sort no-lastmod URLs by oldest last_submitted timestamp from database to ensure a fair rotation
+      const noLastmodSorted = [...data.noLastmod].sort((a, b) => {
+        const stateA = getUrlState(a.url, site.id);
+        const stateB = getUrlState(b.url, site.id);
+        const timeA = stateA?.last_submitted ? new Date(stateA.last_submitted).getTime() : 0;
+        const timeB = stateB?.last_submitted ? new Date(stateB.last_submitted).getTime() : 0;
+        return timeA - timeB; // oldest first (0/never submitted first)
+      });
+
+      const queue = [...data.newUrls, ...data.changed, ...noLastmodSorted];
       if (queue.length === 0) {
         log(runId, 'info', `${site.domain} — nothing to submit to Google (no changes detected)`, site.id);
       }
@@ -303,7 +316,28 @@ async function _doRun(
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
-      const indexNowUrls = [...data.newUrls, ...data.changed].map(e => e.url);
+      // Build IndexNow queue: prioritise new and changed. If sitemap has no lastmod tags at all,
+      // submit a rolling batch of up to 100 URLs that haven't been submitted in the last 7 days.
+      let indexNowUrls = [...data.newUrls, ...data.changed].map(e => e.url);
+      
+      if (data.noLastmod.length > 0 && indexNowUrls.length === 0) {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const rollingBatch = data.noLastmod
+          .filter(e => {
+            const state = getUrlState(e.url, site.id);
+            if (!state) return true; // never submitted
+            if (!state.last_submitted) return true; // never submitted
+            return state.last_submitted < sevenDaysAgo; // not submitted in last 7 days
+          })
+          .slice(0, 100)
+          .map(e => e.url);
+          
+        if (rollingBatch.length > 0) {
+          indexNowUrls = rollingBatch;
+          log(runId, 'info', `${site.domain} — sitemap has no <lastmod>; submitting rolling batch of ${rollingBatch.length} older URLs to IndexNow`, site.id);
+        }
+      }
+
       if (indexNowUrls.length === 0) {
         log(runId, 'info', `${site.domain} — no changed URLs to submit to IndexNow`, site.id);
         continue;
@@ -322,11 +356,12 @@ async function _doRun(
         if (r.success) {
           run.total_submitted += r.urlCount;
           log(runId, 'ok', `IndexNow ✓ ${site.domain} — ${r.urlCount} URLs accepted${r.statusCode === 202 ? ' (queued, key verification pending)' : ''}`, site.id);
-          // Mark URLs as indexnow-submitted
+          // Mark URLs as indexnow-submitted and update last_submitted date
           for (const url of indexNowUrls.slice(0, r.urlCount)) {
             upsertUrlState({
               url,
               site_id: site.id,
+              last_submitted: new Date().toISOString(),
               last_seen_lastmod: data.changed.find(e => e.url === url)?.lastmod
                 ?? data.newUrls.find(e => e.url === url)?.lastmod
                 ?? null,

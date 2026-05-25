@@ -170,13 +170,22 @@ export async function submitToIndexNow(
     return { siteId, host: domain, urlCount: 0, success: true, statusCode: 200, message: 'No URLs to submit.' };
   }
 
+  // Extract bare hostname (no protocol, no trailing slash or path)
+  let hostname = domain;
+  if (hostname.includes('://')) {
+    hostname = hostname.split('://')[1];
+  }
+  if (hostname.includes('/')) {
+    hostname = hostname.split('/')[0];
+  }
+
   const key = getOrCreateIndexNowKey(siteId);
   const baseUrl = getBaseUrl(siteId, domain);
   const keyLocation = `${baseUrl}/${key}.txt`;
   const batch = urls.slice(0, MAX_BATCH);
 
   const payload = JSON.stringify({
-    host: domain,
+    host: hostname,
     key,
     keyLocation,
     urlList: batch,
