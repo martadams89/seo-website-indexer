@@ -78,6 +78,29 @@ export default function SetupPage() {
     : step === 'device-flow-auth' ? 1
     : 2;
 
+  function formatError(err: string) {
+    if (err.includes('Invalid client type') || err.includes('invalid_client')) {
+      return (
+        <div style={{ textAlign: 'left' }}>
+          <strong style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Error: Invalid Client Type</strong>
+          <span style={{ fontSize: 11, lineHeight: '1.4', display: 'block' }}>
+            It looks like you created a <strong>Web application</strong> Client ID in your Google Cloud Console. 
+            Because this tool runs headlessly in Docker and uses Google's secure Device Flow (like a smart TV or a CLI tool does), Google <strong>requires</strong> the credential to be a <strong>Desktop app</strong>.
+            <br /><br />
+            <strong>How to fix this in 30 seconds:</strong>
+            <ol style={{ paddingLeft: 16, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <li>Go back to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Google Cloud Credentials <ExternalLink size={10} style={{ display: 'inline' }} /></a>.</li>
+              <li>Click <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>.</li>
+              <li>Under <strong>Application type</strong>, choose <strong>Desktop app</strong> (do <em>not</em> choose "Web application").</li>
+              <li>Name it (e.g. <code>SEO Indexer</code>) and click <strong>Create</strong>. Copy-paste the new Client ID and Secret here!</li>
+            </ol>
+          </span>
+        </div>
+      );
+    }
+    return err;
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <div className="page-header">
@@ -116,7 +139,7 @@ export default function SetupPage() {
                 No complex console setup required.
               </p>
 
-              {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{dfError}</div></div>}
+              {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
 
               <button
                 className="btn btn-primary btn-lg"
@@ -190,7 +213,7 @@ export default function SetupPage() {
               value={dfClientSecret} onChange={e => setDfClientSecret(e.target.value)} />
           </div>
 
-          {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{dfError}</div></div>}
+          {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
 
           <div className="flex gap-3 justify-end">
             <button className="btn btn-secondary" onClick={() => setStep('welcome')}>Back</button>
@@ -237,7 +260,7 @@ export default function SetupPage() {
             </div>
           </div>
 
-          {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{dfError}</div></div>}
+          {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
 
           <div className="flex gap-3 justify-end">
             <button className="btn btn-secondary" onClick={() => hasBuiltin ? setStep('welcome') : setStep('device-flow-creds')}>Back</button>
