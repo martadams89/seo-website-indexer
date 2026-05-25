@@ -32,6 +32,7 @@ import {
   getIndexNowKey,
   upsertIndexNowKey,
   markIndexNowKeyVerified,
+  getSiteById,
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
 
@@ -63,6 +64,18 @@ export interface KeyVerificationResult {
   error?: string;
 }
 
+function getBaseUrl(siteId: string, domain: string): string {
+  // If domain already has a protocol, use it
+  if (domain.startsWith('http://') || domain.startsWith('https://')) {
+    return domain;
+  }
+  
+  // Otherwise, inspect the sitemap_url to see if we should use http or https
+  const site = getSiteById(siteId);
+  const protocol = (site && site.sitemap_url.startsWith('http://')) ? 'http' : 'https';
+  return `${protocol}://${domain}`;
+}
+
 // ── Key Management ────────────────────────────────────────────────────────────
 
 /**
@@ -88,7 +101,8 @@ export function getOrCreateIndexNowKey(siteId: string): string {
  */
 export async function verifyIndexNowKey(siteId: string, domain: string): Promise<KeyVerificationResult> {
   const key = getOrCreateIndexNowKey(siteId);
-  const url = `https://${domain}/${key}.txt`;
+  const baseUrl = getBaseUrl(siteId, domain);
+  const url = `${baseUrl}/${key}.txt`;
 
   logSystem('info', `Starting IndexNow key verification for ${domain}. Fetching: ${url}`, siteId, url);
 
@@ -127,7 +141,7 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
       error: keyMatch ? undefined : `Key file content mismatch. Expected "${key}", got "${body.slice(0, 64)}".`,
     };
   } catch (e) {
-    const errMsg = `Cannot reach key file: ${String(e)}. The container must be accessible from the internet (or from Bing's crawlers) at https://${domain}.`;
+    const errMsg = `Cannot reach key file: ${String(e)}. The container must be accessible from the internet (or from Bing's crawlers) at ${baseUrl}.`;
     logSystem('error', `IndexNow verification network error for ${domain}: ${errMsg}`, siteId, url);
     return {
       reachable: false,
@@ -157,7 +171,8 @@ export async function submitToIndexNow(
   }
 
   const key = getOrCreateIndexNowKey(siteId);
-  const keyLocation = `https://${domain}/${key}.txt`;
+  const baseUrl = getBaseUrl(siteId, domain);
+  const keyLocation = `${baseUrl}/${key}.txt`;
   const batch = urls.slice(0, MAX_BATCH);
 
   const payload = JSON.stringify({
@@ -212,7 +227,7 @@ export async function submitToIndexNow(
         `IndexNow rejected the submission (403 Forbidden). ` +
         `This means the key verification file is not accessible at: ${keyLocation}\n\n` +
         `To fix this:\n` +
-        `  1. Ensure this container/server is publicly reachable via HTTPS at https://${domain}\n` +
+        `  1. Ensure this container/server is publicly reachable at ${baseUrl}\n` +
         `  2. If using a reverse proxy, make sure the /${key}.txt path is forwarded to this container\n` +
         `  3. If the site is hosted separately, place a file at /${key}.txt containing exactly: ${key}\n` +
         `  4. Check the "Sites" page in the dashboard to verify the key file status\n\n` +
