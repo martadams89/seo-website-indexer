@@ -158,7 +158,12 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   const { code, error } = req.query as { code?: string; error?: string };
   if (error) {
     return reply.type('text/html').send(`
-      <html>
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>Authentication Failed</title>
+        </head>
         <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
           <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
           <h2 style="color: white; margin-bottom: 8px;">Authentication Failed</h2>
@@ -181,7 +186,12 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   try {
     await exchangeCodeForTokens(code, redirectUri);
     return reply.type('text/html').send(`
-      <html>
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>Authentication Successful</title>
+        </head>
         <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #00e676; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
           <div style="font-size: 48px; margin-bottom: 20px;">🎉</div>
           <h2 style="color: white; margin-bottom: 8px;">Authenticated Successfully!</h2>
@@ -198,7 +208,12 @@ app.get('/api/auth/google/callback', async (req, reply) => {
     `);
   } catch (e) {
     return reply.type('text/html').send(`
-      <html>
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>Authentication Failed</title>
+        </head>
         <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
           <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
           <h2 style="color: white; margin-bottom: 8px;">Token Exchange Failed</h2>

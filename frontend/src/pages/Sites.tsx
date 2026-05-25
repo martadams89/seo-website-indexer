@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check } from 'lucide-react';
+import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api, type Site, type GSCSite } from '../api';
 
@@ -137,10 +137,13 @@ function AddSiteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
 // ── IndexNow Setup Info ───────────────────────────────────────────────────────
 
 function IndexNowSetupCard({ site }: { site: Site }) {
+  const { status, refresh } = useApp();
   const [verifying, setVerifying] = useState(false);
   const [result, setResult]       = useState<{ reachable: boolean; keyMatch: boolean; error?: string } | null>(null);
   const [copied, setCopied]       = useState(false);
   const [activeTab, setActiveTab] = useState<'manual' | 'frameworks' | 'proxy' | 'cloudflare'>('manual');
+  const [running, setRunning]     = useState(false);
+  const [runSuccess, setRunSuccess] = useState('');
 
   async function verify() {
     setVerifying(true);
@@ -148,8 +151,32 @@ function IndexNowSetupCard({ site }: { site: Site }) {
     try {
       const r = await api.verifyIndexNow(site.id);
       setResult(r);
-    } catch { /* ignore */ }
+      await refresh();
+    } catch (e) {
+      setResult({
+        reachable: false,
+        keyMatch: false,
+        error: String(e).replace('Error: ', ''),
+      });
+    }
     setVerifying(false);
+  }
+
+  async function runSiteIndexing() {
+    setRunning(true);
+    setRunSuccess('');
+    try {
+      await api.triggerRun({ siteIds: [site.id] });
+      setRunSuccess('Indexing run triggered successfully for this site! Check the dashboard or activity logs to view progress.');
+      setTimeout(() => setRunSuccess(''), 8000);
+    } catch (e) {
+      setResult({
+        reachable: false,
+        keyMatch: false,
+        error: `Failed to start indexing: ${String(e).replace('Error: ', '')}`,
+      });
+    }
+    setRunning(false);
   }
 
   function copyKey() {
@@ -348,8 +375,16 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button className="btn btn-secondary btn-sm" disabled={verifying} onClick={verify}>
+      {runSuccess && (
+        <div className="alert alert-ok mt-3">
+          <div className="alert-content" style={{ fontSize: 12 }}>
+            🎉 {runSuccess}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
+        <button className="btn btn-secondary btn-sm" disabled={verifying || running} onClick={verify}>
           {verifying ? <><span className="spinner" /> Verifying…</> : <><ShieldCheck size={12} /> Verify Key File</>}
         </button>
         <a
@@ -360,6 +395,14 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         >
           <ExternalLink size={12} /> Open Key File
         </a>
+        <button
+          className="btn btn-primary btn-sm"
+          style={{ marginLeft: 'auto' }}
+          disabled={running || verifying || (!site.indexNowVerified && !status?.auth.authenticated)}
+          onClick={runSiteIndexing}
+        >
+          {running ? <><span className="spinner" /> Indexing…</> : <><Play size={12} /> Run Indexing Now</>}
+        </button>
       </div>
     </div>
   );

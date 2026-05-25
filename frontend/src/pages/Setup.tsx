@@ -42,6 +42,25 @@ export default function SetupPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, [refresh]);
 
+  // Background polling fallback when awaiting authorization
+  useEffect(() => {
+    if (step !== 'auth') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const currentStatus = await api.getStatus();
+        if (currentStatus?.auth?.authenticated) {
+          await refresh();
+          setStep('done');
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [step, refresh]);
+
   async function startGoogleAuth() {
     setDfError('');
     setDfLoading(true);
@@ -227,45 +246,90 @@ export default function SetupPage() {
 
       {/* ── Step 1b: Custom credentials entry ── */}
       {step === 'creds' && (
-        <div className="card">
-          <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>OAuth 2.0 Credentials</h2>
-          <p className="text-secondary text-sm mb-3">
-            Create an OAuth 2.0 Client ID of type <strong>Web application</strong> in your&nbsp;
-            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer"
-              style={{ color: 'var(--accent)' }}>Google Cloud Console <ExternalLink size={11} /></a>.
-            Enable the <strong>Google Search Console API</strong> and <strong>Web Search Indexing API</strong>.
+        <div className="card" style={{ maxWidth: '100%' }}>
+          <h2 style={{ fontWeight: 700, fontSize: 18, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Key size={20} style={{ color: 'var(--accent)' }} /> Configure Google Web OAuth Credentials
+          </h2>
+          <p className="text-secondary text-sm mb-4">
+            Follow this simple, step-by-step guide to create your credentials in less than 2 minutes.
           </p>
 
-          <div className="alert alert-info mb-3">
-            <div className="alert-content" style={{ fontSize: 12 }}>
-              <strong style={{ display: 'block', marginBottom: 6 }}>Authorized Redirect URI:</strong>
-              <p style={{ margin: '0 0 8px 0', color: 'var(--text-secondary)' }}>
-                You must paste this Redirect URI into your Google Cloud Client configuration under <strong>Authorized redirect URIs</strong>:
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-input)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
-                <code style={{ fontSize: 11, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)' }}>{redirectUri}</code>
-                <button className="btn btn-ghost btn-sm" onClick={copyRedirectUri} style={{ padding: 4 }} title="Copy Redirect URI">
-                  {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
-                </button>
-              </div>
-            </div>
+          <div style={{ background: 'var(--bg-input)', padding: '16px 20px', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 20 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              🛠️ Step-by-Step Google Cloud Guide
+            </h3>
+            
+            <ol style={{ fontSize: 12, lineHeight: 1.6, paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 12, color: 'var(--text-secondary)' }}>
+              <li>
+                <strong>Create a Google Cloud Project:</strong>
+                <br />
+                Go to the <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Project Creation Console <ExternalLink size={10} style={{ display: 'inline' }} /></a>, give it a name (e.g. <code>SEO Indexer</code>), and click <strong>Create</strong>.
+              </li>
+              
+              <li>
+                <strong>Enable required Search APIs:</strong>
+                <br />
+                Enable the following two APIs in your new project (ensure your new project is selected in the top bar):
+                <ul style={{ paddingLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <li>👉 <a href="https://console.cloud.google.com/apis/library/searchconsole.googleapis.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Google Search Console API <ExternalLink size={10} style={{ display: 'inline' }} /></a> (Allows sitemap submissions).</li>
+                  <li>👉 <a href="https://console.cloud.google.com/apis/library/indexing.googleapis.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Web Search Indexing API <ExternalLink size={10} style={{ display: 'inline' }} /></a> (Allows rapid URL submission).</li>
+                </ul>
+              </li>
+
+              <li>
+                <strong>Configure OAuth Consent Screen:</strong>
+                <br />
+                Go to the <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>OAuth Consent Screen config <ExternalLink size={10} style={{ display: 'inline' }} /></a>:
+                <ul style={{ paddingLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <li>Select <strong>External</strong> and click <strong>Create</strong>.</li>
+                  <li>Fill in the <strong>App name</strong> (e.g., <code>SEO Indexer</code>) and your <strong>User support email</strong>.</li>
+                  <li>Scroll to the bottom, click <strong>Save and Continue</strong>.</li>
+                  <li>⚠️ <strong>Crucial Step:</strong> On the <strong>Test Users</strong> screen, click <strong>+ Add Users</strong> and enter your Google account email address. (If you omit this, Google will block you from signing in). Click <strong>Save and Continue</strong>.</li>
+                </ul>
+              </li>
+
+              <li>
+                <strong>Create your OAuth Web Credentials:</strong>
+                <br />
+                Go to the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Credentials Management page <ExternalLink size={10} style={{ display: 'inline' }} /></a>:
+                <ul style={{ paddingLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <li>Click <strong>+ Create Credentials</strong> at the top, and select <strong>OAuth client ID</strong>.</li>
+                  <li>Under <strong>Application type</strong>, select <strong>Web application</strong> (do not select "Desktop app").</li>
+                  <li>Scroll down to **Authorized redirect URIs** and click <strong>+ Add URI</strong>.</li>
+                  <li>Paste the exact Redirect URI below:</li>
+                </ul>
+                
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <code style={{ fontSize: 11, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)', fontWeight: 600 }}>{redirectUri}</code>
+                  <button className="btn btn-ghost btn-sm" onClick={copyRedirectUri} style={{ padding: 4 }} title="Copy Redirect URI">
+                    {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </li>
+
+              <li>
+                <strong>Copy Credentials &amp; Save:</strong>
+                <br />
+                Click <strong>Create</strong>. Google will present your new **Client ID** and **Client Secret**. Copy and paste them into the inputs below!
+              </li>
+            </ol>
           </div>
 
           <div className="input-group mb-3">
-            <label className="input-label">Client ID</label>
+            <label className="input-label" style={{ fontWeight: 600 }}>Client ID</label>
             <input className="input" placeholder="1234567890-abc...apps.googleusercontent.com"
               value={dfClientId} onChange={e => setDfClientId(e.target.value)} />
           </div>
 
           <div className="input-group mb-3">
-            <label className="input-label">Client Secret</label>
+            <label className="input-label" style={{ fontWeight: 600 }}>Client Secret</label>
             <input className="input" type="password" placeholder="GOCSPX-..."
               value={dfClientSecret} onChange={e => setDfClientSecret(e.target.value)} />
           </div>
 
           {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
 
-          <div className="flex gap-3 justify-end">
+          <div className="flex gap-3 justify-end" style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 16 }}>
             <button className="btn btn-secondary" onClick={() => setStep('welcome')}>Back</button>
             <button
               className="btn btn-primary"

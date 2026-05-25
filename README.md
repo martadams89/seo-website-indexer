@@ -48,31 +48,51 @@ This application uses the secure **Google OAuth 2.0 Web Application Flow** (whic
 
 Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
 
-### How to set up your Google Cloud API credentials:
+### How to set up your Google Cloud API credentials (Foolproof Step-by-Step):
 
-1. **Create an OAuth Client:**
-   - Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
-   - Click **Create Credentials** → **OAuth client ID**.
-   - Select **Web application** as the Application Type and name it (e.g., `SEO Indexer`).
-   - Under **Authorized redirect URIs**, add your container's callback URL:
-     `http://localhost:3000/api/auth/google/callback` (or your domain callback URL, which is dynamically displayed inside the Setup wizard).
-   - Click **Create**.
-2. **Enable the Google APIs:**
-   - Enable both of the following APIs in your Google Cloud Project:
-     - [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com)
-     - [Web Search Indexing API](https://console.cloud.google.com/apis/library/indexing.googleapis.com)
-3. **Configure the Container:**
-   - Copy your new **Client ID** and **Client Secret**.
-   - Paste them into the onboarding Setup wizard, OR bake them directly into your container via environment variables in your `docker-compose.yml`:
-     ```yaml
-     environment:
-       - GOOGLE_OAUTH_CLIENT_ID=your-client-id
-       - GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
-     ```
-4. **Redirection Authorization:**
-   - Click **Start Google Sign-In**. This will launch a secure Google authorization popup.
-   - Grant permissions and log in with your Google account.
-   - Once authorized, Google will redirect to your container, which automatically saves the refresh token locally and self-closes the popup window. Done!
+If you don't have a pre-configured container, follow this simple guide to set up your credentials in less than 2 minutes.
+
+#### 1️⃣ Step 1: Create a Google Cloud Project
+- Open the [Google Cloud Project Creation Console](https://console.cloud.google.com/projectcreate).
+- Give your project a name (e.g., `SEO Website Indexer`) and click **Create**.
+- Make sure your new project is selected in the top project dropdown bar of the Cloud Console.
+
+#### 2️⃣ Step 2: Enable required Search APIs
+You must enable the two Google APIs that this tool communicates with:
+- 👉 Go to the [Google Search Console API Page](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com) and click **Enable**.
+- 👉 Go to the [Web Search Indexing API Page](https://console.cloud.google.com/apis/library/indexing.googleapis.com) and click **Enable**.
+
+#### 3️⃣ Step 3: Configure the OAuth Consent Screen
+Google requires you to describe how your app authorizes users:
+- Open the [OAuth Consent Screen Configuration Page](https://console.cloud.google.com/apis/credentials/consent).
+- Select **External** as the user type and click **Create**.
+- Enter your **App Name** (e.g., `SEO Indexer`) and your **User Support Email** (your Google email).
+- Scroll to the bottom and click **Save and Continue** until you reach the **Test Users** screen.
+- ⚠️ **CRITICAL STEP (Must Do):** Click **+ Add Users** and enter your Google account email address. Google restricts unverified "Testing" apps to explicitly authorized email addresses only. If you skip this, Google will block your login with an error!
+- Click **Save and Continue** to finish.
+
+#### 4️⃣ Step 4: Create your Web OAuth Client ID
+- Open the [Credentials Management Page](https://console.cloud.google.com/apis/credentials).
+- Click **+ Create Credentials** at the top, and select **OAuth client ID**.
+- Under **Application type**, select **Web application** (do *not* choose "Desktop app" or "TV app").
+- Give it a name (e.g. `SEO Indexer Client`).
+- Scroll down to **Authorized redirect URIs** and click **+ Add URI**.
+- Paste your exact container redirect callback URI:
+  - Default local: `http://localhost:3000/api/auth/google/callback`
+  - (If you are running the dashboard on custom ports or reverse proxies, use your custom domain equivalent, which is dynamically calculated and displayed on your Setup wizard screen!).
+- Click **Create**.
+
+#### 5️⃣ Step 5: Configure the Container & Connect
+- Copy your new **Client ID** and **Client Secret**.
+- Paste them directly into the onboarding Setup wizard, OR save them directly in your environment variables inside `docker-compose.yml`:
+  ```yaml
+  environment:
+    - GOOGLE_OAUTH_CLIENT_ID=your-client-id
+    - GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+  ```
+- Click **Start Google Sign-In**. A secure Google authentication popup will open.
+- Log in with your Google account.
+- Once authorized, the popup will communicate success back to your browser tab, automatically self-close, and your container is fully configured and connected!
 
 ---
 
