@@ -95,6 +95,8 @@ export interface RunOptions {
   skipIndexNow?: boolean;
   /** Skip GSC sitemap submission */
   skipSitemaps?: boolean;
+  /** Override Google Search Console URL inspection limit for this run */
+  gscLimit?: number;
 }
 
 export async function runIndexing(options: RunOptions = {}): Promise<string> {
@@ -460,6 +462,10 @@ async function _doRun(
       const urlStates = getUrlsBySite(site.id);
       if (urlStates.length === 0) continue;
 
+      // Determine how many URLs to inspect based on trigger type and optional override
+      const defaultLimit = options.trigger === 'manual' ? 100 : 5;
+      const inspectLimit = options.gscLimit ?? defaultLimit;
+
       // Sort by gsc_last_inspected (null first, then oldest)
       const oldestInspected = urlStates
         .sort((a: UrlState, b: UrlState) => {
@@ -467,9 +473,9 @@ async function _doRun(
           const timeB = b.gsc_last_inspected ? new Date(b.gsc_last_inspected).getTime() : 0;
           return timeA - timeB;
         })
-        .slice(0, 5);
+        .slice(0, inspectLimit);
 
-      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs`, site.id);
+      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (Limit: ${inspectLimit})`, site.id);
 
       for (const state of oldestInspected) {
         if (_stopRequested) break;
