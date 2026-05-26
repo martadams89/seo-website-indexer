@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Edit, Zap } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api, type Site, type GSCSite, type GoogleAccount, type UrlState } from '../api';
+import { InfoTooltip } from '../components/Tooltip';
 
 
 // ── Add Site Modal ────────────────────────────────────────────────────────────
@@ -194,7 +195,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
               <div className="input-group">
                 <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Deploy Webhook URL</span>
-                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless headless CMS or Jamstack setups to automatically deploy the key.">ⓘ What is this?</span>
+                  <InfoTooltip content="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless CMS or Jamstack setups to automatically deploy the key." label="ⓘ What is this?" position="top" />
                 </label>
                 <input className="input" placeholder="https://api.yourhosting.com/deploy" value={deployWebhookUrl} onChange={e => setDeployWebhookUrl(e.target.value)} />
                 <span className="input-hint">HTTP POST triggered with key details. Great for serverless deployment triggers.</span>
@@ -205,7 +206,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
               <div className="input-group">
                 <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>FTP Host Address</span>
-                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload keyfile to this server.">ⓘ What is this?</span>
+                  <InfoTooltip content="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload the keyfile to this server." label="ⓘ What is this?" position="top" />
                 </label>
                 <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
               </div>
@@ -351,7 +352,7 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
               <div className="input-group">
                 <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Deploy Webhook URL</span>
-                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless headless CMS or Jamstack setups to automatically deploy the key.">ⓘ What is this?</span>
+                  <InfoTooltip content="We will send a POST request with JSON body { key, filename, content } to this URL whenever you verify or submit, allowing headless CMS or Jamstack setups to automatically deploy the key." label="ⓘ What is this?" position="top" />
                 </label>
                 <input className="input" placeholder="https://api.yourhosting.com/deploy" value={deployWebhookUrl} onChange={e => setDeployWebhookUrl(e.target.value)} />
                 <span className="input-hint">HTTP POST triggered with key details. Great for serverless deployment triggers.</span>
@@ -362,7 +363,7 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
               <div className="input-group">
                 <label className="input-label flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>FTP Host Address</span>
-                  <span className="tooltip-trigger" style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }} title="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload keyfile to this server.">ⓘ What is this?</span>
+                  <InfoTooltip content="The domain or IP address of your standard FTP server (e.g. ftp.yoursite.com). If filled, we will upload the keyfile to this server." label="ⓘ What is this?" position="top" />
                 </label>
                 <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
               </div>
@@ -760,30 +761,28 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
         ) : urls.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: 12 }}>No URL crawl history yet. Run an indexing run to populate.</div>
         ) : (
-          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
-            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', textAlign: 'left' }}>
+          <div className="table-scroll" style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', textAlign: 'left', minWidth: 480 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-overlay)', borderBottom: '1px solid var(--border)' }}>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>URL Path</th>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       Google Index State
-                      <span 
-                        className="tooltip-trigger" 
-                        style={{ cursor: 'help', fontSize: 10, background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 4, color: 'var(--accent)', fontWeight: 'normal' }} 
-                        title={
+                      <InfoTooltip
+                        content={
                           "Common GSC Indexing States:\n\n" +
-                          "• INDEXED: The page is successfully indexed and appearing in Google Search results.\n\n" +
-                          "• INDEXING_ALLOWED: Googlebot has crawled the page and indexing is allowed (no noindex tags), but it hasn't finished joining the public index yet.\n\n" +
-                          "• INDEXING_STATE_UNSPECIFIED: The status is unknown because Google has never crawled, discovered, or processed this URL before (e.g. newly created page).\n\n" +
-                          "• NOT_INDEXED: The page is not in Google's index (could be crawled but not indexed, discovered but not crawled, or an actual 404).\n\n" +
-                          "• BLOCKED_BY_ROBOTS: Googlebot is blocked from crawling this URL by your site's robots.txt directives.\n\n" +
-                          "• BLOCKED_BY_NOINDEX: The page contains a 'noindex' tag or header, telling Google not to index it.\n\n" +
-                          "• Pending GSC Check: A manual or scheduled indexing run has not inspected this URL yet."
+                          "• INDEXED: Successfully indexed in Google Search results.\n\n" +
+                          "• INDEXING_ALLOWED: Crawled and indexing allowed, but not yet in public index.\n\n" +
+                          "• INDEXING_STATE_UNSPECIFIED: Status unknown — never crawled/discovered before.\n\n" +
+                          "• NOT_INDEXED: Not in Google's index (could be crawled but not indexed, or a 404).\n\n" +
+                          "• BLOCKED_BY_ROBOTS: Blocked by robots.txt.\n\n" +
+                          "• BLOCKED_BY_NOINDEX: Contains a 'noindex' tag or header.\n\n" +
+                          "• Pending GSC Check: Not yet inspected by an indexing run."
                         }
-                      >
-                        ⓘ Info
-                      </span>
+                        label="ⓘ"
+                        position="bottom"
+                      />
                     </div>
                   </th>
                   <th style={{ padding: '6px 8px', fontWeight: 600 }}>JSON-LD Schemas</th>
@@ -917,7 +916,7 @@ export default function SitesPage() {
         <div className="flex-col gap-4">
           {sites.map(site => (
             <div key={site.id} className="card">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
                 <div style={{
                   width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
                   background: site.indexNowVerified ? 'var(--ok)' : 'var(--warn)',
@@ -963,7 +962,7 @@ export default function SitesPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => setExpanded(expanded === site.id ? null : site.id)}
@@ -986,16 +985,16 @@ export default function SitesPage() {
                 </div>
               </div>
 
-              <div className="grid-2 mt-3" style={{ fontSize: 12, color: 'var(--text-secondary)', gridTemplateColumns: '1fr 1fr' }}>
-                <div>
+              <div className="grid-2 mt-3" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                <div style={{ minWidth: 0 }}>
                   <span className="text-dim">Sitemap: </span>
-                  <a href={site.sitemap_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+                  <a href={site.sitemap_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>
                     {site.sitemap_url} <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                   </a>
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <span className="text-dim">GSC URL: </span>
-                  <code className="font-mono" style={{ fontSize: 11 }}>{site.gsc_url}</code>
+                  <code className="font-mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>{site.gsc_url}</code>
                 </div>
               </div>
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users
+  LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users,
+  ChevronLeft, ChevronRight, Menu, X
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { createLogStream } from './api';
@@ -22,6 +23,8 @@ export default function Layout() {
   const { status, appendLog } = useApp();
   const navigate = useNavigate();
   const [sseConnected, setSseConnected] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
+  const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer open
 
   const needsSetup = status && !status.auth.authenticated;
 
@@ -38,10 +41,34 @@ export default function Layout() {
     return disconnect;
   }, [appendLog]);
 
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [navigate]);
+
+  const shellClass = [
+    'app-shell',
+    collapsed ? 'sidebar-collapsed' : '',
+    mobileOpen ? 'sidebar-open' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className="app-shell">
+    <div className={shellClass}>
+      {/* ── Mobile overlay ── */}
+      <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
+
       {/* ── Sidebar ── */}
       <aside className="sidebar">
+        {/* Desktop collapse toggle */}
+        <button
+          className="sidebar-toggle"
+          onClick={() => setCollapsed(c => !c)}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+        </button>
+
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">🔍</div>
           <div>
@@ -57,9 +84,11 @@ export default function Layout() {
               to={to}
               end={to === '/'}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              title={collapsed ? label : undefined}
+              onClick={() => setMobileOpen(false)}
             >
               <Icon size={15} />
-              {label}
+              <span className="nav-item-label">{label}</span>
             </NavLink>
           ))}
         </nav>
@@ -72,11 +101,13 @@ export default function Layout() {
               background: status?.auth.authenticated ? 'var(--ok)' : 'var(--warn)',
               boxShadow: status?.auth.authenticated ? '0 0 6px var(--ok)' : 'none',
             }} />
-            {status?.auth.authenticated ? (
-              <span className="text-dim truncate">Google Connected</span>
-            ) : (
-              <span className="text-warn">Not authenticated</span>
-            )}
+            <span className="sidebar-footer-text">
+              {status?.auth.authenticated ? (
+                <span className="text-dim truncate">Google Connected</span>
+              ) : (
+                <span className="text-warn">Not authenticated</span>
+              )}
+            </span>
           </div>
 
           {/* Scheduler / SSE status */}
@@ -84,12 +115,12 @@ export default function Layout() {
             {status?.scheduler.running ? (
               <>
                 <Activity size={11} style={{ color: 'var(--ok)', flexShrink: 0 }} />
-                <span style={{ color: 'var(--ok)' }}>Run in progress</span>
+                <span className="sidebar-footer-text" style={{ color: 'var(--ok)' }}>Run in progress</span>
               </>
             ) : (
               <>
                 <Zap size={11} style={{ flexShrink: 0 }} />
-                <span>{status?.scheduler.cronSchedule ?? '—'}</span>
+                <span className="sidebar-footer-text">{status?.scheduler.cronSchedule ?? '—'}</span>
               </>
             )}
           </div>
@@ -97,7 +128,7 @@ export default function Layout() {
           {needsSetup && (
             <div className="flex items-center gap-2 mt-2" style={{ fontSize: 11 }}>
               <AlertTriangle size={11} style={{ color: 'var(--warn)' }} />
-              <NavLink to="/setup" style={{ color: 'var(--warn)', textDecoration: 'none', fontSize: 11 }}>
+              <NavLink to="/setup" className="sidebar-footer-text" style={{ color: 'var(--warn)', textDecoration: 'none', fontSize: 11 }}>
                 Setup required
               </NavLink>
             </div>
@@ -106,13 +137,35 @@ export default function Layout() {
           {/* SSE indicator */}
           <div className="flex items-center gap-2 mt-2" style={{ fontSize: 10, color: 'var(--text-dim)' }}>
             <span style={{
-              width: 6, height: 6, borderRadius: '50%',
+              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
               background: sseConnected ? 'var(--ok)' : 'var(--text-dim)',
             }} />
-            {sseConnected ? 'Live stream connected' : 'Connecting…'}
+            <span className="sidebar-footer-text">{sseConnected ? 'Live stream connected' : 'Connecting…'}</span>
           </div>
         </div>
       </aside>
+
+      {/* ── Mobile top bar ── */}
+      <div className="mobile-header">
+        <button
+          className="hamburger"
+          onClick={() => setMobileOpen(o => !o)}
+          aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+        >
+          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+        <span className="mobile-header-title">SEO Indexer</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: status?.auth.authenticated ? 'var(--ok)' : 'var(--warn)',
+            boxShadow: status?.auth.authenticated ? '0 0 6px var(--ok)' : 'none',
+          }} />
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            {status?.auth.authenticated ? 'Connected' : 'Not auth'}
+          </span>
+        </div>
+      </div>
 
       {/* ── Main ── */}
       <main className="main-content">

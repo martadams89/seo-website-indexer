@@ -105,7 +105,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Stats ── */}
-      <div className="grid-4 mb-4" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
+      <div className="grid-4 mb-4">
         <div className="stat-card" style={{ '--accent-color': 'var(--accent)' } as React.CSSProperties}>
           <div className="stat-label">Sites</div>
           <div className="stat-value text-accent">{sites.length}</div>
