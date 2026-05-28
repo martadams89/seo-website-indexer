@@ -23,7 +23,7 @@ function LogLine({ log }: { log: LogEntry }) {
         {log.message}
       </span>
       {log.url && (
-        <span className="text-dim text-xs" style={{ flexShrink: 0, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span className="log-url text-dim text-xs">
           {log.url}
         </span>
       )}
@@ -97,7 +97,7 @@ export default function LogsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="logs-filter-row flex items-center gap-2 mb-3">
         <Filter size={13} className="text-dim" />
         {(['all', 'ok', 'info', 'warn', 'error'] as const).map(level => (
           <button
@@ -109,7 +109,7 @@ export default function LogsPage() {
             {level}
           </button>
         ))}
-        <label className="flex items-center gap-2 ml-auto" style={{ fontSize: 12, cursor: 'pointer' }}>
+        <label className="logs-autoscroll-toggle flex items-center gap-2 ml-auto" style={{ fontSize: 12, cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={autoScroll}
@@ -120,7 +120,7 @@ export default function LogsPage() {
         </label>
       </div>
 
-      <div className="log-panel" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+      <div className="log-panel logs-panel">
         {filtered.length === 0 ? (
           <div className="text-dim">No logs yet. Trigger a run from the Dashboard.</div>
         ) : (
