@@ -271,7 +271,8 @@ body {
 
   .log-panel {
     font-size: 11px;
-    max-height: calc(100dvh - 280px) !important;
+    /* 280px = page header (~120) + filter row (~56) + footer summary + page paddings/margins */
+    max-height: calc(100dvh - 280px);
   }
 
   .logs-filter-row {
@@ -301,6 +302,7 @@ body {
     overflow: visible;
     text-overflow: clip;
     word-break: break-word;
+    /* align wrapped URL content under the message column after timestamp + column gap */
     padding-left: 52px;
   }
 }
@@ -446,6 +448,9 @@ body {
   overflow-y: auto;
   max-height: 480px;
   padding: 12px;
+}
+.logs-panel {
+  max-height: calc(100vh - 220px);
 }
 .log-line { display: flex; gap: 10px; align-items: baseline; padding: 1px 0; }
 .log-ts   { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }

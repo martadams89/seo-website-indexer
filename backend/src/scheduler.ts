@@ -42,10 +42,10 @@ import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const GOOGLE_DAILY_LIMIT = 200; // hard per-project limit
-const GSC_INSPECTION_DAILY_LIMIT = Math.max(
-  1,
-  parseInt(process.env.GSC_INSPECTION_DAILY_LIMIT ?? '2000', 10) || 2000
-);
+const parsedGscInspectionLimit = parseInt(process.env.GSC_INSPECTION_DAILY_LIMIT ?? '', 10);
+const GSC_INSPECTION_DAILY_LIMIT = Number.isFinite(parsedGscInspectionLimit)
+  ? Math.max(1, parsedGscInspectionLimit)
+  : 2000;
 
 export { subscribeToLogs };
 
@@ -204,7 +204,11 @@ async function _doRun(
       try {
         const robotsStatus = await auditRobotsTxt(site.domain);
         const llmsStatus = await probeLlmsTxt(site.domain);
-        const latestSite = getSiteById(site.id) ?? site;
+        const latestSite = getSiteById(site.id);
+        if (!latestSite) {
+          log(runId, 'warn', `${site.domain} — site record disappeared during run; skipping GEO status update to avoid overwriting changes.`, site.id);
+          continue;
+        }
         upsertSite({
           ...latestSite,
           robots_txt_status: robotsStatus,
@@ -455,7 +459,8 @@ async function _doRun(
   // ── Step 5: Google URL Inspection & Real-Time Status Verification ────────
 
   if (!options.skipGoogle) {
-    let inspectionBudgetRemaining = options.gscLimit ?? GSC_INSPECTION_DAILY_LIMIT;
+    const defaultInspectionBudget = options.trigger === 'manual' ? 100 : GSC_INSPECTION_DAILY_LIMIT;
+    let inspectionBudgetRemaining = options.gscLimit ?? defaultInspectionBudget;
     log(runId, 'info', `── Step 5: Google URL Inspection (separate budget: ${inspectionBudgetRemaining}) ──`);
 
     for (const site of allSites) {

@@ -120,7 +120,7 @@ export default function LogsPage() {
         </label>
       </div>
 
-      <div className="log-panel" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+      <div className="log-panel logs-panel">
         {filtered.length === 0 ? (
           <div className="text-dim">No logs yet. Trigger a run from the Dashboard.</div>
         ) : (
