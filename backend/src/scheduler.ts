@@ -207,7 +207,7 @@ async function _doRun(
         const latestSite = getSiteById(site.id);
         if (!latestSite) {
           log(runId, 'warn', `${site.domain} — site record disappeared during run; skipping GEO status update to avoid overwriting changes.`, site.id);
-          continue;
+          return;
         }
         upsertSite({
           ...latestSite,
