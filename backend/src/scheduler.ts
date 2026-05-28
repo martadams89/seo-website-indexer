@@ -23,6 +23,7 @@ import {
   getUrlState,
   upsertUrlState,
   upsertSite,
+  getSiteById,
   getUrlsBySite,
   insertLog,
   insertRun,
@@ -41,6 +42,10 @@ import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const GOOGLE_DAILY_LIMIT = 200; // hard per-project limit
+const GSC_INSPECTION_DAILY_LIMIT = Math.max(
+  1,
+  parseInt(process.env.GSC_INSPECTION_DAILY_LIMIT ?? '2000', 10) || 2000
+);
 
 export { subscribeToLogs };
 
@@ -199,8 +204,9 @@ async function _doRun(
       try {
         const robotsStatus = await auditRobotsTxt(site.domain);
         const llmsStatus = await probeLlmsTxt(site.domain);
+        const latestSite = getSiteById(site.id) ?? site;
         upsertSite({
-          ...site,
+          ...latestSite,
           robots_txt_status: robotsStatus,
           llms_txt_status: llmsStatus
         });
@@ -449,10 +455,15 @@ async function _doRun(
   // ── Step 5: Google URL Inspection & Real-Time Status Verification ────────
 
   if (!options.skipGoogle) {
-    log(runId, 'info', '── Step 5: Google URL Inspection (5 oldest URLs per site) ──');
+    let inspectionBudgetRemaining = options.gscLimit ?? GSC_INSPECTION_DAILY_LIMIT;
+    log(runId, 'info', `── Step 5: Google URL Inspection (separate budget: ${inspectionBudgetRemaining}) ──`);
 
     for (const site of allSites) {
       if (_stopRequested) break;
+      if (inspectionBudgetRemaining <= 0) {
+        log(runId, 'info', 'Google URL Inspection budget reached for this run.');
+        break;
+      }
       const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
       if (!accountId) {
         log(runId, 'warn', `URL Inspection skipped: No Google Account linked for site ${site.domain}.`, site.id);
@@ -462,9 +473,9 @@ async function _doRun(
       const urlStates = getUrlsBySite(site.id);
       if (urlStates.length === 0) continue;
 
-      // Determine how many URLs to inspect based on trigger type and optional override
-      const defaultLimit = options.trigger === 'manual' ? 100 : 5;
-      const inspectLimit = options.gscLimit ?? defaultLimit;
+      // URL Inspection API quota is separate from Indexing API publish quota.
+      // Keep a single run-level budget so scheduled runs can use the available quota.
+      const inspectLimit = Math.min(inspectionBudgetRemaining, urlStates.length);
 
       // Sort by gsc_last_inspected (null first, then oldest)
       const oldestInspected = urlStates
@@ -475,7 +486,7 @@ async function _doRun(
         })
         .slice(0, inspectLimit);
 
-      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (Limit: ${inspectLimit})`, site.id);
+      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (remaining inspection budget: ${inspectionBudgetRemaining})`, site.id);
 
       for (const state of oldestInspected) {
         if (_stopRequested) break;
@@ -501,6 +512,8 @@ async function _doRun(
         } catch (e) {
           log(runId, 'warn', `GSC Inspection error for ${state.url}: ${String(e)}`, site.id, state.url);
         }
+        inspectionBudgetRemaining--;
+        if (inspectionBudgetRemaining <= 0) break;
         await sleep(500); // Be polite
       }
     }

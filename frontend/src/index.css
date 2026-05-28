@@ -269,7 +269,40 @@ body {
   .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table { min-width: 520px; }
 
-  .log-panel { font-size: 11px; }
+  .log-panel {
+    font-size: 11px;
+    max-height: calc(100dvh - 280px) !important;
+  }
+
+  .logs-filter-row {
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 6px;
+  }
+
+  .logs-autoscroll-toggle {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .log-line {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+    gap: 3px 8px;
+    padding: 4px 0;
+  }
+
+  .log-url {
+    grid-column: 1 / -1;
+    max-width: none;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+    padding-left: 52px;
+  }
 }
 
 /* ── Page Header ── */
@@ -417,6 +450,13 @@ body {
 .log-line { display: flex; gap: 10px; align-items: baseline; padding: 1px 0; }
 .log-ts   { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }
 .log-msg  { flex: 1; word-break: break-all; }
+.log-url  {
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .log-ok    .log-msg { color: var(--ok); }
 .log-warn  .log-msg { color: var(--warn); }
 .log-error .log-msg { color: var(--error); }
