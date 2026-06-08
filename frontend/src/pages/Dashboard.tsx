@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp, Unlock } from 'lucide-react';
 import { useApp, useToast } from '../AppContext';
 import { api } from '../api';
 import { formatDistanceToNow } from 'date-fns';
@@ -10,6 +10,7 @@ export default function Dashboard() {
   const toast = useToast();
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const [runError, setRunError] = useState('');
 
   const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
@@ -47,7 +48,29 @@ export default function Dashboard() {
     setStopping(false);
   }
 
+  async function releaseLock() {
+    if (!confirm('Release the persistent run lock? Only do this if a previous run crashed and never released the lock — releasing while a run is genuinely active can cause overlapping submissions.')) return;
+    setUnlocking(true);
+    setRunError('');
+    try {
+      await api.releaseLock();
+      toast('success', 'Lock released');
+      setTimeout(refresh, 800);
+    } catch (e) {
+      const msg = String(e).replace('Error: ', '');
+      setRunError(msg);
+      toast('error', msg);
+    }
+    setUnlocking(false);
+  }
+
   const isCurrentlyRunning = status?.scheduler.running;
+  const persistentLock = status?.scheduler.lock ?? null;
+  // The persistent lock can outlive an in-process run when the previous server
+  // crashed before releasing it. We show a release affordance whenever a lock
+  // exists but no in-process run is active.
+  const showReleaseLock = !!persistentLock && !isCurrentlyRunning;
+  const lockErrorVisible = /persistent lock/i.test(runError);
 
   return (
     <div>
@@ -60,6 +83,16 @@ export default function Dashboard() {
           <button className="btn btn-secondary btn-sm" onClick={refresh}>
             <RefreshCw size={13} /> Refresh
           </button>
+          {showReleaseLock && (
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={unlocking}
+              onClick={releaseLock}
+              title={`Persistent lock held by run ${persistentLock?.runId ?? '?'}${persistentLock?.acquiredAt ? ` since ${persistentLock.acquiredAt}` : ''}`}
+            >
+              {unlocking ? <><span className="spinner" /> Releasing…</> : <><Unlock size={13} /> Release lock</>}
+            </button>
+          )}
           {isCurrentlyRunning ? (
             <button
               className="btn btn-danger"
@@ -91,7 +124,18 @@ export default function Dashboard() {
 
       {runError && (
         <div className="alert alert-error mb-4">
-          <div className="alert-content">{runError}</div>
+          <div className="alert-content" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ flex: 1, minWidth: 220 }}>{runError}</span>
+            {lockErrorVisible && (
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={unlocking}
+                onClick={releaseLock}
+              >
+                {unlocking ? <><span className="spinner" /> Releasing…</> : <><Unlock size={12} /> Release lock</>}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
