@@ -7,6 +7,12 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   if (options?.body) {
     headers.set('Content-Type', 'application/json');
   }
+  // CSRF-lite: marks the request as coming from our SPA. The backend enforces
+  // this header on all state-changing requests.
+  const method = (options?.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    headers.set('X-Requested-With', 'seo-indexer-ui');
+  }
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -78,8 +84,33 @@ export interface AppStatus {
     running: boolean;
     currentRunId: string | null;
     cronSchedule: string;
+    lock?: { runId: string; acquiredAt: string } | null;
   };
   sites: number;
+  accounts?: number;
+  version?: string;
+}
+
+export interface QuotaSummary {
+  day: string;
+  google_indexing: { used: number; limit: number; perProjectLimit: number; projects: Array<{ bucket: string; count: number }> };
+  gsc_inspection:  { used: number; perPropertyLimit: number; properties: Array<{ bucket: string; count: number }> };
+  indexnow:        { used: number; perSiteLimit: number; sites: Array<{ bucket: string; count: number }> };
+}
+
+export interface UrlFailureRecord {
+  url: string;
+  site_id: string;
+  api: string;
+  fail_count: number;
+  last_failed_at: string;
+  first_failed_at: string;
+}
+
+export interface BackupInfo {
+  name: string;
+  bytes: number;
+  mtime: string;
 }
 
 export interface RunRecord {
@@ -175,7 +206,7 @@ export const api = {
       method: 'POST', body: JSON.stringify(data),
     }),
   updateSite: (id: string, data: Partial<Site & { googleAccountId: string | null; sitemapUrl?: string; gscUrl?: string }>) =>
-    apiFetch<{ ok: boolean }>(`/api/sites/${id}`, {
+    apiFetch<{ ok: boolean; site?: Site }>(`/api/sites/${id}`, {
       method: 'PUT', body: JSON.stringify(data),
     }),
   deleteSite: (id: string) =>
@@ -188,7 +219,7 @@ export const api = {
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
-  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean }) =>
+  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipSitemaps?: boolean; gscLimit?: number; googleLimit?: number }) =>
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),
@@ -204,6 +235,21 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/settings', {
       method: 'PUT', body: JSON.stringify(data),
     }),
+
+  // Quota & failures
+  getQuotaToday: () => apiFetch<QuotaSummary>('/api/quota/today'),
+  getUrlFailures: () => apiFetch<UrlFailureRecord[]>('/api/url-failures'),
+
+  // Backups
+  listBackups: () => apiFetch<BackupInfo[]>('/api/backups'),
+  triggerBackup: () => apiFetch<{ ok: boolean; created?: string; reason?: string }>('/api/backups', { method: 'POST' }),
+
+  // GEO files
+  deployGeo: (siteId: string) =>
+    apiFetch<{ ok: boolean; robots: string; llms: string }>(`/api/sites/${siteId}/deploy-geo`, { method: 'POST' }),
+
+  // Admin: release stuck lock
+  releaseLock: () => apiFetch<{ ok: boolean }>('/api/scheduler/release-lock', { method: 'POST' }),
 };
 
 // ── SSE Log Stream ────────────────────────────────────────────────────────────

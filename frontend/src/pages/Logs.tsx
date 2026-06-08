@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { Filter, Download } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Filter, Download, Pause, Play, ArrowDown, Search, X } from 'lucide-react';
+import { List, type RowComponentProps } from 'react-window';
 import { useApp } from '../AppContext';
 import { createLogStream, type LogEntry } from '../api';
 
@@ -11,9 +12,20 @@ const LEVEL_COLORS: Record<string, string> = {
   dim:   'var(--text-dim)',
 };
 
+const LEVEL_PILL_BG: Record<string, string> = {
+  ok:    'var(--ok-dim)',
+  warn:  'var(--warn-dim)',
+  error: 'var(--error-dim)',
+  info:  'var(--info-dim)',
+  dim:   'var(--bg-input)',
+};
+
 function LogLine({ log }: { log: LogEntry }) {
   return (
     <div className={`log-line log-${log.level}`}>
+      <span className="log-level-pill" style={{ background: LEVEL_PILL_BG[log.level], color: LEVEL_COLORS[log.level] }}>
+        {log.level.toUpperCase()}
+      </span>
       <span className="log-ts">
         {log.created_at
           ? new Date(log.created_at).toLocaleTimeString()
@@ -31,19 +43,51 @@ function LogLine({ log }: { log: LogEntry }) {
   );
 }
 
+// ── Virtualized row for react-window v2 ──────────────────────────────────────
+// Heavy lists (>200 entries) render via this row. Fixed height for performance.
+const ROW_HEIGHT = 26;
+function VirtualLogRow({ index, style, items }: RowComponentProps<{ items: LogEntry[] }>) {
+  const log = items[index];
+  if (!log) return null;
+  return (
+    <div style={style} className={`log-vlist-row log-${log.level}`}>
+      <span className="log-ts">{log.created_at ? new Date(log.created_at).toLocaleTimeString() : '--:--:--'}</span>
+      <span className="log-lvl">{log.level.toUpperCase()}</span>
+      <span className="log-msg">{log.message}{log.url ? `  ${log.url}` : ''}</span>
+    </div>
+  );
+}
+
+function VirtualizedLogs({ items }: { items: LogEntry[] }) {
+  return (
+    <List
+      rowComponent={VirtualLogRow}
+      rowCount={items.length}
+      rowHeight={ROW_HEIGHT}
+      rowProps={{ items }}
+      defaultHeight={400}
+      overscanCount={10}
+      style={{ width: '100%', height: '100%', minHeight: 240 }}
+    />
+  );
+}
+
 export default function LogsPage() {
   const { logs: initialLogs, appendLog, status } = useApp();
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>(initialLogs);
   const [filter, setFilter]     = useState<string>('all');
+  const [search, setSearch]     = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [showJump, setShowJump] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
 
   // Keep local live logs updated from context
   useEffect(() => {
     setLiveLogs(initialLogs);
   }, [initialLogs]);
 
-  // SSE subscription on this page (duplicates might arrive from context — that's fine, UI deduplicates by index)
+  // SSE subscription on this page (duplicates might arrive from context — that's fine)
   useEffect(() => {
     const unsub = createLogStream((entry) => {
       appendLog(entry);
@@ -52,16 +96,40 @@ export default function LogsPage() {
     return unsub;
   }, [appendLog]);
 
-  // Auto-scroll to bottom
+  // Detect when the user manually scrolls up — pause auto-scroll
+  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const scrolledUp = distanceFromBottom > 80;
+    userScrolledUp.current = scrolledUp;
+    setShowJump(scrolledUp);
+  }, []);
+
+  // Auto-scroll to bottom when new logs arrive (unless user scrolled up)
   useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && !userScrolledUp.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [liveLogs, autoScroll]);
 
-  const filtered = filter === 'all'
-    ? liveLogs
-    : liveLogs.filter(l => l.level === filter);
+  function jumpToBottom() {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      userScrolledUp.current = false;
+      setShowJump(false);
+    }
+  }
+
+  const filtered = liveLogs.filter(l => {
+    if (filter !== 'all' && l.level !== filter) return false;
+    if (search) {
+      const needle = search.toLowerCase();
+      if (!l.message.toLowerCase().includes(needle) && !(l.url ?? '').toLowerCase().includes(needle)) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   function downloadLogs() {
     const text = liveLogs.map(l =>
@@ -74,9 +142,20 @@ export default function LogsPage() {
     a.click();
   }
 
+  const counts = {
+    all:   liveLogs.length,
+    ok:    liveLogs.filter(l => l.level === 'ok').length,
+    info:  liveLogs.filter(l => l.level === 'info').length,
+    warn:  liveLogs.filter(l => l.level === 'warn').length,
+    error: liveLogs.filter(l => l.level === 'error').length,
+  };
+
+  // Reversed (oldest → newest) memoized list used by the virtualized renderer.
+  const virtualItems = useMemo(() => [...filtered].reverse(), [filtered]);
+
   return (
-    <div>
-      <div className="page-header flex items-center justify-between">
+    <div className="logs-page">
+      <div className="page-header logs-page-header">
         <div>
           <h1 className="page-title">Live Logs</h1>
           <p className="page-subtitle">
@@ -89,49 +168,81 @@ export default function LogsPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 logs-header-actions">
           <button className="btn btn-secondary btn-sm" onClick={downloadLogs}>
-            <Download size={12} /> Export
+            <Download size={12} /> <span className="hide-mobile">Export</span>
           </button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="logs-filter-row flex items-center gap-2 mb-3">
-        <Filter size={13} className="text-dim" />
-        {(['all', 'ok', 'info', 'warn', 'error'] as const).map(level => (
-          <button
-            key={level}
-            className={`btn btn-sm ${filter === level ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setFilter(level)}
-            style={{ textTransform: 'capitalize' }}
-          >
-            {level}
-          </button>
-        ))}
-        <label className="logs-autoscroll-toggle flex items-center gap-2 ml-auto" style={{ fontSize: 12, cursor: 'pointer' }}>
+      <div className="logs-toolbar">
+        <div className="logs-filter-row">
+          <Filter size={13} className="text-dim" style={{ flexShrink: 0 }} />
+          {(['all', 'ok', 'info', 'warn', 'error'] as const).map(level => (
+            <button
+              key={level}
+              className={`btn btn-sm logs-filter-pill ${filter === level ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setFilter(level)}
+            >
+              <span style={{ textTransform: 'capitalize' }}>{level}</span>
+              <span className="logs-filter-count">{counts[level]}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="logs-search-wrap">
+          <Search size={13} className="text-dim logs-search-icon" />
           <input
-            type="checkbox"
-            checked={autoScroll}
-            onChange={e => setAutoScroll(e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }}
+            className="input logs-search"
+            placeholder="Search messages or URLs…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
           />
-          <span className="text-dim">Auto-scroll</span>
-        </label>
+          {search && (
+            <button className="logs-search-clear" onClick={() => setSearch('')} aria-label="Clear search">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+
+        <div className="logs-toolbar-actions">
+          <button
+            className={`btn btn-sm ${autoScroll ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setAutoScroll(s => !s)}
+            title={autoScroll ? 'Pause auto-scroll' : 'Resume auto-scroll'}
+          >
+            {autoScroll ? <Pause size={12} /> : <Play size={12} />}
+            <span className="hide-mobile">{autoScroll ? 'Pause' : 'Resume'}</span>
+          </button>
+        </div>
       </div>
 
-      <div className="log-panel logs-panel">
-        {filtered.length === 0 ? (
-          <div className="text-dim">No logs yet. Trigger a run from the Dashboard.</div>
-        ) : (
-          [...filtered].reverse().map((log, i) => <LogLine key={i} log={log} />)
+      <div className="logs-panel-wrap">
+        <div className="log-panel logs-panel" ref={scrollRef} onScroll={onScroll}>
+          {filtered.length === 0 ? (
+            <div className="text-dim" style={{ padding: 16, textAlign: 'center' }}>
+              {search || filter !== 'all'
+                ? 'No matching logs. Adjust filter/search to see more.'
+                : 'No logs yet. Trigger a run from the Dashboard.'}
+            </div>
+          ) : filtered.length > 200 ? (
+            <VirtualizedLogs items={virtualItems} />
+          ) : (
+            [...filtered].reverse().map((log, i) => <LogLine key={`${log.id ?? 'x'}-${i}`} log={log} />)
+          )}
+        </div>
+
+        {showJump && (
+          <button className="logs-jump-bottom btn btn-primary btn-sm" onClick={jumpToBottom}>
+            <ArrowDown size={12} /> Jump to latest
+          </button>
         )}
-        <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-center justify-between mt-2" style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-        <span>{filtered.length} entries{filter !== 'all' ? ` (filtered: ${filter})` : ''}</span>
-        <span>Showing up to 1,000 recent entries</span>
+      <div className="logs-footer">
+        <span>{filtered.length} entries{filter !== 'all' || search ? ` (filtered)` : ''}</span>
+        <span className="text-dim">Up to 1,000 most recent</span>
       </div>
     </div>
   );

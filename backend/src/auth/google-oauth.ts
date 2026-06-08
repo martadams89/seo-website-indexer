@@ -178,18 +178,32 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     }).toString(),
   });
 
-  const data = await res.json() as { access_token?: string; expires_in?: number; error?: string };
+  const data = await res.json() as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    error?: string;
+    error_description?: string;
+  };
   if (!data.access_token) {
+    // 'invalid_grant' = user revoked or refresh token expired (~6 months unused)
+    const isInvalidGrant = data.error === 'invalid_grant';
     throw new Error(
-      `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}). ` +
-      'Please re-connect this account on the Google Accounts tab.'
+      `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_description ? `: ${data.error_description}` : ''}). ` +
+      (isInvalidGrant
+        ? 'Refresh token has been revoked or expired. Please reconnect this account on the Accounts page.'
+        : 'Please re-connect this account on the Google Accounts tab.')
     );
   }
 
   const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
-  
+
   account.access_token = data.access_token;
   account.token_expiry = expiryDate.toISOString();
+  // Google occasionally rotates the refresh token — persist the new one if provided.
+  if (data.refresh_token && data.refresh_token !== account.refresh_token) {
+    account.refresh_token = data.refresh_token;
+  }
   upsertGoogleAccount(account);
 
   _tokenCache.set(account.id, { token: data.access_token, expiry: expiryDate });

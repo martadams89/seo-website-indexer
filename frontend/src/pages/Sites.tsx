@@ -270,7 +270,7 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
     setError('');
     setLoading(true);
     try {
-      await api.updateSite(site.id, {
+      const result = await api.updateSite(site.id, {
         name,
         domain,
         sitemap_url: sitemapUrl,
@@ -283,6 +283,14 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
         ftp_pass: ftpPass || null,
         ftp_path: ftpPath || null,
       });
+      // Verify the round-trip: backend returns the persisted row.
+      // If the value didn't stick, surface a clear error to the user instead
+      // of silently letting the modal close on a corrupted save.
+      const persistedAccountId = result.site?.google_account_id ?? null;
+      const expectedAccountId = googleAccountId || null;
+      if (result.site && persistedAccountId !== expectedAccountId) {
+        throw new Error(`Save did not persist (expected account "${expectedAccountId ?? 'none'}", got "${persistedAccountId ?? 'none'}"). Please retry.`);
+      }
       onSaved();
       onClose();
     } catch (e) {
@@ -896,6 +904,7 @@ export default function SitesPage() {
 
       {editingSite && (
         <EditSiteModal
+          key={editingSite.id}
           site={editingSite}
           accounts={accounts}
           onClose={() => setEditingSite(null)}

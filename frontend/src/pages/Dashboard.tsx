@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp } from 'lucide-react';
-import { useApp } from '../AppContext';
+import { useApp, useToast } from '../AppContext';
 import { api } from '../api';
 import { formatDistanceToNow } from 'date-fns';
+import { QuotaWidget } from '../components/QuotaWidget';
 
 export default function Dashboard() {
   const { status, sites, runs, logs, refresh } = useApp();
+  const toast = useToast();
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [runError, setRunError] = useState('');
@@ -13,15 +15,19 @@ export default function Dashboard() {
   const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
   const totalSubmitted = todayRuns.reduce((s, r) => s + r.total_submitted, 0);
   const totalFailed    = todayRuns.reduce((s, r) => s + r.total_failed, 0);
+  const siteNames = Object.fromEntries(sites.map(s => [s.id, s.name]));
 
   async function triggerRun(dryRun = false) {
     setRunError('');
     setRunning(true);
     try {
       await api.triggerRun(dryRun ? { skipGoogle: true, skipIndexNow: true } : {});
+      toast('success', dryRun ? 'Dry-run started' : 'Run started');
       setTimeout(refresh, 1500);
     } catch (e) {
-      setRunError(String(e).replace('Error: ', ''));
+      const msg = String(e).replace('Error: ', '');
+      setRunError(msg);
+      toast('error', msg);
     }
     setRunning(false);
   }
@@ -31,9 +37,12 @@ export default function Dashboard() {
     setStopping(true);
     try {
       await api.stopRun();
+      toast('info', 'Stop requested');
       setTimeout(refresh, 1500);
     } catch (e) {
-      setRunError(String(e).replace('Error: ', ''));
+      const msg = String(e).replace('Error: ', '');
+      setRunError(msg);
+      toast('error', msg);
     }
     setStopping(false);
   }
@@ -186,6 +195,11 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Quota widget ── */}
+      <div className="mb-4">
+        <QuotaWidget siteNames={siteNames} />
       </div>
 
       {/* ── Recent logs preview ── */}

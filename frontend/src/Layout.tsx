@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users,
-  ChevronLeft, ChevronRight, Menu, X
+  ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { createLogStream } from './api';
+import { ToastHost } from './components/Toast';
 
 // ── Sidebar Nav ───────────────────────────────────────────────────────────────
 
@@ -20,9 +21,9 @@ const NAV = [
 // ── Layout Component ──────────────────────────────────────────────────────────
 
 export default function Layout() {
-  const { status, appendLog } = useApp();
+  const { status, appendLog, theme, toggleTheme, sseConnected, setSseConnected } = useApp();
   const navigate = useNavigate();
-  const [sseConnected, setSseConnected] = useState(false);
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
   const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer open
 
@@ -39,12 +40,21 @@ export default function Layout() {
   useEffect(() => {
     const disconnect = createLogStream(appendLog, () => setSseConnected(true));
     return disconnect;
-  }, [appendLog]);
+  }, [appendLog, setSseConnected]);
 
   // Close mobile sidebar on route change
   useEffect(() => {
     setMobileOpen(false);
-  }, [navigate]);
+  }, [location.pathname]);
+
+  // Lock body scroll while mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [mobileOpen]);
 
   const shellClass = [
     'app-shell',
@@ -142,6 +152,18 @@ export default function Layout() {
             }} />
             <span className="sidebar-footer-text">{sseConnected ? 'Live stream connected' : 'Connecting…'}</span>
           </div>
+
+          {/* Theme toggle */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="theme-toggle"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+            <span className="sidebar-footer-text">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+          </button>
         </div>
       </aside>
 
@@ -155,7 +177,15 @@ export default function Layout() {
           {mobileOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
         <span className="mobile-header-title">SEO Indexer</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="theme-toggle-mobile"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <span style={{
             width: 8, height: 8, borderRadius: '50%',
             background: status?.auth.authenticated ? 'var(--ok)' : 'var(--warn)',
@@ -167,10 +197,21 @@ export default function Layout() {
         </div>
       </div>
 
+      {/* ── SSE disconnect banner ── */}
+      {!sseConnected && (
+        <div className="sse-banner" role="alert">
+          <WifiOff size={14} />
+          <span>Live stream disconnected — reconnecting…</span>
+        </div>
+      )}
+
       {/* ── Main ── */}
       <main className="main-content">
         <Outlet />
       </main>
+
+      {/* ── Toasts ── */}
+      <ToastHost />
     </div>
   );
 }

@@ -14,8 +14,26 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - DATA_DIR=/data
+      # Strongly recommended: stable secret for encrypting FTP passwords at rest
+      # and signing future cookies. If unset, a per-volume key is auto-generated
+      # at /data/.key (0600).
+      # - APP_SECRET=please-change-me
+      # Comma-separated list of allowed CORS origins. Default `*` is fine when
+      # the dashboard is served from the same origin via the reverse proxy.
+      # - CORS_ORIGIN=https://indexer.example.com
+      # Rate limiting (defaults: 300 req / 1 minute / IP)
+      # - RATE_LIMIT_MAX=300
+      # - RATE_LIMIT_WINDOW=1 minute
+      # Number of nightly DB backups to retain (default 7).
+      # - BACKUP_KEEP=14
       # Optional: override default cron (can also be set via UI)
       # - CRON_SCHEDULE=0 3 * * *
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/livez"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
 volumes:
   seo-indexer-data:
@@ -38,3 +56,11 @@ volumes:
 #    }
 #
 #  The container automatically serves the key file at /{key}.txt for all sites.
+#
+# ─── Multi-arch image build ───────────────────────────────────────────────────
+#
+#  docker buildx create --use --name seo-indexer || docker buildx use seo-indexer
+#  docker buildx build \
+#    --platform linux/amd64,linux/arm64 \
+#    -t ghcr.io/<your-org>/seo-website-indexer:latest \
+#    --push .

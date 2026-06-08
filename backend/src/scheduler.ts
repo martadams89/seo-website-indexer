@@ -29,6 +29,14 @@ import {
   insertRun,
   updateRun,
   getAllGoogleAccounts,
+  incrementQuota,
+  getQuotaUsage,
+  recordUrlFailure,
+  clearUrlFailure,
+  getRecentlyBackedOffUrls,
+  acquireRunLock,
+  releaseRunLock,
+  pruneOldQuotaUsage,
   type Site,
   type LogEntry,
   type UrlState,
@@ -38,14 +46,29 @@ import { fetchSitemap, filterChangedEntries, type SitemapEntry } from './indexer
 import { notifyGoogle, submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
+import { deployGeoFiles } from './indexer/geo-deploy.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const GOOGLE_DAILY_LIMIT = 200; // hard per-project limit
+// Google Indexing API: 200 URLs/day per Google Cloud project (i.e. per OAuth client_id).
+// Multiple OAuth accounts that share the same client_id share the same 200/day budget.
+const GOOGLE_DAILY_LIMIT_PER_PROJECT = 200;
+
+// Google URL Inspection API: 2000 inspections/day per Search Console property.
+// (https://developers.google.com/webmaster-tools/limits)
 const parsedGscInspectionLimit = parseInt(process.env.GSC_INSPECTION_DAILY_LIMIT ?? '', 10);
-const GSC_INSPECTION_DAILY_LIMIT = Number.isFinite(parsedGscInspectionLimit)
+const GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY = Number.isFinite(parsedGscInspectionLimit)
   ? Math.max(1, parsedGscInspectionLimit)
   : 2000;
+
+// IndexNow: no public daily cap, but >10k URLs/site/day risks soft-throttling.
+// We submit changed URLs immediately + rolling batches for no-lastmod sites.
+const INDEXNOW_DAILY_LIMIT_PER_SITE = 10_000;
+const INDEXNOW_NO_LASTMOD_BATCH = 500;
+
+// Polite pacing
+const GOOGLE_INDEXING_DELAY_MS = 200;
+const GSC_INSPECTION_DELAY_MS = 350;
 
 export { subscribeToLogs };
 
@@ -90,7 +113,7 @@ function log(
 
 export interface RunOptions {
   trigger?: 'manual' | 'scheduled';
-  /** Override Google daily limit for this run (useful for testing) */
+  /** Override per-project Google Indexing daily limit for this run (testing only) */
   googleLimit?: number;
   /** Only run for specific site IDs */
   siteIds?: string[];
@@ -100,7 +123,7 @@ export interface RunOptions {
   skipIndexNow?: boolean;
   /** Skip GSC sitemap submission */
   skipSitemaps?: boolean;
-  /** Override Google Search Console URL inspection limit for this run */
+  /** Override per-property URL Inspection daily limit for this run */
   gscLimit?: number;
 }
 
@@ -109,7 +132,12 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
 
   const runId    = randomUUID();
   const trigger  = options.trigger ?? 'manual';
-  const googleLimit = options.googleLimit ?? GOOGLE_DAILY_LIMIT;
+  const googleLimitPerProject = options.googleLimit ?? GOOGLE_DAILY_LIMIT_PER_PROJECT;
+
+  // Acquire persistent lock with TTL so a crashed run doesn't block forever.
+  if (!acquireRunLock(runId)) {
+    throw new Error('Another run holds the persistent lock. Wait for it to expire (max 60 min) or restart the server.');
+  }
 
   _running = true;
   _stopRequested = false;
@@ -128,9 +156,10 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
   insertRun(run);
 
   // Run async, don't await here — caller can track via SSE
-  _doRun(runId, run, options, googleLimit).finally(() => {
+  _doRun(runId, run, options, googleLimitPerProject).finally(() => {
     _running = false;
     _currentRunId = null;
+    releaseRunLock();
   });
 
   return runId;
@@ -140,7 +169,7 @@ async function _doRun(
   runId: string,
   run: { total_submitted: number; total_skipped: number; total_failed: number },
   options: RunOptions,
-  googleLimit: number
+  googleLimitPerProject: number
 ): Promise<void> {
   let allSites = getAllSites();
   if (options.siteIds?.length) {
@@ -153,7 +182,13 @@ async function _doRun(
     return;
   }
 
-  log(runId, 'info', `Starting indexing run — ${allSites.length} site(s) | Google limit: ${googleLimit} URLs | trigger: ${options.trigger ?? 'manual'}`);
+  // Compute total Google budget = 200/day per distinct OAuth project (client_id).
+  // Each Google account that has its own OAuth client_id grants a separate 200/day quota.
+  const allAccounts = getAllGoogleAccounts();
+  const distinctProjects = new Set(allAccounts.map(a => a.client_id)).size;
+  const totalGoogleBudget = googleLimitPerProject * Math.max(distinctProjects, 1);
+
+  log(runId, 'info', `Starting indexing run — ${allSites.length} site(s) | Google budget: ${googleLimitPerProject} URLs/account × ${distinctProjects || 1} project(s) = ${totalGoogleBudget} max | trigger: ${options.trigger ?? 'manual'}`);
 
   // ── Step 1: Fetch & diff sitemaps ─────────────────────────────────────────
 
@@ -292,10 +327,16 @@ async function _doRun(
     }
   }
 
-  // ── Step 3: Google Indexing API (round-robin) ─────────────────────────────
+  // ── Step 3: Google Indexing API (round-robin, per-project budget) ────────
 
   if (!options.skipGoogle) {
-    log(runId, 'info', `── Step 3: Google Indexing API (round-robin, budget: ${googleLimit}) ──`);
+    log(runId, 'info', `── Step 3: Google Indexing API (round-robin, per-project budget: ${googleLimitPerProject}) ──`);
+
+    // Pre-fetch URLs that are in long-term failure backoff for this API.
+    const backedOff = getRecentlyBackedOffUrls('google_indexing', 3, 30);
+    if (backedOff.size > 0) {
+      log(runId, 'info', `Google: ${backedOff.size} URL(s) are in 30-day failure backoff — skipping.`);
+    }
 
     // Build per-site URL queues: priority = new > changed > no-lastmod (rotation)
     type SiteQueue = { site: Site; queue: SitemapEntry[]; pos: number };
@@ -304,7 +345,7 @@ async function _doRun(
     for (const site of allSites) {
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
-      
+
       // Sort no-lastmod URLs by oldest last_submitted timestamp from database to ensure a fair rotation
       const noLastmodSorted = [...data.noLastmod].sort((a, b) => {
         const stateA = getUrlState(a.url, site.id);
@@ -314,44 +355,123 @@ async function _doRun(
         return timeA - timeB; // oldest first (0/never submitted first)
       });
 
-      const queue = [...data.newUrls, ...data.changed, ...noLastmodSorted];
-      if (queue.length === 0) {
+      // Drop URLs that are in the 30-day backoff list (3+ recent failures)
+      const filtered = [...data.newUrls, ...data.changed, ...noLastmodSorted]
+        .filter(e => !backedOff.has(`${e.url}::${site.id}`));
+
+      if (filtered.length === 0) {
         log(runId, 'info', `${site.domain} — nothing to submit to Google (no changes detected)`, site.id);
       }
-      queues.push({ site, queue, pos: 0 });
+      queues.push({ site, queue: filtered, pos: 0 });
     }
 
-    // Round-robin interleave
-    let googleSubmitted = 0;
-    let quotaHit = false;
+    // Per-account submission counters; per-project quota is enforced by counting
+    // submissions made by accounts sharing the same client_id.
+    const accountSubmitted = new Map<string, number>();          // accountId -> count
+    const accountToProject = new Map<string, string>();           // accountId -> client_id
+    const projectSubmitted = new Map<string, number>();          // client_id -> count
+    const exhaustedAccounts = new Set<string>();                  // accountIds that 4xx'd or hit budget
+    const projectBackoffUntil = new Map<string, number>();       // client_id -> ms timestamp
 
-    while (!quotaHit && queues.some(q => q.pos < q.queue.length)) {
+    for (const acc of allAccounts) accountToProject.set(acc.id, acc.client_id);
+
+    function projectIdFor(accountId: string): string {
+      return accountToProject.get(accountId) ?? `account:${accountId}`;
+    }
+
+    // Seed counters from persistent storage so we never overshoot a daily limit
+    // even if the process was restarted today.
+    for (const [accountId, projectId] of accountToProject) {
+      const used = getQuotaUsage('google_indexing', `project:${projectId}`);
+      if (used > 0) {
+        projectSubmitted.set(projectId, Math.max(projectSubmitted.get(projectId) ?? 0, used));
+      }
+      const accUsed = getQuotaUsage('google_indexing', `account:${accountId}`);
+      if (accUsed > 0) accountSubmitted.set(accountId, accUsed);
+      if ((projectSubmitted.get(projectId) ?? 0) >= googleLimitPerProject) {
+        for (const [aid, pid] of accountToProject) if (pid === projectId) exhaustedAccounts.add(aid);
+      }
+    }
+
+    let googleSubmitted = 0;
+
+    while (queues.some(q => q.pos < q.queue.length)) {
       if (_stopRequested) break;
+      let progressedThisRound = false;
+
       for (const sq of queues) {
         if (_stopRequested) break;
-        if (sq.pos >= sq.queue.length || quotaHit) continue;
+        if (sq.pos >= sq.queue.length) continue;
 
-        const entry = sq.queue[sq.pos++];
-        const accountId = sq.site.google_account_id || getAllGoogleAccounts()[0]?.id;
+        const accountId = sq.site.google_account_id || allAccounts[0]?.id;
         if (!accountId) {
-          log(runId, 'error', `Google Submission skipped: No Google Account linked for site ${sq.site.domain}.`, sq.site.id, entry.url);
-          run.total_failed++;
+          // No account at all → log once per site and drain its queue
+          log(runId, 'error', `Google Submission skipped: No Google Account linked for site ${sq.site.domain}.`, sq.site.id, sq.queue[sq.pos]?.url);
+          run.total_failed += 1;
+          sq.pos = sq.queue.length;
           continue;
         }
+
+        if (exhaustedAccounts.has(accountId)) {
+          // Skip — this account is done for the day
+          continue;
+        }
+
+        const projectId = projectIdFor(accountId);
+        const projectBackoff = projectBackoffUntil.get(projectId) ?? 0;
+        if (projectBackoff > Date.now()) {
+          // Honor a server-suggested cool-down on this project
+          continue;
+        }
+        const usedInProject = projectSubmitted.get(projectId) ?? 0;
+        if (usedInProject >= googleLimitPerProject) {
+          // Mark all accounts under this project exhausted
+          for (const [aid, pid] of accountToProject) if (pid === projectId) exhaustedAccounts.add(aid);
+          continue;
+        }
+
+        const entry = sq.queue[sq.pos++];
+        progressedThisRound = true;
+
         const result = await notifyGoogle(accountId, entry.url);
 
         if (result.statusCode === 429) {
-          log(runId, 'warn', `Google daily quota exhausted after ${googleSubmitted} URLs this run. Remaining URLs will be picked up on the next run.`);
-          quotaHit = true;
+          // Respect Retry-After if reasonable (< 1 hour). Beyond that, treat as
+          // day-exhausted for the project.
+          const wait = result.retryAfterMs ?? 0;
+          if (wait > 0 && wait < 60 * 60 * 1000) {
+            projectBackoffUntil.set(projectId, Date.now() + wait);
+            log(runId, 'warn', `Google 429 on ${projectId} — backing off ${Math.round(wait / 1000)}s (Retry-After).`);
+            // Put the entry back so we retry after cooldown
+            sq.queue.splice(sq.pos - 1, 0, entry);
+            sq.pos--;
+          } else {
+            for (const [aid, pid] of accountToProject) if (pid === projectId) exhaustedAccounts.add(aid);
+            log(runId, 'warn', `Google quota exhausted for OAuth project (account ${accountId}). Submitted ${usedInProject} via this project this run; other accounts continue.`);
+          }
           run.total_failed++;
-          break;
+          recordUrlFailure(entry.url, sq.site.id, 'google_indexing');
+          continue;
+        }
+
+        if (result.statusCode === 401 || result.statusCode === 403) {
+          // Auth failed for this account; don't keep hammering.
+          exhaustedAccounts.add(accountId);
+          log(runId, 'error', `Google auth/permission failure for account ${accountId} on ${entry.url} — ${result.message}. Skipping this account for the rest of the run.`, sq.site.id, entry.url);
+          run.total_failed++;
+          recordUrlFailure(entry.url, sq.site.id, 'google_indexing');
+          continue;
         }
 
         if (result.success) {
           googleSubmitted++;
+          accountSubmitted.set(accountId, (accountSubmitted.get(accountId) ?? 0) + 1);
+          projectSubmitted.set(projectId, usedInProject + 1);
+          incrementQuota('google_indexing', `project:${projectId}`);
+          incrementQuota('google_indexing', `account:${accountId}`);
           run.total_submitted++;
-          log(runId, 'ok', `Google ✓ [${googleSubmitted}/${googleLimit}] ${entry.url}`, sq.site.id, entry.url);
-          // Update DB state
+          clearUrlFailure(entry.url, sq.site.id, 'google_indexing');
+          log(runId, 'ok', `Google ✓ [project ${usedInProject + 1}/${googleLimitPerProject}] ${entry.url}`, sq.site.id, entry.url);
           upsertUrlState({
             url: entry.url,
             site_id: sq.site.id,
@@ -362,20 +482,22 @@ async function _doRun(
           });
         } else {
           run.total_failed++;
+          recordUrlFailure(entry.url, sq.site.id, 'google_indexing');
           log(runId, 'error', `Google ✗ ${entry.url} — ${result.message}`, sq.site.id, entry.url);
         }
 
-        if (googleSubmitted >= googleLimit) {
-          log(runId, 'info', `Google budget of ${googleLimit} URLs reached for this run.`);
-          quotaHit = true;
-          break;
-        }
-
-        await sleep(250); // Be polite to the API
+        await sleep(GOOGLE_INDEXING_DELAY_MS);
       }
+
+      // If we made no progress this whole pass (every account exhausted or no-quota),
+      // there's nothing more we can do.
+      if (!progressedThisRound) break;
     }
 
-    log(runId, 'ok', `Google Indexing API: ${googleSubmitted} URLs submitted this run.`);
+    const projectSummary = [...projectSubmitted.entries()]
+      .map(([pid, n]) => `${pid.slice(0, 14)}…=${n}`)
+      .join(', ') || '0';
+    log(runId, 'ok', `Google Indexing API: ${googleSubmitted} URLs submitted this run (per-project today: ${projectSummary}).`);
   }
 
   // ── Step 4: IndexNow ──────────────────────────────────────────────────────
@@ -383,15 +505,31 @@ async function _doRun(
   if (!options.skipIndexNow) {
     log(runId, 'info', '── Step 4: IndexNow (Bing / Yandex / Yahoo) ──');
 
+    // URLs in long-term failure backoff for IndexNow are dropped.
+    const indexNowBackedOff = getRecentlyBackedOffUrls('indexnow', 3, 30);
+
     for (const site of allSites) {
       if (_stopRequested) break;
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
-      // Build IndexNow queue: prioritise new and changed. If sitemap has no lastmod tags at all,
-      // submit a rolling batch of up to 100 URLs that haven't been submitted in the last 7 days.
-      let indexNowUrls = [...data.newUrls, ...data.changed].map(e => e.url);
-      
+      // Priority order:
+      // 1. New URLs (sorted: most recent lastmod first; missing lastmod last)
+      // 2. Changed URLs (sorted: most recent lastmod first; missing lastmod last)
+      // 3. Rolling batch of no-lastmod URLs (when there are no priority targets)
+      const byRecentLastmod = (a: SitemapEntry, b: SitemapEntry) => {
+        const ta = a.lastmod ? Date.parse(a.lastmod) : 0;
+        const tb = b.lastmod ? Date.parse(b.lastmod) : 0;
+        return tb - ta; // newest first; 0 (missing) sorts last
+      };
+
+      const prioritised = [
+        ...[...data.newUrls].sort(byRecentLastmod),
+        ...[...data.changed].sort(byRecentLastmod),
+      ].map(e => e.url);
+
+      let indexNowUrls = prioritised;
+
       if (data.noLastmod.length > 0 && indexNowUrls.length === 0) {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const rollingBatch = data.noLastmod
@@ -401,13 +539,33 @@ async function _doRun(
             if (!state.last_submitted) return true; // never submitted
             return state.last_submitted < sevenDaysAgo; // not submitted in last 7 days
           })
-          .slice(0, 100)
+          .slice(0, INDEXNOW_NO_LASTMOD_BATCH)
           .map(e => e.url);
-          
+
         if (rollingBatch.length > 0) {
           indexNowUrls = rollingBatch;
           log(runId, 'info', `${site.domain} — sitemap has no <lastmod>; submitting rolling batch of ${rollingBatch.length} older URLs to IndexNow`, site.id);
         }
+      }
+
+      // Drop URLs in 30-day backoff
+      const beforeBackoff = indexNowUrls.length;
+      indexNowUrls = indexNowUrls.filter(u => !indexNowBackedOff.has(`${u}::${site.id}`));
+      const droppedByBackoff = beforeBackoff - indexNowUrls.length;
+      if (droppedByBackoff > 0) {
+        log(runId, 'info', `${site.domain} — dropped ${droppedByBackoff} URL(s) in 30-day IndexNow backoff`, site.id);
+      }
+
+      // Honor daily persistent quota
+      const usedToday = getQuotaUsage('indexnow', `site:${site.id}`);
+      const remainingToday = Math.max(0, INDEXNOW_DAILY_LIMIT_PER_SITE - usedToday);
+      if (remainingToday <= 0) {
+        log(runId, 'warn', `${site.domain} — IndexNow daily cap reached (${usedToday}/${INDEXNOW_DAILY_LIMIT_PER_SITE}). Skipping.`, site.id);
+        continue;
+      }
+      if (indexNowUrls.length > remainingToday) {
+        log(runId, 'warn', `${site.domain} — capping IndexNow submission at ${remainingToday} URLs (daily remaining; had ${indexNowUrls.length}).`, site.id);
+        indexNowUrls = indexNowUrls.slice(0, remainingToday);
       }
 
       if (indexNowUrls.length === 0) {
@@ -417,19 +575,25 @@ async function _doRun(
 
       const key = getOrCreateIndexNowKey(site.id);
       log(runId, 'info',
-        `${site.domain} — submitting ${indexNowUrls.length} URLs to IndexNow (key: ${key.slice(0, 8)}...)`,
+        `${site.domain} — submitting ${indexNowUrls.length} URLs to IndexNow (key: ${key.slice(0, 8)}...) [today: ${usedToday}/${INDEXNOW_DAILY_LIMIT_PER_SITE}]`,
         site.id
       );
 
       const results = await submitToIndexNowInBatches(site.id, site.domain, indexNowUrls);
 
+      // Track which URLs we've claimed as submitted so we can clear/record failures.
+      let cursor = 0;
       for (const r of results) {
         if (_stopRequested) break;
+        const batchUrls = indexNowUrls.slice(cursor, cursor + r.urlCount);
+        cursor += r.urlCount;
+
         if (r.success) {
           run.total_submitted += r.urlCount;
+          incrementQuota('indexnow', `site:${site.id}`, r.urlCount);
           log(runId, 'ok', `IndexNow ✓ ${site.domain} — ${r.urlCount} URLs accepted${r.statusCode === 202 ? ' (queued, key verification pending)' : ''}`, site.id);
-          // Mark URLs as indexnow-submitted and update last_submitted date
-          for (const url of indexNowUrls.slice(0, r.urlCount)) {
+          for (const url of batchUrls) {
+            clearUrlFailure(url, site.id, 'indexnow');
             upsertUrlState({
               url,
               site_id: site.id,
@@ -442,7 +606,13 @@ async function _doRun(
           }
         } else {
           run.total_failed++;
+          for (const url of batchUrls) recordUrlFailure(url, site.id, 'indexnow');
           log(runId, 'error', `IndexNow ✗ ${site.domain} — ${r.message}`, site.id);
+          if (r.retryAfterMs && r.retryAfterMs > 0) {
+            const waitSec = Math.round(r.retryAfterMs / 1000);
+            log(runId, 'warn', `IndexNow Retry-After: ${waitSec}s — skipping further batches for this site.`, site.id);
+            break;
+          }
           if (r.verificationRequired) {
             log(runId, 'warn',
               `⚠️  IndexNow key verification required for ${site.domain}. ` +
@@ -456,48 +626,66 @@ async function _doRun(
     }
   }
 
-  // ── Step 5: Google URL Inspection & Real-Time Status Verification ────────
+  // ── Step 5: Google URL Inspection (per-property budget) ──────────────────
 
   if (!options.skipGoogle) {
-    const defaultInspectionBudget = options.trigger === 'manual' ? 100 : GSC_INSPECTION_DAILY_LIMIT;
-    let inspectionBudgetRemaining = options.gscLimit ?? defaultInspectionBudget;
-    log(runId, 'info', `── Step 5: Google URL Inspection (separate budget: ${inspectionBudgetRemaining}) ──`);
+    // Per-property budget: 2000 inspections/day per Search Console property.
+    // Manual runs default to a smaller per-property budget to stay snappy.
+    const defaultPerProperty = options.trigger === 'manual' ? 100 : GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY;
+    const perPropertyLimit = options.gscLimit ?? defaultPerProperty;
+
+    log(runId, 'info', `── Step 5: Google URL Inspection (per-property budget: ${perPropertyLimit}, ${allSites.length} site(s)) ──`);
+
+    // Track per-account submission count to politely back off if we see 429.
+    const inspectExhaustedAccount = new Set<string>();
 
     for (const site of allSites) {
       if (_stopRequested) break;
-      if (inspectionBudgetRemaining <= 0) {
-        log(runId, 'info', 'Google URL Inspection budget reached for this run.');
-        break;
-      }
-      const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
+      const accountId = site.google_account_id || allAccounts[0]?.id;
       if (!accountId) {
         log(runId, 'warn', `URL Inspection skipped: No Google Account linked for site ${site.domain}.`, site.id);
+        continue;
+      }
+      if (inspectExhaustedAccount.has(accountId)) {
+        log(runId, 'info', `URL Inspection skipped for ${site.domain}: account ${accountId} already exhausted this run.`, site.id);
         continue;
       }
 
       const urlStates = getUrlsBySite(site.id);
       if (urlStates.length === 0) continue;
 
-      // URL Inspection API quota is separate from Indexing API publish quota.
-      // Keep a single run-level budget so scheduled runs can use the available quota.
-      const inspectLimit = Math.min(inspectionBudgetRemaining, urlStates.length);
+      // Per-property persistent quota — never exceed it across runs in the same day.
+      const propertyBucket = `property:${site.gsc_url}`;
+      const usedToday = getQuotaUsage('gsc_inspection', propertyBucket);
+      const remaining = Math.max(0, GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY - usedToday);
+      const thisRunLimit = Math.min(perPropertyLimit, remaining);
+      if (thisRunLimit <= 0) {
+        log(runId, 'warn', `${site.domain} — GSC Inspection daily cap reached (${usedToday}/${GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY}). Skipping.`, site.id);
+        continue;
+      }
 
-      // Sort by gsc_last_inspected (null first, then oldest)
-      const oldestInspected = urlStates
+      // Sort by gsc_last_inspected (null first, then oldest) and take per-property budget
+      const oldestInspected = [...urlStates]
         .sort((a: UrlState, b: UrlState) => {
           const timeA = a.gsc_last_inspected ? new Date(a.gsc_last_inspected).getTime() : 0;
           const timeB = b.gsc_last_inspected ? new Date(b.gsc_last_inspected).getTime() : 0;
           return timeA - timeB;
         })
-        .slice(0, inspectLimit);
+        .slice(0, thisRunLimit);
 
-      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (remaining inspection budget: ${inspectionBudgetRemaining})`, site.id);
+      log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (today ${usedToday}/${GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY})`, site.id);
+
+      let propertyConsecutive429 = 0;
 
       for (const state of oldestInspected) {
         if (_stopRequested) break;
+        if (inspectExhaustedAccount.has(accountId)) break;
+
         try {
           const result = await inspectGoogleUrl(accountId, site.gsc_url, state.url);
           if (result.success) {
+            propertyConsecutive429 = 0;
+            incrementQuota('gsc_inspection', propertyBucket);
             log(runId, 'ok', `GSC Inspection verdict: [${result.indexingState}] for ${state.url}`, site.id, state.url);
             upsertUrlState({
               url: state.url,
@@ -505,9 +693,21 @@ async function _doRun(
               gsc_indexing_state: result.indexingState,
               gsc_last_inspected: new Date().toISOString()
             });
+          } else if (result.statusCode === 429) {
+            propertyConsecutive429++;
+            const wait = result.retryAfterMs && result.retryAfterMs > 0 && result.retryAfterMs < 30_000
+              ? result.retryAfterMs
+              : 5000;
+            // After two consecutive 429s, give up on this account for the rest of the run.
+            if (propertyConsecutive429 >= 2) {
+              inspectExhaustedAccount.add(accountId);
+              log(runId, 'warn', `GSC Inspection: account ${accountId} appears rate-limited (429) — skipping remaining inspections this run.`, site.id);
+              break;
+            }
+            log(runId, 'warn', `GSC Inspection 429 for ${state.url} — backing off ${Math.round(wait / 1000)}s.`, site.id, state.url);
+            await sleep(wait);
           } else {
             log(runId, 'warn', `GSC Inspection failed for ${state.url}: ${result.message}`, site.id, state.url);
-            // Update timestamp so we cycle to other pages
             upsertUrlState({
               url: state.url,
               site_id: site.id,
@@ -517,12 +717,26 @@ async function _doRun(
         } catch (e) {
           log(runId, 'warn', `GSC Inspection error for ${state.url}: ${String(e)}`, site.id, state.url);
         }
-        inspectionBudgetRemaining--;
-        if (inspectionBudgetRemaining <= 0) break;
-        await sleep(500); // Be polite
+        await sleep(GSC_INSPECTION_DELAY_MS);
       }
     }
   }
+
+  // ── Step 6: GEO file deployment (robots.txt + llms.txt) ───────────────────
+
+  for (const site of allSites) {
+    if (_stopRequested) break;
+    // Only deploy if a target is configured.
+    if (!site.deploy_webhook_url && !site.ftp_host) continue;
+    try {
+      await deployGeoFiles(site);
+    } catch (e) {
+      log(runId, 'warn', `${site.domain} — GEO file deploy failed: ${String(e)}`, site.id);
+    }
+  }
+
+  // Prune old quota usage rows (>90d) once per run.
+  try { pruneOldQuotaUsage(90); } catch { /* ignore */ }
 
   // ── Finalize ──────────────────────────────────────────────────────────────
 

@@ -13,6 +13,13 @@ export interface FtpConfig {
  * Uploads a text file to a specified remote path.
  */
 export function uploadVerificationKeyViaFtp(config: FtpConfig, filename: string, content: string): Promise<void> {
+  return uploadFileViaFtp(config, filename, content);
+}
+
+/**
+ * Generic alias — uploads any text file to a path under `config.path` on the FTP server.
+ */
+export function uploadFileViaFtp(config: FtpConfig, filename: string, content: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const host = config.host;
     const port = config.port || 21;

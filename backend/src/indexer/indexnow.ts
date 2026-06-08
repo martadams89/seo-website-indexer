@@ -56,6 +56,8 @@ export interface IndexNowSubmitResult {
   message?: string;
   /** Set when verification fails — key file not reachable */
   verificationRequired?: boolean;
+  /** Server-suggested wait in ms (parsed from Retry-After). */
+  retryAfterMs?: number;
 }
 
 export interface KeyVerificationResult {
@@ -293,13 +295,15 @@ export async function submitToIndexNow(
   }
 
   if (res.status === 429) {
+    const retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
     return {
       siteId,
       host: domain,
       urlCount: batch.length,
       success: false,
       statusCode: 429,
-      message: 'IndexNow rate limit hit. Try again tomorrow.',
+      message: 'IndexNow rate limit hit. Try again later.',
+      retryAfterMs,
     };
   }
 
@@ -334,4 +338,13 @@ export async function submitToIndexNowInBatches(
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+function parseRetryAfter(headerValue: string | null): number | undefined {
+  if (!headerValue) return undefined;
+  const asInt = parseInt(headerValue, 10);
+  if (Number.isFinite(asInt) && asInt >= 0) return asInt * 1000;
+  const asDate = Date.parse(headerValue);
+  if (Number.isFinite(asDate)) return Math.max(0, asDate - Date.now());
+  return undefined;
 }

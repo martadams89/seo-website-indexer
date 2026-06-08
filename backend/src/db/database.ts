@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { encrypt, decrypt } from '../utils/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../..', 'data');
@@ -95,6 +96,29 @@ function initSchema(db: Database.Database): void {
       verified   INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS api_quota_usage (
+      day        TEXT NOT NULL,
+      api        TEXT NOT NULL,
+      bucket     TEXT NOT NULL,
+      count      INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (day, api, bucket)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_api_quota_day ON api_quota_usage(day);
+
+    CREATE TABLE IF NOT EXISTS url_failures (
+      url            TEXT NOT NULL,
+      site_id        TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      api            TEXT NOT NULL,
+      fail_count     INTEGER NOT NULL DEFAULT 0,
+      last_failed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      first_failed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (url, site_id, api)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_url_failures_last ON url_failures(last_failed_at);
   `);
 
   // Backwards compatibility migrations
@@ -220,14 +244,34 @@ export interface Site {
 }
 
 export function getAllSites(): Site[] {
-  return getDb().prepare('SELECT * FROM sites WHERE enabled = 1 ORDER BY created_at').all() as Site[];
+  return (getDb().prepare('SELECT * FROM sites WHERE enabled = 1 ORDER BY created_at').all() as Site[])
+    .map(decryptSiteSecrets);
 }
 
 export function getSiteById(id: string): Site | null {
-  return (getDb().prepare('SELECT * FROM sites WHERE id = ?').get(id) as Site | undefined) ?? null;
+  const row = getDb().prepare('SELECT * FROM sites WHERE id = ?').get(id) as Site | undefined;
+  return row ? decryptSiteSecrets(row) : null;
+}
+
+function decryptSiteSecrets(site: Site): Site {
+  if (site.ftp_pass) site.ftp_pass = decrypt(site.ftp_pass);
+  return site;
 }
 
 export function upsertSite(site: Omit<Site, 'created_at'>): void {
+  const merged = {
+    google_account_id: null as string | null,
+    robots_txt_status: null as string | null,
+    llms_txt_status: null as string | null,
+    deploy_webhook_url: null as string | null,
+    ftp_host: null as string | null,
+    ftp_port: 21 as number | null,
+    ftp_user: null as string | null,
+    ftp_path: null as string | null,
+    ...site,
+    // Always encrypt FTP password before writing
+    ftp_pass: encrypt(site.ftp_pass ?? null),
+  };
   getDb().prepare(`
     INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path)
     VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path)
@@ -246,18 +290,7 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
       ftp_user = excluded.ftp_user,
       ftp_pass = excluded.ftp_pass,
       ftp_path = excluded.ftp_path
-  `).run({
-    google_account_id: null,
-    robots_txt_status: null,
-    llms_txt_status: null,
-    deploy_webhook_url: null,
-    ftp_host: null,
-    ftp_port: 21,
-    ftp_user: null,
-    ftp_pass: null,
-    ftp_path: null,
-    ...site
-  });
+  `).run(merged);
 }
 
 export function deleteSite(id: string): void {
@@ -431,3 +464,138 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
 export function deleteGoogleAccount(id: string): void {
   getDb().prepare('DELETE FROM google_accounts WHERE id = ?').run(id);
 }
+
+// ── API Quota Tracking ────────────────────────────────────────────────────────
+
+export function todayKey(d: Date = new Date()): string {
+  // UTC day key — Google quotas reset at midnight Pacific but UTC is close
+  // enough for "today" semantics in the UI.
+  return d.toISOString().slice(0, 10);
+}
+
+export interface QuotaRow {
+  day: string;
+  api: string;
+  bucket: string;
+  count: number;
+  updated_at: string;
+}
+
+/** Increment a usage counter; returns the new value. */
+export function incrementQuota(api: string, bucket: string, by = 1, day: string = todayKey()): number {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO api_quota_usage(day, api, bucket, count, updated_at)
+    VALUES(?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(day, api, bucket) DO UPDATE SET
+      count = api_quota_usage.count + excluded.count,
+      updated_at = datetime('now')
+  `).run(day, api, bucket, by);
+  const row = db.prepare('SELECT count FROM api_quota_usage WHERE day = ? AND api = ? AND bucket = ?')
+    .get(day, api, bucket) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
+export function getQuotaUsage(api: string, bucket: string, day: string = todayKey()): number {
+  const row = getDb().prepare('SELECT count FROM api_quota_usage WHERE day = ? AND api = ? AND bucket = ?')
+    .get(day, api, bucket) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
+export function getAllQuotaUsageForDay(day: string = todayKey()): QuotaRow[] {
+  return getDb().prepare('SELECT * FROM api_quota_usage WHERE day = ?').all(day) as QuotaRow[];
+}
+
+/** Keep last 90 days only, run on boot / nightly */
+export function pruneOldQuotaUsage(days = 90): void {
+  getDb().prepare(`DELETE FROM api_quota_usage WHERE day < date('now', ?)`).run(`-${days} days`);
+}
+
+// ── Per-URL Failure Tracking ──────────────────────────────────────────────────
+
+export interface UrlFailure {
+  url: string;
+  site_id: string;
+  api: string;
+  fail_count: number;
+  last_failed_at: string;
+  first_failed_at: string;
+}
+
+export function recordUrlFailure(url: string, siteId: string, api: string): void {
+  getDb().prepare(`
+    INSERT INTO url_failures(url, site_id, api, fail_count, last_failed_at, first_failed_at)
+    VALUES(?, ?, ?, 1, datetime('now'), datetime('now'))
+    ON CONFLICT(url, site_id, api) DO UPDATE SET
+      fail_count = url_failures.fail_count + 1,
+      last_failed_at = datetime('now')
+  `).run(url, siteId, api);
+}
+
+export function clearUrlFailure(url: string, siteId: string, api: string): void {
+  getDb().prepare('DELETE FROM url_failures WHERE url = ? AND site_id = ? AND api = ?')
+    .run(url, siteId, api);
+}
+
+/**
+ * Returns the set of URLs that have failed `>= threshold` times for the given
+ * `api` and whose last failure was within the last `recencyDays` days.
+ * Such URLs are dropped from the next round of submissions to save quota.
+ */
+export function getRecentlyBackedOffUrls(api: string, threshold = 3, recencyDays = 30): Set<string> {
+  const rows = getDb().prepare(`
+    SELECT url || '::' || site_id AS key
+    FROM url_failures
+    WHERE api = ? AND fail_count >= ? AND last_failed_at >= datetime('now', ?)
+  `).all(api, threshold, `-${recencyDays} days`) as { key: string }[];
+  return new Set(rows.map(r => r.key));
+}
+
+export function getAllUrlFailures(): UrlFailure[] {
+  return getDb().prepare('SELECT * FROM url_failures ORDER BY last_failed_at DESC').all() as UrlFailure[];
+}
+
+// ── Run Lock with TTL ─────────────────────────────────────────────────────────
+
+const RUN_LOCK_KEY = 'run_lock';
+const RUN_LOCK_TTL_MS = 60 * 60 * 1000; // 60 min — much longer than any real run
+
+export interface RunLock {
+  runId: string;
+  pid: number;
+  acquiredAt: string;
+}
+
+export function acquireRunLock(runId: string): boolean {
+  const existing = getSetting(RUN_LOCK_KEY);
+  if (existing) {
+    try {
+      const parsed = JSON.parse(existing) as RunLock;
+      const age = Date.now() - new Date(parsed.acquiredAt).getTime();
+      if (age < RUN_LOCK_TTL_MS) return false;
+      // Stale lock — overwrite
+    } catch { /* corrupt lock — overwrite */ }
+  }
+  setSetting(RUN_LOCK_KEY, JSON.stringify({
+    runId, pid: process.pid, acquiredAt: new Date().toISOString()
+  } satisfies RunLock));
+  return true;
+}
+
+export function releaseRunLock(): void {
+  getDb().prepare('DELETE FROM settings WHERE key = ?').run(RUN_LOCK_KEY);
+}
+
+export function getRunLock(): RunLock | null {
+  const raw = getSetting(RUN_LOCK_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as RunLock;
+    const age = Date.now() - new Date(parsed.acquiredAt).getTime();
+    if (age >= RUN_LOCK_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+

@@ -19,6 +19,8 @@ export interface IndexingResult {
   success: boolean;
   statusCode: number;
   message?: string;
+  /** Server-suggested wait time in ms before retrying (parsed from Retry-After). */
+  retryAfterMs?: number;
 }
 
 export interface SitemapSubmitResult {
@@ -26,6 +28,15 @@ export interface SitemapSubmitResult {
   success: boolean;
   statusCode: number;
   message?: string;
+}
+
+function parseRetryAfter(headerValue: string | null): number | undefined {
+  if (!headerValue) return undefined;
+  const asInt = parseInt(headerValue, 10);
+  if (Number.isFinite(asInt) && asInt >= 0) return asInt * 1000;
+  const asDate = Date.parse(headerValue);
+  if (Number.isFinite(asDate)) return Math.max(0, asDate - Date.now());
+  return undefined;
 }
 
 // ── Indexing API ─────────────────────────────────────────────────────────────
@@ -68,7 +79,14 @@ export async function notifyGoogle(accountId: string, url: string, type: 'URL_UP
       return { url, success: true, statusCode: 200 };
     }
     if (res.status === 429) {
-      return { url, success: false, statusCode: 429, message: 'Daily quota exhausted (200 URLs/day per project).' };
+      const retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
+      return {
+        url,
+        success: false,
+        statusCode: 429,
+        message: 'Daily quota exhausted (200 URLs/day per project).',
+        retryAfterMs,
+      };
     }
     if (res.status === 401 && attempt < 3) {
       // Token may have just expired — wait briefly and let the next iteration
@@ -196,6 +214,7 @@ export interface GscInspectionResult {
   success: boolean;
   statusCode: number;
   message?: string;
+  retryAfterMs?: number;
 }
 
 /**
@@ -237,7 +256,8 @@ export async function inspectGoogleUrl(
         const body = await res.json() as { error?: { message?: string } };
         msg = body?.error?.message ?? msg;
       } catch { /* ignore */ }
-      return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: res.status, message: msg };
+      const retryAfterMs = res.status === 429 ? parseRetryAfter(res.headers.get('retry-after')) : undefined;
+      return { indexingState: 'UNKNOWN', verdict: 'FAIL', success: false, statusCode: res.status, message: msg, retryAfterMs };
     }
 
     const data = await res.json() as {

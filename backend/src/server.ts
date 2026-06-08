@@ -35,6 +35,7 @@
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import fastifyRateLimit from '@fastify/rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -53,6 +54,10 @@ import {
   getIndexNowKey,
   getAllGoogleAccounts,
   getUrlsBySite,
+  getAllQuotaUsageForDay,
+  getAllUrlFailures,
+  getRunLock,
+  getDb,
 } from './db/database.js';
 import {
   getAuthStatus,
@@ -76,6 +81,8 @@ import {
   restartScheduler,
   forceStopRun,
 } from './scheduler.js';
+import { deployGeoFiles } from './indexer/geo-deploy.js';
+import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = path.join(__dirname, '../frontend/dist');
@@ -84,30 +91,101 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 
 // ── Fastify Setup ─────────────────────────────────────────────────────────────
 
-const app = Fastify({ logger: { level: 'warn' } });
+const isDev = process.env.NODE_ENV !== 'production';
+const app = Fastify({
+  logger: isDev
+    ? {
+        level: process.env.LOG_LEVEL ?? 'info',
+        transport: {
+          target: 'pino-pretty',
+          options: { translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname,reqId' },
+        },
+      }
+    : {
+        level: process.env.LOG_LEVEL ?? 'info',
+        redact: { paths: ['req.headers.authorization', 'req.headers.cookie'], remove: true },
+      },
+});
 
 await app.register(fastifyCors, {
-  origin: true,
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+});
+
+await app.register(fastifyRateLimit, {
+  max: parseInt(process.env.RATE_LIMIT_MAX ?? '300', 10),
+  timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
+  // SSE stream is exempt — long-lived connection
+  allowList: (req) => req.url.startsWith('/api/logs/stream') || req.url === '/health' || req.url === '/api/healthz' || req.url === '/api/livez',
+});
+
+// ── CSRF-lite: require X-Requested-With on state-changing requests ────────────
+// Browsers cannot send custom headers cross-origin without a CORS preflight.
+// Combined with Same-Origin defaults this defeats the classic CSRF attack
+// vector. Webhook callbacks and the OAuth callback are exempt.
+const CSRF_EXEMPT_PATHS = new Set<string>([
+  '/api/auth/google/callback',
+]);
+app.addHook('preHandler', async (req, reply) => {
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+  if (CSRF_EXEMPT_PATHS.has(req.url.split('?')[0])) return;
+  if (!req.url.startsWith('/api/')) return;
+  // The IndexNow key file route is GET only — covered above. All other state-
+  // changing API routes must come from our own JS client.
+  const header = req.headers['x-requested-with'];
+  if (header !== 'seo-indexer-ui') {
+    return reply.status(403).send({
+      error: 'CSRF protection: missing X-Requested-With header. State-changing requests must come from the dashboard UI.',
+    });
+  }
 });
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
 app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
+// Liveness: just confirms the process is up. Used by Docker HEALTHCHECK.
+app.get('/api/livez', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+// Readiness: confirms the DB is reachable and the scheduler is responsive.
+app.get('/api/healthz', async (_req, reply) => {
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT 1 AS ok').get() as { ok: number };
+    if (row?.ok !== 1) throw new Error('DB sanity check failed');
+    const lock = getRunLock();
+    return {
+      ok: true,
+      ts: new Date().toISOString(),
+      scheduler: { running: isRunning(), currentRunId: getCurrentRunId() },
+      lock: lock ? { runId: lock.runId, acquiredAt: lock.acquiredAt } : null,
+      sites: getAllSites().length,
+      accounts: getAllGoogleAccounts().length,
+    };
+  } catch (e) {
+    reply.status(503).send({ ok: false, error: String(e) });
+  }
+});
+
 // ── Status ────────────────────────────────────────────────────────────────────
 
 app.get('/api/status', async () => {
   const auth = await getAuthStatus();
   const cronSchedule = getSetting('cron_schedule') ?? '0 3 * * *';
+  const lock = getRunLock();
   return {
     auth,
     scheduler: {
       running: isRunning(),
       currentRunId: getCurrentRunId(),
       cronSchedule,
+      lock: lock ? { runId: lock.runId, acquiredAt: lock.acquiredAt } : null,
     },
     sites: getAllSites().length,
+    accounts: getAllGoogleAccounts().length,
+    version: process.env.APP_VERSION ?? 'dev',
   };
 });
 
@@ -322,6 +400,7 @@ app.put('/api/sites/:id', async (req, reply) => {
     gsc_url: string;
     enabled: number;
     googleAccountId: string | null;
+    google_account_id: string | null;
     deploy_webhook_url: string | null;
     ftp_host: string | null;
     ftp_port: number | null;
@@ -329,22 +408,48 @@ app.put('/api/sites/:id', async (req, reply) => {
     ftp_pass: string | null;
     ftp_path: string | null;
   }>;
-  upsertSite({
-    id,
-    name: updates.name ?? existing.name,
-    domain: updates.domain ?? existing.domain,
-    sitemap_url: updates.sitemap_url ?? updates.sitemapUrl ?? existing.sitemap_url,
-    gsc_url: updates.gsc_url ?? updates.gscUrl ?? existing.gsc_url,
-    enabled: updates.enabled ?? existing.enabled,
-    google_account_id: updates.googleAccountId !== undefined ? updates.googleAccountId : existing.google_account_id,
-    deploy_webhook_url: updates.deploy_webhook_url !== undefined ? updates.deploy_webhook_url : existing.deploy_webhook_url,
-    ftp_host: updates.ftp_host !== undefined ? updates.ftp_host : existing.ftp_host,
-    ftp_port: updates.ftp_port !== undefined && updates.ftp_port !== null ? Number(updates.ftp_port) : existing.ftp_port,
-    ftp_user: updates.ftp_user !== undefined ? updates.ftp_user : existing.ftp_user,
-    ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
-    ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
-  });
-  return { ok: true };
+
+  // Accept both camelCase and snake_case for the google account id so the
+  // frontend can't accidentally drop the value due to naming mismatch.
+  const incomingAccountId =
+    updates.googleAccountId !== undefined ? updates.googleAccountId :
+    updates.google_account_id !== undefined ? updates.google_account_id :
+    undefined;
+
+  // Validate the FK target exists, otherwise the upsert would throw silently.
+  if (incomingAccountId) {
+    const accountOk = getAllGoogleAccounts().some(a => a.id === incomingAccountId);
+    if (!accountOk) {
+      return reply.status(400).send({
+        error: `Google account "${incomingAccountId}" does not exist. Reconnect the account on the Accounts page.`,
+      });
+    }
+  }
+
+  try {
+    upsertSite({
+      id,
+      name: updates.name ?? existing.name,
+      domain: updates.domain ?? existing.domain,
+      sitemap_url: updates.sitemap_url ?? updates.sitemapUrl ?? existing.sitemap_url,
+      gsc_url: updates.gsc_url ?? updates.gscUrl ?? existing.gsc_url,
+      enabled: updates.enabled ?? existing.enabled,
+      google_account_id: incomingAccountId !== undefined ? incomingAccountId : existing.google_account_id,
+      deploy_webhook_url: updates.deploy_webhook_url !== undefined ? updates.deploy_webhook_url : existing.deploy_webhook_url,
+      ftp_host: updates.ftp_host !== undefined ? updates.ftp_host : existing.ftp_host,
+      ftp_port: updates.ftp_port !== undefined && updates.ftp_port !== null ? Number(updates.ftp_port) : existing.ftp_port,
+      ftp_user: updates.ftp_user !== undefined ? updates.ftp_user : existing.ftp_user,
+      ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
+      ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
+    });
+  } catch (e) {
+    console.error(`[PUT /api/sites/${id}] upsertSite failed:`, e);
+    return reply.status(500).send({ error: `Failed to update site: ${String(e)}` });
+  }
+
+  // Return the updated site so the client can verify the persisted state.
+  const updated = getSiteById(id);
+  return { ok: true, site: updated };
 });
 
 app.delete('/api/sites/:id', async (req, reply) => {
@@ -393,6 +498,8 @@ app.post('/api/runs', async (req, reply) => {
     skipGoogle?: boolean;
     skipIndexNow?: boolean;
     skipSitemaps?: boolean;
+    gscLimit?: number;
+    googleLimit?: number;
   };
   try {
     const runId = await runIndexing({ trigger: 'manual', ...opts });
@@ -479,6 +586,85 @@ app.put('/api/settings', async (req) => {
   return { ok: true };
 });
 
+// ── Quota Usage ───────────────────────────────────────────────────────────────
+
+app.get('/api/quota/today', async (req) => {
+  const { day } = (req.query ?? {}) as { day?: string };
+  const targetDay = day ?? new Date().toISOString().slice(0, 10);
+  const rows = getAllQuotaUsageForDay(targetDay);
+
+  // Aggregate by API with helpful per-bucket detail.
+  const grouped: Record<string, { total: number; buckets: Array<{ bucket: string; count: number }> }> = {};
+  for (const row of rows) {
+    if (!grouped[row.api]) grouped[row.api] = { total: 0, buckets: [] };
+    grouped[row.api].total += row.count;
+    grouped[row.api].buckets.push({ bucket: row.bucket, count: row.count });
+  }
+
+  // Build summary limits using current configuration
+  const accounts = getAllGoogleAccounts();
+  const distinctProjects = new Set(accounts.map(a => a.client_id)).size || 1;
+  const summary = {
+    day: targetDay,
+    google_indexing: {
+      used: grouped['google_indexing']?.total ?? 0,
+      limit: 200 * distinctProjects,
+      perProjectLimit: 200,
+      projects: grouped['google_indexing']?.buckets ?? [],
+    },
+    gsc_inspection: {
+      used: grouped['gsc_inspection']?.total ?? 0,
+      perPropertyLimit: 2000,
+      properties: grouped['gsc_inspection']?.buckets ?? [],
+    },
+    indexnow: {
+      used: grouped['indexnow']?.total ?? 0,
+      perSiteLimit: 10_000,
+      sites: grouped['indexnow']?.buckets ?? [],
+    },
+  };
+  return summary;
+});
+
+app.get('/api/url-failures', async () => {
+  return getAllUrlFailures();
+});
+
+// ── Backups ───────────────────────────────────────────────────────────────────
+
+app.get('/api/backups', async () => listBackups());
+
+app.post('/api/backups', async () => {
+  const result = backupNow();
+  return { ok: true, ...result };
+});
+
+// ── Lock control (admin) ──────────────────────────────────────────────────────
+
+app.post('/api/scheduler/release-lock', async (_req, reply) => {
+  // Only allow if no run is in process memory (safety).
+  if (isRunning()) {
+    return reply.status(409).send({ error: 'A run is currently active in-process. Stop it first.' });
+  }
+  const db = getDb();
+  db.prepare(`DELETE FROM settings WHERE key = 'run_lock'`).run();
+  return { ok: true };
+});
+
+// ── GEO File Deploy (robots.txt + llms.txt) ───────────────────────────────────
+
+app.post('/api/sites/:id/deploy-geo', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const site = getSiteById(id);
+  if (!site) return reply.status(404).send({ error: 'Site not found.' });
+  try {
+    const result = await deployGeoFiles(site);
+    return { ok: true, ...result };
+  } catch (e) {
+    return reply.status(500).send({ error: String(e) });
+  }
+});
+
 // ── IndexNow Key File Route ───────────────────────────────────────────────────
 // This is the critical route that makes IndexNow verification work.
 // IndexNow calls GET https://{domain}/{key}.txt and expects to receive the
@@ -536,3 +722,6 @@ console.log(`\n🚀 SEO Website Indexer running at http://localhost:${PORT}\n`);
 
 // Start scheduled indexing
 startScheduler();
+
+// Start nightly DB backup
+startBackupScheduler();
