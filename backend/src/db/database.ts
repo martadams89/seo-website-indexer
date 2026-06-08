@@ -22,6 +22,7 @@ export function getDb(): Database.Database {
     _db.pragma('foreign_keys = ON');
     initSchema(_db);
     migrateSettingsToAccounts(_db);
+    backfillSiteAccounts(_db);
   }
   return _db;
 }
@@ -202,6 +203,50 @@ function migrateSettingsToAccounts(db: Database.Database): void {
     } catch (e) {
       console.error('Failed to run settings to google_accounts migration:', e);
     }
+  }
+}
+
+// Backfill: when a Google account exists but sites still reference NULL or a
+// non-existent account id (e.g. user added the account through the new
+// multi-account flow after creating sites, or the legacy 'default' migration
+// fired but the row was later removed), auto-link orphan sites to the
+// most-recently-created account so the UI and scheduler agree.
+function backfillSiteAccounts(db: Database.Database): void {
+  try {
+    const accountCount = (db.prepare('SELECT COUNT(*) AS c FROM google_accounts').get() as { c: number }).c;
+    if (accountCount === 0) return; // nothing to link to yet
+
+    // Pick the newest account by created_at as the default fallback. This
+    // matches the scheduler's first-account fallback semantics in spirit
+    // (single-account installs are unambiguous; multi-account ones get the
+    // most-recently-added account, and the user can re-assign per site).
+    const defaultAccount = db.prepare(
+      'SELECT id FROM google_accounts ORDER BY created_at DESC LIMIT 1'
+    ).get() as { id: string } | undefined;
+    if (!defaultAccount) return;
+
+    // Orphan = NULL OR points at a row that no longer exists.
+    const orphans = db.prepare(`
+      SELECT s.id, s.name, s.google_account_id
+      FROM sites s
+      LEFT JOIN google_accounts a ON a.id = s.google_account_id
+      WHERE s.google_account_id IS NULL OR a.id IS NULL
+    `).all() as Array<{ id: string; name: string; google_account_id: string | null }>;
+
+    if (orphans.length === 0) return;
+
+    const upd = db.prepare('UPDATE sites SET google_account_id = ? WHERE id = ?');
+    const tx = db.transaction((rows: typeof orphans) => {
+      for (const r of rows) upd.run(defaultAccount.id, r.id);
+    });
+    tx(orphans);
+
+    console.log(
+      `[migration] Linked ${orphans.length} site(s) to Google account ${defaultAccount.id}: ` +
+      orphans.map(o => `${o.name}${o.google_account_id ? ` (was stale "${o.google_account_id}")` : ''}`).join(', ')
+    );
+  } catch (e) {
+    console.error('Failed to backfill site → google_account associations:', e);
   }
 }
 

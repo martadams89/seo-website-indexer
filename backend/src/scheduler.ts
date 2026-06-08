@@ -315,6 +315,9 @@ async function _doRun(
           log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
           continue;
         }
+        if (!site.google_account_id) {
+          log(runId, 'warn', `${site.domain} — No Google Account explicitly linked; falling back to first available account. Edit the site to set this.`, site.id);
+        }
         const result = await submitSitemapToGSC(accountId, site.gsc_url, site.sitemap_url);
         if (result.success) {
           log(runId, 'ok', `${site.domain} — sitemap re-submitted to GSC due to detected content changes`, site.id);
@@ -339,7 +342,7 @@ async function _doRun(
     }
 
     // Build per-site URL queues: priority = new > changed > no-lastmod (rotation)
-    type SiteQueue = { site: Site; queue: SitemapEntry[]; pos: number };
+    type SiteQueue = { site: Site; queue: SitemapEntry[]; pos: number; fallbackWarned?: boolean };
     const queues: SiteQueue[] = [];
 
     for (const site of allSites) {
@@ -410,6 +413,10 @@ async function _doRun(
           run.total_failed += 1;
           sq.pos = sq.queue.length;
           continue;
+        }
+        if (!sq.site.google_account_id && !sq.fallbackWarned) {
+          log(runId, 'warn', `${sq.site.domain} — No Google Account explicitly linked; falling back to first available account.`, sq.site.id);
+          sq.fallbackWarned = true;
         }
 
         if (exhaustedAccounts.has(accountId)) {
@@ -645,6 +652,9 @@ async function _doRun(
       if (!accountId) {
         log(runId, 'warn', `URL Inspection skipped: No Google Account linked for site ${site.domain}.`, site.id);
         continue;
+      }
+      if (!site.google_account_id) {
+        log(runId, 'warn', `URL Inspection for ${site.domain} — No Google Account explicitly linked; falling back to first available account.`, site.id);
       }
       if (inspectExhaustedAccount.has(accountId)) {
         log(runId, 'info', `URL Inspection skipped for ${site.domain}: account ${accountId} already exhausted this run.`, site.id);
