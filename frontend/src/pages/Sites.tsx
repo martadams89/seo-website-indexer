@@ -183,8 +183,8 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
           </div>
 
           {/* Advanced Auto-Deployment Options */}
-          <details className="mt-2" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-card)' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--accent)' }}>
+          <details className="disclosure mt-2">
+            <summary>
               ⚙️ Auto-Deploy Verification Key (FTP / Webhooks)
             </summary>
             <div className="flex-col gap-3 mt-3" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -211,7 +211,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
                 <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: 12 }}>
+              <div className="ftp-user-port-grid">
                 <div className="input-group">
                   <label className="input-label">FTP Username</label>
                   <input className="input" placeholder="ftpuser" value={ftpUser} onChange={e => setFtpUser(e.target.value)} />
@@ -348,8 +348,8 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
           </div>
 
           {/* Advanced Auto-Deployment Options */}
-          <details className="mt-2" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-card)' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--accent)' }}>
+          <details className="disclosure mt-2">
+            <summary>
               ⚙️ Auto-Deploy Verification Key (FTP / Webhooks)
             </summary>
             <div className="flex-col gap-3 mt-3" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -376,7 +376,7 @@ function EditSiteModal({ site, accounts, onClose, onSaved }: { site: Site; accou
                 <input className="input" placeholder="ftp.example.com" value={ftpHost} onChange={e => setFtpHost(e.target.value)} />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: 12 }}>
+              <div className="ftp-user-port-grid">
                 <div className="input-group">
                   <label className="input-label">FTP Username</label>
                   <input className="input" placeholder="ftpuser" value={ftpUser} onChange={e => setFtpUser(e.target.value)} />
@@ -501,71 +501,21 @@ function IndexNowSetupCard({ site }: { site: Site }) {
       </div>
 
       {/* Guide Tabs */}
-      <div className="flex gap-1 mb-3 border-b pb-2" style={{ borderBottom: '1px solid var(--border)', overflowX: 'auto', whiteSpace: 'nowrap' }}>
-        <button
-          className="btn btn-sm"
-          style={{
-            background: activeTab === 'manual' ? 'var(--accent-dim)' : 'transparent',
-            color: activeTab === 'manual' ? 'var(--accent)' : 'var(--text-secondary)',
-            borderColor: activeTab === 'manual' ? 'var(--accent)' : 'transparent',
-            padding: '4px 10px',
-            fontSize: 11
-          }}
-          onClick={() => setActiveTab('manual')}
-        >
+      <div className="segmented-control mb-3" role="tablist" aria-label="Setup guide">
+        <button type="button" aria-pressed={activeTab === 'manual'} onClick={() => setActiveTab('manual')}>
           Manual Upload
         </button>
-        <button
-          className="btn btn-sm"
-          style={{
-            background: activeTab === 'autodeploy' ? 'var(--accent-dim)' : 'transparent',
-            color: activeTab === 'autodeploy' ? 'var(--accent)' : 'var(--text-secondary)',
-            borderColor: activeTab === 'autodeploy' ? 'var(--accent)' : 'transparent',
-            padding: '4px 10px',
-            fontSize: 11
-          }}
-          onClick={() => setActiveTab('autodeploy')}
-        >
-          🚀 Auto-Deploy (FTP/Webhook)
+        <button type="button" aria-pressed={activeTab === 'autodeploy'} onClick={() => setActiveTab('autodeploy')}>
+          🚀 Auto-Deploy
         </button>
-        <button
-          className="btn btn-sm"
-          style={{
-            background: activeTab === 'frameworks' ? 'var(--accent-dim)' : 'transparent',
-            color: activeTab === 'frameworks' ? 'var(--accent)' : 'var(--text-secondary)',
-            borderColor: activeTab === 'frameworks' ? 'var(--accent)' : 'transparent',
-            padding: '4px 10px',
-            fontSize: 11
-          }}
-          onClick={() => setActiveTab('frameworks')}
-        >
-          Frameworks (Next.js/Astro/WP)
+        <button type="button" aria-pressed={activeTab === 'frameworks'} onClick={() => setActiveTab('frameworks')}>
+          Frameworks
         </button>
-        <button
-          className="btn btn-sm"
-          style={{
-            background: activeTab === 'proxy' ? 'var(--accent-dim)' : 'transparent',
-            color: activeTab === 'proxy' ? 'var(--accent)' : 'var(--text-secondary)',
-            borderColor: activeTab === 'proxy' ? 'var(--accent)' : 'transparent',
-            padding: '4px 10px',
-            fontSize: 11
-          }}
-          onClick={() => setActiveTab('proxy')}
-        >
-          Nginx / Multi-Site Proxy
+        <button type="button" aria-pressed={activeTab === 'proxy'} onClick={() => setActiveTab('proxy')}>
+          Nginx / Proxy
         </button>
-        <button
-          className="btn btn-sm"
-          style={{
-            background: activeTab === 'cloudflare' ? 'var(--accent-dim)' : 'transparent',
-            color: activeTab === 'cloudflare' ? 'var(--accent)' : 'var(--text-secondary)',
-            borderColor: activeTab === 'cloudflare' ? 'var(--accent)' : 'transparent',
-            padding: '4px 10px',
-            fontSize: 11
-          }}
-          onClick={() => setActiveTab('cloudflare')}
-        >
-          Cloudflare Redirect
+        <button type="button" aria-pressed={activeTab === 'cloudflare'} onClick={() => setActiveTab('cloudflare')}>
+          Cloudflare
         </button>
       </div>
 
@@ -697,8 +647,14 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
       <div className="flex-col gap-2 mb-3" style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-input)', padding: 10, borderRadius: 6 }}>
         <div className="flex items-center justify-between">
           <span><span className="text-dim">Key Value:</span> <code className="font-mono" style={{ color: 'var(--text-code)' }}>{site.indexNowKey}</code></span>
-          <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }} onClick={copyKey}>
-            {copied ? <Check size={11} style={{ color: 'var(--ok)' }} /> : <Copy size={11} />}
+          <button
+            type="button"
+            className="btn-icon btn-icon-ghost"
+            onClick={copyKey}
+            aria-label={copied ? 'Copied' : 'Copy IndexNow key'}
+            title={copied ? 'Copied' : 'Copy key'}
+          >
+            {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
           </button>
         </div>
         <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
@@ -971,25 +927,30 @@ export default function SitesPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div className="action-row" style={{ justifyContent: 'flex-end' }}>
                   <button
-                    className="btn btn-ghost btn-sm"
+                    type="button"
+                    className="btn btn-primary btn-sm"
                     onClick={() => setExpanded(expanded === site.id ? null : site.id)}
                   >
-                    {expanded === site.id ? 'Hide Details' : 'SEO Audits & Key Setup'}
+                    {expanded === site.id ? 'Hide details' : 'SEO audits & key setup'}
                   </button>
                   <button
-                    className="btn btn-ghost btn-sm flex items-center gap-1"
+                    type="button"
+                    className="btn btn-secondary btn-sm flex items-center gap-1"
                     onClick={() => setEditingSite(site)}
                   >
-                    <Edit size={12} /> Edit
+                    <Edit size={14} /> Edit
                   </button>
                   <button
-                    className="btn btn-danger btn-sm"
+                    type="button"
+                    className="btn-icon btn-icon-danger"
                     disabled={deleting === site.id}
                     onClick={() => deleteSite(site.id)}
+                    aria-label="Delete site"
+                    title="Delete site"
                   >
-                    {deleting === site.id ? <span className="spinner" /> : <Trash2 size={12} />}
+                    {deleting === site.id ? <span className="spinner" /> : <Trash2 size={16} />}
                   </button>
                 </div>
               </div>

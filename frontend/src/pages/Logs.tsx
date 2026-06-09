@@ -200,20 +200,28 @@ export default function LogsPage() {
             onChange={e => setSearch(e.target.value)}
           />
           {search && (
-            <button className="logs-search-clear" onClick={() => setSearch('')} aria-label="Clear search">
-              <X size={12} />
+            <button
+              type="button"
+              className="logs-search-clear btn-icon btn-icon-ghost"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              style={{ width: 28, height: 28, padding: 0 }}
+            >
+              <X size={14} />
             </button>
           )}
         </div>
 
         <div className="logs-toolbar-actions">
           <button
+            type="button"
             className={`btn btn-sm ${autoScroll ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setAutoScroll(s => !s)}
             title={autoScroll ? 'Pause auto-scroll' : 'Resume auto-scroll'}
+            aria-pressed={autoScroll}
           >
-            {autoScroll ? <Pause size={12} /> : <Play size={12} />}
-            <span className="hide-mobile">{autoScroll ? 'Pause' : 'Resume'}</span>
+            {autoScroll ? <Pause size={14} /> : <Play size={14} />}
+            <span>{autoScroll ? 'Pause' : 'Resume'}</span>
           </button>
         </div>
       </div>
@@ -234,8 +242,12 @@ export default function LogsPage() {
         </div>
 
         {showJump && (
-          <button className="logs-jump-bottom btn btn-primary btn-sm" onClick={jumpToBottom}>
-            <ArrowDown size={12} /> Jump to latest
+          <button
+            type="button"
+            className="logs-jump-bottom btn btn-primary"
+            onClick={jumpToBottom}
+          >
+            <ArrowDown size={14} /> Jump to latest
           </button>
         )}
       </div>

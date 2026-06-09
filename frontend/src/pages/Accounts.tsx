@@ -138,8 +138,14 @@ export default function AccountsPage() {
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
               <code style={{ fontSize: 11, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)' }}>{redirectUri}</code>
-              <button className="btn btn-ghost btn-sm" onClick={copyRedirectUri} style={{ padding: 4 }} title="Copy Redirect URI">
-                {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
+              <button
+                type="button"
+                className="btn-icon btn-icon-ghost"
+                onClick={copyRedirectUri}
+                title="Copy Redirect URI"
+                aria-label={copied ? 'Copied redirect URI' : 'Copy redirect URI'}
+              >
+                {copied ? <Check size={16} style={{ color: 'var(--ok)' }} /> : <Copy size={16} />}
               </button>
             </div>
           </div>

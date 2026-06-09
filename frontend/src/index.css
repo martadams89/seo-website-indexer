@@ -1059,3 +1059,266 @@ body {
 .log-vlist-row.log-warn  .log-lvl { background: var(--warn-dim);  color: var(--warn); }
 .log-vlist-row.log-error .log-lvl { background: var(--error-dim); color: var(--error); }
 .log-vlist-row.log-debug .log-lvl { background: var(--bg-input);  color: var(--text-dim); }
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   MOBILE UI POLISH
+   Unified touch targets, icon buttons, styled disclosures, segmented controls,
+   responsive tables. Applied site-wide; mobile-specific tweaks are scoped to
+   the existing 768px media query at the bottom of this section.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Icon-only button (was previously missing - .btn-icon used by QuotaWidget). */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), transform var(--t-fast);
+  flex-shrink: 0;
+}
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: var(--border-bright);
+  color: var(--text-primary);
+}
+.btn-icon:active:not(:disabled) { transform: scale(0.96); }
+.btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-icon-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn-icon-ghost:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+.btn-icon-danger { color: var(--error); border-color: hsla(5, 80%, 60%, 0.3); background: var(--error-dim); }
+.btn-icon-danger:hover:not(:disabled) { background: hsla(5, 80%, 60%, 0.18); border-color: hsla(5, 80%, 60%, 0.5); color: var(--error); }
+.btn-icon-success { color: var(--ok); border-color: hsla(145, 65%, 50%, 0.3); background: var(--ok-dim); }
+
+/* Visible focus ring for keyboard accessibility on all interactive controls. */
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.hamburger:focus-visible,
+.theme-toggle:focus-visible,
+.theme-toggle-mobile:focus-visible,
+.sidebar-toggle:focus-visible,
+.disclosure summary:focus-visible,
+.segmented-control button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  border-color: var(--border-focus);
+}
+
+/* Styled disclosure (replaces ad-hoc native details/summary inline styles). */
+.disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  overflow: hidden;
+  transition: border-color var(--t-fast);
+}
+.disclosure[open] { border-color: var(--border-bright); }
+.disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  transition: background var(--t-fast);
+}
+.disclosure > summary:hover { background: var(--bg-card-hover); }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::after {
+  content: '';
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--t-med);
+  flex-shrink: 0;
+}
+.disclosure[open] > summary::after { transform: rotate(-135deg) translateY(2px); }
+.disclosure > summary > .disclosure-label-text { flex: 1; min-width: 0; }
+.disclosure-body {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Segmented control: replaces the tiny tab strip in Sites.tsx setup guide. */
+.segmented-control {
+  display: inline-flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.segmented-control::-webkit-scrollbar { display: none; }
+.segmented-control button {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius-md) - 4px);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  min-height: 38px;
+}
+.segmented-control button:hover:not([aria-pressed="true"]) {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+.segmented-control button[aria-pressed="true"] {
+  background: var(--bg-card);
+  color: var(--accent);
+  box-shadow: 0 1px 2px hsla(225, 30%, 0%, 0.3);
+}
+
+/* Responsive table that turns into stacked cards on narrow screens. */
+.mobile-card-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.mobile-card-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+.mobile-card-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+
+/* Stronger action-row stacking on Sites.tsx and similar. */
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.action-row .btn { min-height: 36px; }
+.action-row .btn-primary { flex: 1 1 auto; }
+
+/* FTP two-column row used inside the auto-deploy disclosure; collapses on mobile. */
+.ftp-user-port-grid {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 540px) {
+  .ftp-user-port-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Mobile (≤768px) refinements layered on top of the existing rules ── */
+@media (max-width: 768px) {
+  /* Touch-target floor for primary controls. */
+  .hamburger,
+  .theme-toggle-mobile,
+  .btn-icon {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  /* Buttons that remain visible on mobile must be at least 40px tall. */
+  .btn { min-height: 40px; padding: 10px 16px; font-size: 13px; }
+  .btn-sm { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+  .btn-lg { min-height: 48px; padding: 13px 22px; font-size: 14px; }
+
+  /* Stack action rows so primary CTA is full-width. */
+  .action-row .btn { flex: 1 1 auto; min-width: 0; justify-content: center; }
+  .action-row .btn.btn-primary { flex: 1 1 100%; order: -1; }
+
+  /* Logs filter pills inherit the new touch sizing. */
+  .logs-filter-pill { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+
+  /* Logs jump-to-bottom CTA — bigger and easier to tap. */
+  .logs-jump-bottom { min-height: 40px; padding: 8px 14px; font-size: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+
+  /* Keep the Pause/Resume label visible on mobile, just shorter. */
+  .logs-toolbar-actions .btn .hide-mobile { display: inline !important; }
+
+  /* Disclosures get more breathing room. */
+  .disclosure > summary { padding: 14px 16px; font-size: 13.5px; }
+  .disclosure-body { padding: 14px 16px 16px; gap: 14px; }
+
+  /* Convert standard tables to stacked cards when they have data-mobile-cards. */
+  table[data-mobile-cards] thead { display: none; }
+  table[data-mobile-cards],
+  table[data-mobile-cards] tbody,
+  table[data-mobile-cards] tr,
+  table[data-mobile-cards] td {
+    display: block;
+    width: 100%;
+  }
+  table[data-mobile-cards] tr {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+    padding: 4px 0;
+  }
+  table[data-mobile-cards] td {
+    border-bottom: 1px dashed var(--border);
+    padding: 8px 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    word-break: break-word;
+  }
+  table[data-mobile-cards] td:last-child { border-bottom: none; }
+  table[data-mobile-cards] td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+    min-width: 90px;
+  }
+
+  /* Stat-grid breathing room at very narrow widths. */
+  .grid-4 { grid-template-columns: 1fr 1fr !important; gap: 10px; }
+}
+
+@media (max-width: 420px) {
+  .grid-4 { grid-template-columns: 1fr !important; }
+  .stat-value { font-size: 24px; }
+}
+
