@@ -500,9 +500,23 @@ export function getGoogleAccountByEmail(email: string): GoogleAccount | null {
 }
 
 export function upsertGoogleAccount(acc: GoogleAccount): void {
+  // IMPORTANT: use a real UPSERT, not INSERT OR REPLACE.
+  // INSERT OR REPLACE deletes the existing row and inserts a new one, which —
+  // with `PRAGMA foreign_keys = ON` and `sites.google_account_id ... ON DELETE
+  // SET NULL` — cascades and unlinks EVERY site from this account. Because a
+  // token refresh upserts the account roughly hourly, that silently nulled out
+  // site→account links a few hours after connecting. ON CONFLICT...DO UPDATE
+  // mutates the row in place, so the foreign key (and the site links) survive.
   getDb().prepare(`
-    INSERT OR REPLACE INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry)
+    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry)
     VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry)
+    ON CONFLICT(id) DO UPDATE SET
+      email         = excluded.email,
+      client_id     = excluded.client_id,
+      client_secret = excluded.client_secret,
+      access_token  = excluded.access_token,
+      refresh_token = excluded.refresh_token,
+      token_expiry  = excluded.token_expiry
   `).run(acc);
 }
 
