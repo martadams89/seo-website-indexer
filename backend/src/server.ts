@@ -497,6 +497,7 @@ app.post('/api/runs', async (req, reply) => {
     siteIds?: string[];
     skipGoogle?: boolean;
     skipIndexNow?: boolean;
+    skipBing?: boolean;
     skipSitemaps?: boolean;
     gscLimit?: number;
     googleLimit?: number;
@@ -564,12 +565,21 @@ app.get('/api/logs/stream', async (req, reply) => {
 
 // Keys that are safe to expose to the frontend (exclude sensitive auth tokens)
 const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id'];
+// Secrets: writable via PUT, but never returned in plaintext by GET.
+const SECRET_SETTINGS = ['bing_api_key'];
+const SECRET_MASK = '********';
 
 app.get('/api/settings', async () => {
   const all = getAllSettings();
-  return Object.fromEntries(
-    Object.entries(all).filter(([k]) => PUBLIC_SETTINGS.includes(k))
-  );
+  const out: Record<string, string | boolean> = {};
+  for (const [k, v] of Object.entries(all)) {
+    if (PUBLIC_SETTINGS.includes(k)) out[k] = v;
+  }
+  // Expose only whether each secret is configured (e.g. bing_api_key_set: true).
+  for (const k of SECRET_SETTINGS) {
+    out[`${k}_set`] = !!(all[k] && String(all[k]).trim());
+  }
+  return out;
 });
 
 app.put('/api/settings', async (req) => {
@@ -577,6 +587,13 @@ app.put('/api/settings', async (req) => {
   for (const key of PUBLIC_SETTINGS) {
     if (body[key] !== undefined) {
       setSetting(key, String(body[key]));
+    }
+  }
+  for (const key of SECRET_SETTINGS) {
+    if (body[key] !== undefined) {
+      const value = String(body[key]).trim();
+      if (value === SECRET_MASK) continue; // unchanged placeholder — ignore
+      setSetting(key, value);              // empty string clears the secret
     }
   }
   // If cron changed, restart scheduler

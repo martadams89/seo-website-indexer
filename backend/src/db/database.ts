@@ -165,6 +165,12 @@ function initSchema(db: Database.Database): void {
   if (!urlCols.some(c => c.name === 'schema_types')) {
     db.exec("ALTER TABLE url_state ADD COLUMN schema_types TEXT;");
   }
+  // URLs discovered via robots.txt secondary sitemaps that are not indexable
+  // HTML pages (e.g. llms.txt). Submitted to IndexNow only — never to the
+  // Google Indexing API, GSC sitemap submission, or URL Inspection.
+  if (!urlCols.some(c => c.name === 'indexnow_only')) {
+    db.exec("ALTER TABLE url_state ADD COLUMN indexnow_only INTEGER DEFAULT 0;");
+  }
 }
 
 function migrateSettingsToAccounts(db: Database.Database): void {
@@ -356,6 +362,8 @@ export interface UrlState {
   gsc_last_inspected?: string | null;
   has_schema?: number | null;
   schema_types?: string | null;
+  /** 1 = IndexNow-only (non-HTML, e.g. llms.txt); excluded from Google + inspection. */
+  indexnow_only?: number | null;
 }
 
 export function getUrlState(url: string, siteId: string): UrlState | null {
@@ -367,14 +375,15 @@ export function upsertUrlState(state: Partial<UrlState> & { url: string; site_id
   const existing = getUrlState(state.url, state.site_id);
   if (!existing) {
     db.prepare(`
-      INSERT INTO url_state(url, site_id, last_submitted, last_seen_lastmod, submission_count, google_submitted, indexnow_submitted)
-      VALUES(@url, @site_id, @last_submitted, @last_seen_lastmod, @submission_count, @google_submitted, @indexnow_submitted)
+      INSERT INTO url_state(url, site_id, last_submitted, last_seen_lastmod, submission_count, google_submitted, indexnow_submitted, indexnow_only)
+      VALUES(@url, @site_id, @last_submitted, @last_seen_lastmod, @submission_count, @google_submitted, @indexnow_submitted, @indexnow_only)
     `).run({
       last_submitted: null,
       last_seen_lastmod: null,
       submission_count: 0,
       google_submitted: 0,
       indexnow_submitted: 0,
+      indexnow_only: 0,
       ...state
     });
   } else {
