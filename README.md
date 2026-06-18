@@ -1,7 +1,7 @@
 # SEO Website Indexer
 
-Self-hosted Docker container for Google Search Console + IndexNow SEO indexing automation.  
-Works with **any number of sites** — add them all to the dashboard and it handles everything.
+Self-hosted Docker container for Google Search Console + Bing Webmaster + IndexNow SEO indexing automation.  
+Works with **any number of sites** — add them all to the dashboard and it handles everything. Runs on a daily cron and only pushes pages that actually changed.
 
 [![Docker](https://img.shields.io/badge/ghcr.io-martadams89%2Fseo--website--indexer-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -13,6 +13,9 @@ Works with **any number of sites** — add them all to the dashboard and it hand
 - **Google Indexing API** — notify Google of URL changes (200 URLs/day per Google Cloud project)
 - **Google Search Console** — automatic sitemap submission per site
 - **IndexNow** — instantly alert Bing, Yandex, Yahoo, and other participating engines (all via one API call)
+- **Bing Webmaster URL Submission** — direct, quota-aware submission of changed pages into your verified Bing Webmaster property (complements IndexNow; opt-in with a Bing API key)
+- **robots.txt sitemap auto-discovery** — automatically finds every `Sitemap:` declared in `robots.txt` (not just the one you configured), so secondary sitemaps like `llms-sitemap.xml` are covered with zero extra setup
+- **GEO-aware routing** — non-HTML URLs (e.g. `llms.txt`, `llms-full.txt`) are pushed to **IndexNow only** (so Bing/AI answer engines re-crawl them) and deliberately kept out of the Google Indexing API + Search Console, where they'd just be noise
 - **Google URL Inspection API** — daily automated verification of indexing status, mobile usability, and actual search crawl time logs for sitemapped pages
 - **AI & Crawler GEO Audits** — automated rules auditing for key AI bots (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) in `robots.txt` + `llms.txt` existence validation
 - **Semantic JSON-LD Structured Schema Auditing** — extracts and catalogs page schemas (`SoftwareApplication`, `LocalBusiness`, etc.) during sitemap crawls
@@ -317,6 +320,49 @@ After placing the key file, go to **Sites → your site → IndexNow Setup → V
 The dashboard will fetch the URL and confirm the content matches. If it fails, it shows exactly what went wrong.
 
 **Once verified, IndexNow submissions will succeed automatically on every subsequent run.** You don't need to re-verify unless you delete and regenerate the key.
+
+---
+
+## Bing Webmaster URL Submission
+
+IndexNow already notifies Bing (it's Bing's own protocol), so for most people **IndexNow is enough**. Enable this *additional* direct channel if you want submissions to land straight in your verified Bing Webmaster property and want the tool to report your remaining Bing quota.
+
+**One-time setup:**
+
+1. Verify each site in [Bing Webmaster Tools](https://www.bing.com/webmasters) — the fastest way is **Import from Google Search Console**.
+2. In Bing Webmaster, open **Settings → API access → API Key** and generate a key. One key covers every site verified under that Bing account.
+3. In this tool, go to **Settings → Bing API key**, paste it, and save. (Stored encrypted-at-rest in SQLite; the API never returns it in plaintext.)
+
+That's it. On each run, the scheduler submits **new and changed HTML pages** to Bing via `SubmitUrlBatch`, batched at 500/call, and respects your live daily quota (`GetUrlSubmissionQuota`). `llms.txt` and other non-HTML URLs are **not** sent here — they go via IndexNow.
+
+> Set it via the API instead of the UI:
+> ```bash
+> curl -X PUT http://localhost:3000/api/settings \
+>   -H 'Content-Type: application/json' \
+>   -d '{"bing_api_key":"YOUR_BING_KEY"}'
+> ```
+
+To skip Bing for a single manual run, POST `/api/runs` with `{"skipBing": true}`.
+
+---
+
+## How `llms-sitemap.xml` is handled (GEO)
+
+You don't have to configure anything. On every run the indexer reads each site's `robots.txt`, collects **all** declared `Sitemap:` URLs, and merges them with the sitemap you configured. So if your `robots.txt` has:
+
+```
+Sitemap: https://example.com/sitemap.xml
+Sitemap: https://example.com/llms-sitemap.xml
+```
+
+…both are crawled. URLs are then routed by type:
+
+| URL type | Google Indexing API | GSC sitemap | Bing Webmaster | IndexNow |
+|----------|:---:|:---:|:---:|:---:|
+| HTML pages | ✅ | ✅ | ✅ | ✅ |
+| `llms.txt`, `llms-full.txt`, other non-HTML | ❌ | ❌ | ❌ | ✅ |
+
+Non-HTML files are intentionally kept out of Google/Bing search submission (they aren't indexable pages and would just create "Excluded" noise), but **are** pushed to IndexNow so Bing and AI answer engines re-crawl your latest AI index. Their change-state is tracked the same way as pages, so they're only re-submitted when their `<lastmod>` changes.
 
 ---
 
