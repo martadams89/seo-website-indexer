@@ -52,6 +52,19 @@ export default function SettingsPage() {
     setSaving(false);
   }
 
+  async function saveBing() {
+    setBingSaving(true);
+    setBingSaved(false);
+    try {
+      await api.updateSettings({ bing_api_key: bingKey.trim() });
+      setBingConfigured(bingKey.trim().length > 0);
+      setBingKey('');
+      setBingSaved(true);
+      setTimeout(() => setBingSaved(false), 3000);
+    } catch { /* ignore */ }
+    setBingSaving(false);
+  }
+
   async function clearAuth() {
     if (!confirm('Clear all Google authentication credentials? You will need to re-authenticate.')) return;
     setClearLoading(true);
@@ -152,6 +165,51 @@ export default function SettingsPage() {
               {clearLoading ? <><span className="spinner" /> Clearing…</> : <><LogOut size={12} /> Clear Credentials</>}
             </button>
           )}
+        </div>
+      </div>
+
+      {/* ── Bing Webmaster ── */}
+      <div className="card mb-4">
+        <div className="card-title">Bing Webmaster URL Submission</div>
+
+        <div className="flex items-center gap-3 mb-3">
+          <div style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: bingConfigured ? 'var(--ok)' : 'var(--text-dim)',
+            boxShadow: bingConfigured ? '0 0 8px var(--ok)' : 'none',
+          }} />
+          <span style={{ fontWeight: 600, color: bingConfigured ? 'var(--ok)' : 'var(--text-secondary)' }}>
+            {bingConfigured ? 'API key configured' : 'Not configured (optional)'}
+          </span>
+        </div>
+
+        <div className="alert alert-info mb-3">
+          <div className="alert-content" style={{ fontSize: 12 }}>
+            IndexNow already notifies Bing, so this is <strong>optional</strong>. Add a Bing Webmaster API key to also
+            submit changed pages directly into your verified Bing property and surface your daily Bing quota.
+            Get a key from <a href="https://www.bing.com/webmasters" target="_blank" rel="noopener noreferrer">Bing Webmaster Tools</a> → <strong>Settings → API access</strong>. One key covers all your verified sites.
+          </div>
+        </div>
+
+        <div className="input-group mb-3">
+          <label className="input-label">Bing API Key</label>
+          <input
+            className="input"
+            type="password"
+            style={{ fontFamily: 'JetBrains Mono' }}
+            value={bingKey}
+            onChange={e => setBingKey(e.target.value)}
+            placeholder={bingConfigured ? '•••••••• (leave blank to keep current)' : 'Paste your Bing Webmaster API key'}
+            autoComplete="off"
+          />
+          <span className="input-hint">Stored server-side; never returned in plaintext. Submit an empty value to clear it.</span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button className="btn btn-primary" disabled={bingSaving || (!bingKey && !bingConfigured)} onClick={saveBing}>
+            {bingSaving ? <><span className="spinner" /> Saving…</> : bingSaved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save Bing Key</>}
+          </button>
+          {bingSaved && <span className="text-ok text-sm">Bing settings updated.</span>}
         </div>
       </div>
 

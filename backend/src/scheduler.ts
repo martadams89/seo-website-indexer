@@ -42,9 +42,10 @@ import {
   type UrlState,
 } from './db/database.js';
 import { emitLog, subscribeToLogs } from './utils/logger.js';
-import { fetchSitemap, filterChangedEntries, type SitemapEntry } from './indexer/sitemap.js';
+import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry } from './indexer/sitemap.js';
 import { notifyGoogle, submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
+import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexer/bing.js';
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
@@ -123,6 +124,8 @@ export interface RunOptions {
   skipGoogle?: boolean;
   /** Skip IndexNow */
   skipIndexNow?: boolean;
+  /** Skip Bing Webmaster URL submission */
+  skipBing?: boolean;
   /** Skip GSC sitemap submission */
   skipSitemaps?: boolean;
   /** Override per-property URL Inspection daily limit for this run */
@@ -201,6 +204,10 @@ async function _doRun(
     changed: SitemapEntry[];
     newUrls: SitemapEntry[];
     noLastmod: SitemapEntry[];
+    /** Non-HTML URLs (e.g. llms.txt) from robots.txt secondary sitemaps — IndexNow only. */
+    extraChanged: SitemapEntry[];
+    extraNewUrls: SitemapEntry[];
+    extraNoLastmod: SitemapEntry[];
     error?: string;
   };
 
@@ -209,28 +216,48 @@ async function _doRun(
   await Promise.all(allSites.map(async (site) => {
     if (_stopRequested) return;
     try {
-      const entries = await fetchSitemap(site.sitemap_url);
-      log(runId, 'info', `${site.domain} — fetched ${entries.length} URLs from sitemap`, site.id);
+      // Fetch the primary sitemap PLUS any sitemaps declared in robots.txt
+      // (e.g. llms-sitemap.xml). Partition into indexable HTML pages and
+      // non-HTML URLs (llms.txt, feeds…) which are routed to IndexNow only.
+      const { entries: allEntries, sitemapsUsed } = await fetchAllSitemaps(site.sitemap_url, site.domain);
+      const htmlEntries = allEntries.filter(e => !isNonHtmlUrl(e.url));
+      const nonHtmlEntries = allEntries.filter(e => isNonHtmlUrl(e.url));
+      log(runId, 'info',
+        `${site.domain} — fetched ${allEntries.length} URLs from ${sitemapsUsed.length} sitemap(s): ${htmlEntries.length} pages, ${nonHtmlEntries.length} non-HTML (IndexNow only)`,
+        site.id
+      );
 
-      // Build map of known lastmods from DB
+      // Build map of known lastmods from DB (HTML pages)
       const knownLastmods = new Map<string, string | null>();
-      for (const entry of entries) {
+      for (const entry of htmlEntries) {
         const state = getUrlState(entry.url, site.id);
         if (state) knownLastmods.set(entry.url, state.last_seen_lastmod);
       }
 
-      const { changed, unchanged, newUrls } = filterChangedEntries(entries, knownLastmods);
-      const noLastmod = entries.filter(e => !e.lastmod);
+      const { changed, unchanged, newUrls } = filterChangedEntries(htmlEntries, knownLastmods);
+      const noLastmod = htmlEntries.filter(e => !e.lastmod);
+
+      // Change-detect the non-HTML (IndexNow-only) URLs separately.
+      const knownExtra = new Map<string, string | null>();
+      for (const entry of nonHtmlEntries) {
+        const state = getUrlState(entry.url, site.id);
+        if (state) knownExtra.set(entry.url, state.last_seen_lastmod);
+      }
+      const extraDiff = filterChangedEntries(nonHtmlEntries, knownExtra);
+      const extraChanged = extraDiff.changed;
+      const extraNewUrls = extraDiff.newUrls;
+      const extraNoLastmod = nonHtmlEntries.filter(e => !e.lastmod);
 
       // Increment skipped statistics
       run.total_skipped += unchanged.length;
 
       log(runId, 'info',
-        `${site.domain} — ${newUrls.length} new, ${changed.length} changed, ${unchanged.length} unchanged, ${noLastmod.length} no-lastmod`,
+        `${site.domain} — ${newUrls.length} new, ${changed.length} changed, ${unchanged.length} unchanged, ${noLastmod.length} no-lastmod` +
+        (nonHtmlEntries.length ? ` | non-HTML: ${extraNewUrls.length} new, ${extraChanged.length} changed` : ''),
         site.id
       );
 
-      if (noLastmod.length > 0 && noLastmod.length === entries.length) {
+      if (noLastmod.length > 0 && noLastmod.length === htmlEntries.length) {
         log(runId, 'warn',
           `${site.domain} — sitemap has no <lastmod> tags. Add lastmod to your sitemap for smarter change detection. All URLs will be submitted on rotation.`,
           site.id
@@ -258,7 +285,7 @@ async function _doRun(
 
       // Audit JSON-LD schemas for new, modified, or never-audited pages
       const allUrlStates = getUrlsBySite(site.id);
-      const neverAudited = entries.filter(e => {
+      const neverAudited = htmlEntries.filter(e => {
         const state = allUrlStates.find(s => s.url === e.url);
         return state && state.has_schema === null;
       });
@@ -289,10 +316,10 @@ async function _doRun(
         }
       }
 
-      siteDataMap.set(site.id, { site, changed, newUrls, noLastmod });
+      siteDataMap.set(site.id, { site, changed, newUrls, noLastmod, extraChanged, extraNewUrls, extraNoLastmod });
     } catch (e) {
       log(runId, 'error', `${site.domain} — failed to fetch sitemap: ${String(e)}`, site.id);
-      siteDataMap.set(site.id, { site, changed: [], newUrls: [], noLastmod: [], error: String(e) });
+      siteDataMap.set(site.id, { site, changed: [], newUrls: [], noLastmod: [], extraChanged: [], extraNewUrls: [], extraNoLastmod: [], error: String(e) });
     }
   }));
 
@@ -532,16 +559,29 @@ async function _doRun(
         return tb - ta; // newest first; 0 (missing) sorts last
       };
 
+      // Set of all non-HTML (llms.txt etc.) URLs for this site, so we can flag
+      // them as indexnow_only when we persist their state after submission.
+      const extraUrlSet = new Set<string>([
+        ...data.extraNewUrls.map(e => e.url),
+        ...data.extraChanged.map(e => e.url),
+        ...data.extraNoLastmod.map(e => e.url),
+      ]);
+
+      // Priority targets: new + changed HTML pages, then new + changed non-HTML
+      // (llms.txt) URLs discovered via robots.txt.
       const prioritised = [
         ...[...data.newUrls].sort(byRecentLastmod),
         ...[...data.changed].sort(byRecentLastmod),
+        ...[...data.extraNewUrls].sort(byRecentLastmod),
+        ...[...data.extraChanged].sort(byRecentLastmod),
       ].map(e => e.url);
 
       let indexNowUrls = prioritised;
 
-      if (data.noLastmod.length > 0 && indexNowUrls.length === 0) {
+      const allNoLastmod = [...data.noLastmod, ...data.extraNoLastmod];
+      if (allNoLastmod.length > 0 && indexNowUrls.length === 0) {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const rollingBatch = data.noLastmod
+        const rollingBatch = allNoLastmod
           .filter(e => {
             const state = getUrlState(e.url, site.id);
             if (!state) return true; // never submitted
@@ -603,14 +643,18 @@ async function _doRun(
           log(runId, 'ok', `IndexNow ✓ ${site.domain} — ${r.urlCount} URLs accepted${r.statusCode === 202 ? ' (queued, key verification pending)' : ''}`, site.id);
           for (const url of batchUrls) {
             clearUrlFailure(url, site.id, 'indexnow');
+            const isExtra = extraUrlSet.has(url);
             upsertUrlState({
               url,
               site_id: site.id,
               last_submitted: new Date().toISOString(),
               last_seen_lastmod: data.changed.find(e => e.url === url)?.lastmod
                 ?? data.newUrls.find(e => e.url === url)?.lastmod
+                ?? data.extraChanged.find(e => e.url === url)?.lastmod
+                ?? data.extraNewUrls.find(e => e.url === url)?.lastmod
                 ?? null,
               indexnow_submitted: 1,
+              indexnow_only: isExtra ? 1 : 0,
             });
           }
         } else {
@@ -629,6 +673,69 @@ async function _doRun(
               `See the Sites page in the dashboard for setup instructions.`,
               site.id
             );
+          }
+        }
+      }
+    }
+  }
+
+  // ── Step 4b: Bing Webmaster URL Submission (direct; complements IndexNow) ──
+
+  if (!options.skipBing) {
+    const bingApiKey = (getSetting('bing_api_key') ?? '').trim();
+    if (!bingApiKey) {
+      log(runId, 'dim', 'Bing Webmaster URL submission skipped — no API key set (Settings → Bing API key).');
+    } else {
+      log(runId, 'info', '── Step 4b: Bing Webmaster URL Submission ──');
+      const BING_DAILY_LIMIT_FALLBACK = 100; // used only if the live quota lookup fails
+
+      for (const site of allSites) {
+        if (_stopRequested) break;
+        const data = siteDataMap.get(site.id);
+        if (!data || data.error) continue;
+
+        // HTML pages only (new + changed). Non-HTML/llms.txt goes via IndexNow.
+        const bingUrls = [...data.newUrls, ...data.changed].map(e => e.url);
+        if (bingUrls.length === 0) {
+          log(runId, 'info', `${site.domain} — no changed pages to submit to Bing`, site.id);
+          continue;
+        }
+
+        const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
+
+        // Respect Bing's daily quota: prefer the live quota, else a local counter.
+        const usedToday = getQuotaUsage('bing_submission', `site:${site.id}`);
+        const quota = await getBingQuota(bingApiKey, siteUrl);
+        const dailyAllowance = quota?.dailyQuota ?? Math.max(0, BING_DAILY_LIMIT_FALLBACK - usedToday);
+        if (dailyAllowance <= 0) {
+          log(runId, 'warn', `${site.domain} — Bing daily quota exhausted${quota ? '' : ` (local counter ${usedToday}/${BING_DAILY_LIMIT_FALLBACK})`}. Skipping.`, site.id);
+          continue;
+        }
+
+        let toSubmit = bingUrls;
+        if (toSubmit.length > dailyAllowance) {
+          log(runId, 'warn', `${site.domain} — capping Bing submission at ${dailyAllowance} URLs (daily quota; had ${toSubmit.length}).`, site.id);
+          toSubmit = toSubmit.slice(0, dailyAllowance);
+        }
+
+        log(runId, 'info', `${site.domain} — submitting ${toSubmit.length} URLs to Bing (siteUrl: ${siteUrl}${quota ? `, quota: ${quota.dailyQuota}/day left` : ''})`, site.id);
+
+        const results = await submitToBingInBatches(bingApiKey, siteUrl, toSubmit);
+        let cursor = 0;
+        for (const r of results) {
+          if (_stopRequested) break;
+          const batchUrls = toSubmit.slice(cursor, cursor + r.urlCount);
+          cursor += r.urlCount;
+          if (r.success) {
+            run.total_submitted += r.urlCount;
+            incrementQuota('bing_submission', `site:${site.id}`, r.urlCount);
+            for (const url of batchUrls) clearUrlFailure(url, site.id, 'bing_submission');
+            log(runId, 'ok', `Bing ✓ ${site.domain} — ${r.urlCount} URLs accepted`, site.id);
+          } else {
+            run.total_failed++;
+            for (const url of batchUrls) recordUrlFailure(url, site.id, 'bing_submission');
+            log(runId, r.quotaExceeded ? 'warn' : 'error', `Bing ✗ ${site.domain} — ${r.message}`, site.id);
+            if (r.quotaExceeded) break;
           }
         }
       }
@@ -663,7 +770,8 @@ async function _doRun(
         continue;
       }
 
-      const urlStates = getUrlsBySite(site.id);
+      // Exclude IndexNow-only URLs (llms.txt etc.) — they aren't indexable pages.
+      const urlStates = getUrlsBySite(site.id).filter(s => s.indexnow_only !== 1);
       if (urlStates.length === 0) continue;
 
       // Per-property persistent quota — never exceed it across runs in the same day.

@@ -93,6 +93,68 @@ export async function fetchSitemap(sitemapUrl: string): Promise<SitemapEntry[]> 
 }
 
 /**
+ * Discovers every sitemap a site declares in its robots.txt (`Sitemap:` lines).
+ * This is how we pick up secondary sitemaps that are NOT referenced from the
+ * primary sitemap — most importantly an `llms-sitemap.xml` (which lists
+ * `llms.txt` / `llms-full.txt`). Returns absolute URLs, deduped. Never throws.
+ */
+export async function discoverSitemapsFromRobots(domain: string): Promise<string[]> {
+  let host = domain;
+  if (host.includes('://')) host = host.split('://')[1];
+  if (host.includes('/')) host = host.split('/')[0];
+  try {
+    const body = await fetchUrl(`https://${host}/robots.txt`);
+    const urls = [...body.matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim)].map(m => m[1].trim());
+    return [...new Set(urls)].filter(u => /^https?:\/\//i.test(u));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * True for URLs that are not crawlable HTML pages — `llms.txt`, sitemaps,
+ * feeds, data files, assets. These are useful to push to IndexNow (so AI
+ * answer engines re-crawl them) but should NOT be sent to the Google Indexing
+ * API or Search Console (they aren't indexable pages and just create noise).
+ */
+export function isNonHtmlUrl(url: string): boolean {
+  return /\.(txt|xml|json|pdf|rss|atom|csv|md|webmanifest|ya?ml)(?:$|[?#])/i.test(url);
+}
+
+/**
+ * Fetches the primary sitemap plus any sitemaps declared in robots.txt, and
+ * returns the merged, de-duplicated set of URL entries. Secondary sitemaps that
+ * fail to load are skipped. The primary sitemap's entry wins on duplicate URLs.
+ */
+export async function fetchAllSitemaps(
+  primarySitemapUrl: string,
+  domain: string
+): Promise<{ entries: SitemapEntry[]; sitemapsUsed: string[] }> {
+  const seen = new Map<string, SitemapEntry>();
+  const sitemapsUsed: string[] = [];
+
+  // Primary first so it wins on duplicates.
+  const primaryEntries = await fetchSitemap(primarySitemapUrl);
+  sitemapsUsed.push(primarySitemapUrl);
+  for (const e of primaryEntries) if (!seen.has(e.url)) seen.set(e.url, e);
+
+  const discovered = await discoverSitemapsFromRobots(domain);
+  const normalize = (u: string) => u.replace(/\/+$/, '');
+  for (const sm of discovered) {
+    if (normalize(sm) === normalize(primarySitemapUrl)) continue; // already fetched
+    try {
+      const extra = await fetchSitemap(sm);
+      sitemapsUsed.push(sm);
+      for (const e of extra) if (!seen.has(e.url)) seen.set(e.url, e);
+    } catch {
+      // Skip inaccessible secondary sitemaps (e.g. a robots Sitemap: line 404s).
+    }
+  }
+
+  return { entries: [...seen.values()], sitemapsUsed };
+}
+
+/**
  * Returns entries that are new or have changed lastmod since we last saw them.
  * If an entry has no lastmod, it is always considered changed (will use rotation fallback).
  */

@@ -506,6 +506,7 @@ app.post('/api/runs', async (req, reply) => {
     siteIds?: string[];
     skipGoogle?: boolean;
     skipIndexNow?: boolean;
+    skipBing?: boolean;
     skipSitemaps?: boolean;
     gscLimit?: number;
     googleLimit?: number;
@@ -597,6 +598,13 @@ app.put('/api/settings', async (req) => {
   for (const key of [...PUBLIC_SETTINGS, ...SECRET_SETTINGS]) {
     if (body[key] !== undefined) {
       setSetting(key, String(body[key]));
+    }
+  }
+  for (const key of SECRET_SETTINGS) {
+    if (body[key] !== undefined) {
+      const value = String(body[key]).trim();
+      if (value === SECRET_MASK) continue; // unchanged placeholder — ignore
+      setSetting(key, value);              // empty string clears the secret
     }
   }
   // If cron changed, restart scheduler
