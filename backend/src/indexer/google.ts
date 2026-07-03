@@ -63,6 +63,7 @@ export async function notifyGoogle(accountId: string, url: string, type: 'URL_UP
     let res: Response;
     try {
       res = await fetch(INDEXING_ENDPOINT, {
+        signal: AbortSignal.timeout(30_000),
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -137,6 +138,7 @@ export async function submitSitemapToGSC(accountId: string, gscUrl: string, site
   let res: Response;
   try {
     res = await fetch(endpoint, {
+      signal: AbortSignal.timeout(30_000),
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -169,6 +171,7 @@ export async function listGSCSitemaps(accountId: string, gscUrl: string): Promis
   const siteEnc = encodeURIComponent(gscUrl);
 
   const res = await fetch(`${GSC_BASE}/sites/${siteEnc}/sitemaps`, {
+    signal: AbortSignal.timeout(30_000),
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -188,6 +191,7 @@ export async function listGSCSites(accountId: string): Promise<Array<{ siteUrl: 
   const token = await getAccessTokenForAccount(accountId);
 
   const res = await fetch(`${GSC_BASE}/sites`, {
+    signal: AbortSignal.timeout(30_000),
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -242,6 +246,7 @@ export async function inspectGoogleUrl(
 
   try {
     const res = await fetch(endpoint, {
+      signal: AbortSignal.timeout(30_000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,

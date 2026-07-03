@@ -25,6 +25,15 @@ Works with **any number of sites** — add them all to the dashboard and it hand
 - **lastmod change detection** — fetches your live sitemap and only queues URLs whose `<lastmod>` has changed since the last run
 - **SQLite persistence** — URL state, submission history, and credentials survive container restarts
 - **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
+- **Analytics engine** — daily per-site rollups with a portfolio dashboard: coverage funnel (sitemap → submitted → indexed), 60-day trends, GSC indexing-state breakdown, and day-over-day regression **alerts** (index drops, structured-data loss)
+- **Freshness radar** — every page whose sitemap `lastmod` moved *after* Google's last crawl, surfaced as a resubmission worklist
+- **AI citation tracking (GEO)** — run tracked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search** and record whether the answers cite your domains; per-prompt × provider matrix with answer excerpts. Providers are optional — add whichever keys you have
+- **One-click Gemini key** — provisions a service-restricted Gemini API key on *your* Google Cloud project using the already-linked account; no console visit, no copy-paste, free tier
+- **Bing Webmaster API** — URL batch submission + quota on Bing's own (separate) submission allowance, alongside IndexNow
+- **llms.txt lifecycle** — live-fetch, structural lint, drift detection against the generated file, and one-click deploy (webhook/FTP)
+- **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
+- **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
+- **Notifications** — run summaries and alerts to Slack, Discord, ntfy or any generic webhook
 - **Single container** — no external database, no Redis, no separate workers
 
 ---
@@ -53,6 +62,8 @@ Then open **http://localhost:3000** and follow the three-step setup wizard.
 ## Authentication
 
 This application uses the secure **Google OAuth 2.0 Web Application Flow** (which is completely unrestricted by Google and operates using standard browser authorization redirects).
+
+> **Scopes requested**: Search Console (`webmasters`), Indexing API (`indexing`), your email address, and **Google Cloud (`cloud-platform`)**. The Cloud scope exists for exactly one optional feature — the *one-click Gemini API key* button in Settings, which creates a key on **your own** project, restricted to the Generative Language API only. Accounts linked before this scope was added keep working for indexing; they just need a one-time re-link before using that button.
 
 Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
 
@@ -431,6 +442,29 @@ The Google Indexing API is limited to **200 URLs/day across all sites in your Go
 
 ---
 
+## API Keys — Analytics, CWV & AI Citation Tracking
+
+Everything below is **optional** — the core indexing loop needs none of it. Keys are **write-only**: the API stores them server-side and never echoes them back; the UI shows a "configured" badge instead.
+
+| Key | Where to get it | Cost | Unlocks |
+|-----|-----------------|------|---------|
+| Gemini | **One-click button in Settings** (or [AI Studio](https://aistudio.google.com/apikey)) | **Free tier** | Grounded-AI citation checks |
+| Brave Search | [brave.com/search/api](https://brave.com/search/api/) | **Free** (~2k queries/mo, no card) | Retrieval-layer presence — Brave grounds Claude's web search |
+| Bing Webmaster | Bing Webmaster Tools → Settings → API access | Free | URL submission + quota via Bing's own allowance |
+| CrUX | [Google Cloud credentials](https://console.cloud.google.com/apis/credentials) | Free | Core Web Vitals (p75 LCP/INP/CLS) |
+| OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) | Paid (pennies/sweep) | ChatGPT citation checks (web search) |
+| Anthropic | [console.anthropic.com](https://console.anthropic.com/settings/keys) | Paid | Claude citation checks (web search) |
+| Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Paid | Perplexity (sonar) citation checks |
+| xAI | [console.x.ai](https://console.x.ai/) | Paid | Grok citation checks (live search) |
+
+**Zero-cost recommended setup**: link your Google account → Settings → *⚡ Generate with linked Google account* (Gemini) → paste a free Brave key. That gives you one real grounded-LLM answer engine *and* retrieval-layer tracking without spending anything.
+
+**Why no headless-browser scraping of the chat UIs?** It violates those services' terms, requires maintaining logged-in sessions against active bot defences (risking the accounts), and logged-out answers are personalised/experiment-bucketed anyway — the API + retrieval-layer approach gives a cleaner signal with none of the exposure.
+
+**AI citation sweeps are manual by design** (the *Run all* button) so provider costs never accrue unattended. Wire `runAllPrompts()` into the scheduler if you want them recurring.
+
+---
+
 ## Configuration
 
 | Variable       | Default     | Description                   |
@@ -464,7 +498,8 @@ npm run dev       # http://localhost:5173 (proxies /api/* to :3000)
 ```
 ┌─────────────────────────────────────────────┐
 │              React + Vite SPA               │
-│   Setup Wizard | Dashboard | Sites | Logs   │
+│ Setup | Dashboard | Analytics | Citations | │
+│        Sites | Accounts | Logs | Settings   │
 └──────────────────┬──────────────────────────┘
                    │ HTTP REST + SSE
 ┌──────────────────▼──────────────────────────┐

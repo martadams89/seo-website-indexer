@@ -7,6 +7,9 @@ import Layout from './Layout'
 import Dashboard from './pages/Dashboard'
 import SitesPage from './pages/Sites'
 import LogsPage from './pages/Logs'
+import AnalyticsPage from './pages/Analytics'
+import SiteAnalyticsPage from './pages/SiteAnalytics'
+import CitationsPage from './pages/Citations'
 import SettingsPage from './pages/Settings'
 import SetupPage from './pages/Setup'
 import AccountsPage from './pages/Accounts'
@@ -27,6 +30,9 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/"         element={<Dashboard />} />
             <Route path="/sites"    element={<SitesPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/analytics/:siteId" element={<SiteAnalyticsPage />} />
+            <Route path="/citations" element={<CitationsPage />} />
             <Route path="/logs"     element={<LogsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

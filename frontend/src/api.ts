@@ -250,7 +250,89 @@ export const api = {
 
   // Admin: release stuck lock
   releaseLock: () => apiFetch<{ ok: boolean }>('/api/scheduler/release-lock', { method: 'POST' }),
+
+  // ── Analytics ──
+  getAnalyticsOverview: () => apiFetch<AnalyticsOverview>('/api/analytics/overview'),
+  getSiteAnalytics: (siteId: string) => apiFetch<SiteAnalytics>(`/api/analytics/site/${siteId}`),
+  snapshotStats: () => apiFetch<{ snapshots: number }>('/api/analytics/snapshot', { method: 'POST' }),
+  getAlerts: () => apiFetch<AlertRow[]>('/api/analytics/alerts'),
+  ackAlert: (id: number) => apiFetch<{ ok: boolean }>(`/api/analytics/alerts/${id}/ack`, { method: 'POST' }),
+
+  // ── llms.txt lifecycle ──
+  getLlmsAudit: (siteId: string) => apiFetch<LlmsAudit>(`/api/sites/${siteId}/llms-audit`),
+
+  // ── Bing Webmaster ──
+  getBingQuota: (siteId: string) => apiFetch<{ DailyQuota: number; MonthlyQuota: number }>(`/api/bing/quota/${siteId}`),
+  bingSubmit: (siteId: string, urls?: string[]) =>
+    apiFetch<{ submitted: number }>(`/api/bing/submit/${siteId}`, { method: 'POST', body: JSON.stringify({ urls }) }),
+
+  // ── Hygiene / CrUX ──
+  runHygiene: (siteId: string) => apiFetch<HygieneReport>(`/api/sites/${siteId}/hygiene`),
+  refreshCrux: (siteId: string) => apiFetch<CruxResult | { error: string }>(`/api/crux/${siteId}/refresh`, { method: 'POST' }),
+
+  // ── AI citations ──
+  getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
+  getAiPrompts: () => apiFetch<AiPrompt[]>('/api/ai/prompts'),
+  addAiPrompt: (prompt: string, site_id?: string | null) =>
+    apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id }) }),
+  deleteAiPrompt: (id: number) => apiFetch<{ ok: boolean }>(`/api/ai/prompts/${id}`, { method: 'DELETE' }),
+  getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
+  runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
+  runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
+  provisionGeminiKey: () =>
+    apiFetch<{ ok: boolean; error?: string; needsRelink?: boolean }>('/api/ai/provision/gemini', { method: 'POST', body: JSON.stringify({}) }),
 };
+
+// ── Analytics types ───────────────────────────────────────────────────────────
+
+export interface SiteSnapshot {
+  site_id: string; day: string;
+  urls_total: number; urls_submitted: number; urls_google: number; urls_indexnow: number;
+  urls_indexed: number; urls_not_indexed: number; urls_with_schema: number; urls_stale: number;
+  failures: number;
+}
+export interface SiteOverviewRow extends SiteSnapshot {
+  name: string; domain: string;
+  trend: Array<{ day: string; urls_indexed: number; urls_total: number }>;
+}
+export interface AnalyticsOverview {
+  sites: SiteOverviewRow[];
+  totals: { sites: number; urls_total: number; urls_indexed: number; urls_stale: number; failures: number; open_alerts: number };
+}
+export interface SiteAnalytics {
+  site: Site;
+  snapshot: SiteSnapshot;
+  trend: SiteSnapshot[];
+  states: Array<{ state: string; count: number }>;
+  freshness: Array<{ url: string; last_seen_lastmod: string; gsc_last_inspected: string | null; gsc_indexing_state: string | null }>;
+  crux: Array<{ day: string; lcp_ms: number | null; inp_ms: number | null; cls: number | null }>;
+}
+export interface AlertRow {
+  id: number; site_id: string | null; domain?: string | null;
+  kind: string; severity: 'info' | 'warn' | 'error'; message: string; detail?: string | null;
+  acked: number; created_at: string;
+}
+export interface LlmsAudit {
+  live: { status: number; text: string };
+  liveFull: { status: number } | null;
+  generated: string;
+  robotsLive: { status: number; text: string };
+  robotsGenerated: string;
+  lint: { ok: boolean; issues: string[]; stats: { bytes: number; lines: number; links: number; sections: number } };
+  drift: boolean;
+}
+export interface HygieneReport {
+  checked: number;
+  issues: Array<{ url: string; kind: string; detail: string }>;
+}
+export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
+export interface AiPrompt { id: number; site_id: string | null; prompt: string; enabled: number; created_at: string }
+export interface AiResult {
+  id: number; prompt_id: number; prompt: string; site_id: string | null;
+  provider: string; model: string | null; cited: number; domains: string; excerpt: string | null;
+  error: string | null; created_at: string;
+}
+export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; excerpt?: string; error?: string }
 
 // ── SSE Log Stream ────────────────────────────────────────────────────────────
 

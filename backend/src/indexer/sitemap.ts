@@ -17,7 +17,7 @@ function fetchUrl(url: string, redirects = 0): Promise<string> {
     if (redirects > 5) return reject(new Error('Too many redirects'));
     const client = url.startsWith('https') ? https : http;
     client
-      .get(url, { headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (sitemap-reader)' } }, (res) => {
+      .get(url, { headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (sitemap-reader)' }, timeout: 20_000 }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           return resolve(fetchUrl(res.headers.location, redirects + 1));
         }
@@ -29,7 +29,12 @@ function fetchUrl(url: string, redirects = 0): Promise<string> {
         res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
         res.on('error', reject);
       })
-      .on('error', reject);
+      .on('error', reject)
+      // 'timeout' only fires an event — the socket must be destroyed to abort,
+      // which then rejects through the 'error' handler above.
+      .on('timeout', function (this: import('node:http').ClientRequest) {
+        this.destroy(new Error(`Timeout fetching ${url}`));
+      });
   });
 }
 

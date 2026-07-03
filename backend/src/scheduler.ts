@@ -48,6 +48,8 @@ import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/ind
 import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexer/bing.js';
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
+import { snapshotAllSites } from './analytics/stats.js';
+import { sendNotification } from './utils/notify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -866,6 +868,18 @@ async function _doRun(
   } else {
     log(runId, 'ok', `Run complete — ${run.total_submitted} submitted, ${run.total_skipped} skipped, ${run.total_failed} failed.`);
   }
+
+  // Analytics: snapshot every site's daily stats (also raises regression alerts),
+  // then push the run summary to the configured webhook, if any.
+  try {
+    snapshotAllSites();
+  } catch (e) {
+    log(runId, 'warn', `Stats snapshot failed: ${e instanceof Error ? e.message : e}`);
+  }
+  sendNotification(
+    isStopped ? 'Indexing run stopped' : 'Indexing run complete',
+    `${run.total_submitted} submitted, ${run.total_skipped} skipped, ${run.total_failed} failed.`
+  ).catch(() => null);
 
   updateRun(runId, {
     status,

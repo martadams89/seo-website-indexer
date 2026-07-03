@@ -20,6 +20,9 @@ export function getDb(): Database.Database {
     _db = new Database(DB_PATH);
     _db.pragma('journal_mode = WAL');
     _db.pragma('foreign_keys = ON');
+    // Scheduler + HTTP handlers write concurrently; wait for locks instead of
+    // throwing SQLITE_BUSY.
+    _db.pragma('busy_timeout = 5000');
     initSchema(_db);
     migrateSettingsToAccounts(_db);
     backfillSiteAccounts(_db);
@@ -120,6 +123,67 @@ function initSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_url_failures_last ON url_failures(last_failed_at);
+    CREATE INDEX IF NOT EXISTS idx_url_state_site ON url_state(site_id);
+
+    -- ── Analytics engine ──────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS site_stats_daily (
+      site_id           TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      day               TEXT NOT NULL,             -- YYYY-MM-DD
+      urls_total        INTEGER NOT NULL DEFAULT 0,
+      urls_submitted    INTEGER NOT NULL DEFAULT 0,
+      urls_google       INTEGER NOT NULL DEFAULT 0,
+      urls_indexnow     INTEGER NOT NULL DEFAULT 0,
+      urls_indexed      INTEGER NOT NULL DEFAULT 0, -- GSC 'Submitted and indexed' etc.
+      urls_not_indexed  INTEGER NOT NULL DEFAULT 0,
+      urls_with_schema  INTEGER NOT NULL DEFAULT 0,
+      urls_stale        INTEGER NOT NULL DEFAULT 0, -- lastmod newer than last GSC crawl
+      failures          INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (site_id, day)
+    );
+
+    CREATE TABLE IF NOT EXISTS alerts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id    TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL,      -- index_drop | schema_drop | hygiene | llms_drift | quota | bing | citation
+      severity   TEXT NOT NULL DEFAULT 'warn',
+      message    TEXT NOT NULL,
+      detail     TEXT,
+      acked      INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at);
+
+    -- ── AI citation tracking ──────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS ai_prompts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id    TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      prompt     TEXT NOT NULL,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_results (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt_id  INTEGER NOT NULL REFERENCES ai_prompts(id) ON DELETE CASCADE,
+      provider   TEXT NOT NULL,      -- openai | anthropic | gemini | perplexity | xai
+      model      TEXT,
+      cited      INTEGER NOT NULL DEFAULT 0,
+      domains    TEXT,               -- JSON array of our domains found
+      excerpt    TEXT,
+      error      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_results_prompt ON ai_results(prompt_id, created_at);
+
+    -- ── Core Web Vitals (CrUX) snapshots ─────────────────────────────────
+    CREATE TABLE IF NOT EXISTS crux_snapshots (
+      site_id    TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      day        TEXT NOT NULL,
+      lcp_ms     INTEGER,
+      inp_ms     INTEGER,
+      cls        REAL,
+      PRIMARY KEY (site_id, day)
+    );
   `);
 
   // Backwards compatibility migrations
@@ -409,6 +473,16 @@ export interface LogEntry {
   site_id?: string;
   url?: string;
   created_at?: string;
+}
+
+/**
+ * Prune old run logs so the SQLite file stays bounded on long-lived installs.
+ * Keeps 30 days; called at startup and once per scheduler day-roll.
+ */
+export function pruneOldLogs(days = 30): number {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const res = getDb().prepare('DELETE FROM run_logs WHERE created_at < ?').run(cutoff);
+  return res.changes;
 }
 
 export function insertLog(entry: LogEntry): void {

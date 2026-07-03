@@ -98,7 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const appendLog = useCallback((entry: LogEntry) => {
     setSseLastEventAt(Date.now());
     setSseConnected(true);
-    setLogs(prev => [entry, ...prev].slice(0, 500));
+    setLogs(prev => [entry, ...prev].slice(0, 1000));
     if (entry.message.includes('Run complete')) {
       setTimeout(() => api.getRuns().then(setRuns).catch(() => null), 1000);
       setTimeout(() => api.getStatus().then(setStatus).catch(() => null), 1000);
