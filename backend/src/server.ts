@@ -577,6 +577,7 @@ const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id', 'notify_webhook_u
 const SECRET_SETTINGS = [
   'bing_api_key', 'crux_api_key',
   'openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'perplexity_api_key', 'xai_api_key',
+  'brave_api_key',
 ];
 
 app.get('/api/settings', async () => {

@@ -9,6 +9,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: 'Gemini',
   perplexity: 'Perplexity',
   xai: 'Grok',
+  brave: 'Brave Search',
 };
 
 export default function CitationsPage() {

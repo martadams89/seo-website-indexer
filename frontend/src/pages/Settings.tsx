@@ -156,6 +156,7 @@ export default function SettingsPage() {
           ['gemini_api_key', 'Gemini API key', 'Gemini citation checks (Google Search grounding)'],
           ['perplexity_api_key', 'Perplexity API key', 'Perplexity (sonar) citation checks'],
           ['xai_api_key', 'xAI API key', 'Grok citation checks (live search)'],
+          ['brave_api_key', 'Brave Search API key', 'FREE tier (~2,000 queries/mo, no card) — retrieval-layer presence; Brave grounds Claude\u2019s web search'],
         ] as const).map(([key, label, hint]) => (
           <div key={key} className="form-row" style={{ marginBottom: 10 }}>
             <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

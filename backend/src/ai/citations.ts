@@ -9,7 +9,7 @@
 import { getDb, getSetting, getAllSites } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
 
-export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai'] as const;
+export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
 export type Provider = typeof PROVIDERS[number];
 
 const KEY_SETTING: Record<Provider, string> = {
@@ -18,6 +18,7 @@ const KEY_SETTING: Record<Provider, string> = {
   gemini: 'gemini_api_key',
   perplexity: 'perplexity_api_key',
   xai: 'xai_api_key',
+  brave: 'brave_api_key',
 };
 
 export function configuredProviders(): Provider[] {
@@ -132,12 +133,31 @@ async function askXai(prompt: string, key: string): Promise<ProviderAnswer> {
   return { text: data.choices?.[0]?.message?.content ?? '', model, citations: data.citations ?? [] };
 }
 
+/**
+ * Brave Search — not an LLM, but the retrieval layer that grounds Claude's
+ * web search (and other answer engines). Free tier ≈2,000 queries/month.
+ * "Cited" here means: your domain appears in the top web results for the
+ * prompt — the strongest predictor of being cited by grounded AI answers.
+ */
+async function askBrave(prompt: string, key: string): Promise<ProviderAnswer> {
+  const res = await fetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: prompt, count: '10' })}`, {
+    headers: { Accept: 'application/json', 'X-Subscription-Token': key },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`Brave HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json() as { web?: { results?: Array<{ url?: string; title?: string; description?: string }> } };
+  const results = data.web?.results ?? [];
+  const text = results.map((r, i) => `${i + 1}. ${r.title ?? ''} — ${r.url ?? ''}\n${r.description ?? ''}`).join('\n');
+  return { text, model: 'brave-search', citations: results.map(r => r.url).filter((u): u is string => !!u) };
+}
+
 const ASK: Record<Provider, (prompt: string, key: string) => Promise<ProviderAnswer>> = {
   openai: askOpenAI,
   anthropic: askAnthropic,
   gemini: askGemini,
   perplexity: askPerplexity,
   xai: askXai,
+  brave: askBrave,
 };
 
 /** Domains we count as "ours" for citation detection. */
