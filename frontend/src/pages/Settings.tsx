@@ -24,6 +24,10 @@ export default function SettingsPage() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [savingKeys, setSavingKeys] = useState(false);
+  const [bingKey, setBingKey] = useState('');
+  const [bingConfigured, setBingConfigured] = useState(false);
+  const [bingSaving, setBingSaving] = useState(false);
+  const [bingSaved, setBingSaved] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
@@ -37,6 +41,7 @@ export default function SettingsPage() {
         if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
       }
       setConfigured(conf);
+      setBingConfigured(!!rec.bing_api_key_configured);
     }).catch(() => null);
   }, []);
 
@@ -220,7 +225,6 @@ export default function SettingsPage() {
           Keys are write-only: they are stored server-side and never echoed back. A green badge means a key is configured.
         </p>
         {([
-          ['bing_api_key', 'Bing Webmaster API key', 'URL submission + quota via Bing Webmaster Tools'],
           ['crux_api_key', 'CrUX API key', 'Core Web Vitals (Google Cloud API key, free)'],
           ['openai_api_key', 'OpenAI API key', 'ChatGPT citation checks (web search)'],
           ['anthropic_api_key', 'Anthropic API key', 'Claude citation checks (web search)'],

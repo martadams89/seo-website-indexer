@@ -85,7 +85,7 @@ import {
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
-import { bingConfigured, getUrlSubmissionQuota, submitUrlBatch } from './indexer/bing.js';
+import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
 import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
@@ -581,6 +581,8 @@ const SECRET_SETTINGS = [
   'openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'perplexity_api_key', 'xai_api_key',
   'brave_api_key',
 ];
+// Placeholder the UI may echo back for an unchanged secret — never store it.
+const SECRET_MASK = '••••••••';
 
 app.get('/api/settings', async () => {
   const all = getAllSettings();
@@ -780,19 +782,29 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
 app.get('/api/bing/quota/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  if (!bingConfigured()) return reply.code(400).send({ error: 'Bing API key not configured' });
-  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
-  return await getUrlSubmissionQuota(origin);
+  const apiKey = getSetting('bing_api_key');
+  if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
+  const quota = await getBingQuota(apiKey, deriveBingSiteUrl(site.gsc_url, site.domain));
+  if (!quota) return reply.code(502).send({ error: 'Bing quota unavailable — check the API key and that the site is verified in Bing Webmaster Tools' });
+  // Keep the response shape the dashboard expects.
+  return { DailyQuota: quota.dailyQuota, MonthlyQuota: quota.monthlyQuota };
 });
 
 app.post('/api/bing/submit/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  if (!bingConfigured()) return reply.code(400).send({ error: 'Bing API key not configured' });
+  const apiKey = getSetting('bing_api_key');
+  if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
   const { urls } = (req.body ?? {}) as { urls?: string[] };
-  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
   const list = urls?.length ? urls : getUrlsBySite(site.id).slice(0, 100).map((u: { url: string }) => u.url);
-  const submitted = await submitUrlBatch(origin, list);
+  const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
+  const results = await submitToBingInBatches(apiKey, siteUrl, list);
+  const submitted = results.filter(r => r.success).reduce((s, r) => s + r.urlCount, 0);
+  const failed = results.find(r => !r.success);
+  if (failed) {
+    logSystem('warn', `Bing: ${failed.message ?? `HTTP ${failed.statusCode}`} for ${site.domain}`);
+    return reply.code(failed.quotaExceeded ? 429 : 502).send({ submitted, error: failed.message ?? 'Bing submission failed' });
+  }
   logSystem('ok', `Bing: submitted ${submitted} URLs for ${site.domain}`);
   return { submitted };
 });

@@ -19,6 +19,8 @@ RUN npm run build
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS runtime
 
+ARG APP_VERSION=dev
+
 # Install dumb-init for proper signal handling, su-exec for privilege drop,
 # and wget for the HEALTHCHECK probe.
 RUN apk add --no-cache dumb-init su-exec wget
@@ -45,6 +47,7 @@ VOLUME ["/data"]
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+ENV APP_VERSION=${APP_VERSION}
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \

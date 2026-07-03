@@ -1,12 +1,28 @@
-# SEO Website Indexer
+<div align="center">
 
-Self-hosted Docker container for Google Search Console + Bing Webmaster + IndexNow SEO indexing automation.  
-Works with **any number of sites** — add them all to the dashboard and it handles everything. Runs on a daily cron and only pushes pages that actually changed.
+# 🔍 SEO Website Indexer
 
-[![Docker](https://img.shields.io/badge/ghcr.io-martadams89%2Fseo--website--indexer-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
+**Self-hosted SEO & GEO automation for all your sites — indexing, analytics and AI-citation tracking in one container.**
+
+Submit every changed URL to Google & Bing the moment your sitemap moves, watch your index coverage as living dashboards, and measure whether ChatGPT, Claude, Gemini, Perplexity and Grok actually cite you.
+
+[![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
+[![Docker](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml)
+[![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github&color=blueviolet)](https://github.com/martadams89/seo-website-indexer/releases)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-seo--website--indexer-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
+[![Renovate](https://img.shields.io/badge/maintained%20by-renovate-1f8ceb?logo=renovate)](https://docs.renovatebot.com)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+`docker run` → open the dashboard → link Google → done. No external database, no cloud dependencies, your keys never leave your box.
+
+</div>
 
 ---
+
+## Why this exists
+
+Search engines only recrawl what they're told about, and AI answer engines only cite what they can retrieve. Doing that properly across multiple sites means juggling the Indexing API, Search Console, IndexNow, Bing Webmaster, quota limits, `lastmod` diffing, `robots.txt`/`llms.txt` upkeep — and you still can't see whether any of it *works*. This container does all of it on a schedule and shows you the results as per-site dashboards: coverage funnels, freshness gaps, Core Web Vitals, and a prompt-by-prompt matrix of which AI engines cite your domains.
 
 ## Features
 
@@ -477,6 +493,16 @@ All other settings (cron schedule, etc.) are configured via the UI and stored in
 
 ---
 
+## Releases & Self-Maintenance
+
+This repo looks after itself:
+
+- **Automated releases** — [release-please](https://github.com/googleapis/release-please) turns [Conventional Commits](CONTRIBUTING.md#commit-messages--conventional-commits-required) into a rolling release PR with a generated changelog. Merging it tags `vX.Y.Z`, publishes a GitHub Release with notes, and the Docker workflow ships `latest`, `X.Y.Z` and `X.Y` image tags automatically. The running version is visible at `/api/status`.
+- **Automated dependency updates** — [Renovate](https://docs.renovatebot.com) opens grouped weekly PRs; patch/minor updates, action pins and lockfile maintenance **auto-merge once CI is green** (unit tests + typecheck + lint + build + Docker build). Majors — and `better-sqlite3` majors especially, which track the Node ABI — wait for a human.
+- **To enable on a fork**: install the [Renovate GitHub App](https://github.com/apps/renovate), allow auto-merge in repo settings, and mark the CI jobs as required checks so auto-merge is actually gated on them.
+
+---
+
 ## Development
 
 ```bash
@@ -528,6 +554,12 @@ Google APIs         IndexNow API
 (Indexing API +    (api.indexnow.org →
  Search Console)    Bing, Yandex, Yahoo…)
 ```
+
+---
+
+## Contributing
+
+Contributions are very welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for the two-minute setup, and note that commit messages follow Conventional Commits because they *become* the release notes. Bugs and ideas → [issues](https://github.com/martadams89/seo-website-indexer/issues) (templates provided).
 
 ---
 
