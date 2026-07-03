@@ -111,6 +111,7 @@ export default function SettingsPage() {
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<Tab | null>(null);
@@ -119,18 +120,31 @@ export default function SettingsPage() {
   const [provisioning, setProvisioning] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
-  async function loadSettings() {
-    const s = await api.getSettings().catch(() => null);
-    if (!s) return;
-    const rec = s as Record<string, string | boolean>;
-    setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
-    setWebhookUrl((rec.notify_webhook_url as string) ?? '');
-    setProjectId((rec.google_project_id as string) ?? '');
-    const conf: Record<string, boolean> = {};
-    for (const [k, v] of Object.entries(rec)) {
-      if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
-    }
-    setConfigured(conf);
+  useEffect(() => {
+    api.getSettings().then(s => {
+      const rec = s as Record<string, string | boolean>;
+      setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
+      setWebhookUrl((rec.notify_webhook_url as string) ?? '');
+      setProjectId((rec.google_project_id as string) ?? '');
+      const conf: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(rec)) {
+        if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
+      }
+      setConfigured(conf);
+      setBingConfigured(!!rec.bing_api_key_configured);
+    }).catch(() => null);
+  }, []);
+
+  async function saveSettings() {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await api.updateSettings({ cron_schedule: cronSchedule });
+      setSaved(true);
+      await refresh();
+      setTimeout(() => setSaved(false), 3000);
+    } catch { /* ignore */ }
+    setSaving(false);
   }
 
   useEffect(() => { loadSettings(); }, []);
@@ -262,11 +276,50 @@ export default function SettingsPage() {
             />
             <span className="input-hint">Used by the one-click Gemini key. Leave blank to use the project that owns your OAuth client.</span>
           </div>
-          <button className="btn btn-primary" disabled={saving === 'google'} onClick={() => save('google', { google_project_id: projectId.trim() })}>
-            {saving === 'google' ? <><span className="spinner" /> Saving…</> : saved === 'google' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
-          </button>
+        ))}
+        <div className="form-row" style={{ marginBottom: 10 }}>
+          <label className="label">Google Cloud project ID <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+          <input
+            className="input"
+            placeholder="auto-derived from your linked OAuth client — set only to override"
+            value={projectId}
+            onChange={e => setProjectId(e.target.value)}
+          />
+          <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>Used by the one-click Gemini key button. Leave blank to use the project that owns your OAuth client.</div>
         </div>
-      )}
+        <div className="form-row" style={{ marginBottom: 10 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={12} /> Notification webhook URL
+            {webhookUrl && <span className="badge badge-ok">set</span>}
+          </label>
+          <input
+            className="input"
+            placeholder="Slack / Discord / ntfy webhook — run summaries and alerts"
+            value={webhookUrl}
+            onChange={e => setWebhookUrl(e.target.value)}
+          />
+        </div>
+        <button
+          className="btn btn-primary"
+          disabled={savingKeys}
+          onClick={async () => {
+            setSavingKeys(true);
+            const payload: Record<string, string> = { notify_webhook_url: webhookUrl, google_project_id: projectId.trim() };
+            for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
+            try {
+              await api.updateSettings(payload);
+              setKeys({});
+              const s = await api.getSettings() as Record<string, string | boolean>;
+              const conf: Record<string, boolean> = {};
+              for (const [k, v] of Object.entries(s)) if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
+              setConfigured(conf);
+            } catch { /* surfaced via badge state */ }
+            setSavingKeys(false);
+          }}
+        >
+          <Save size={13} /> {savingKeys ? 'Saving…' : 'Save keys'}
+        </button>
+      </div>
 
       {/* ── API Keys ── */}
       {tab === 'keys' && (

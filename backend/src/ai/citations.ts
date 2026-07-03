@@ -83,8 +83,8 @@ async function askAnthropic(turns: ChatTurn[], key: string): Promise<ProviderAns
   return { text, model, citations };
 }
 
-async function askGemini(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'gemini-2.0-flash';
+async function askGemini(prompt: string, key: string): Promise<ProviderAnswer> {
+  const model = 'gemini-flash-latest';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -894,7 +894,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
   const accounts = getAllGoogleAccounts();
   const account = account_id ? accounts.find(a => a.id === account_id) : accounts[0];
   if (!account) return reply.code(400).send({ error: 'No Google account linked yet (Accounts page).' });
-  const result = await provisionGeminiKey(account.id);
+  const result = await provisionGeminiKey(account.id, account.client_id);
   if (!result.ok) return reply.code(422).send(result);
   return result;
 });
