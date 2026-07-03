@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, LogOut } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api } from '../api';
 
@@ -9,10 +9,21 @@ export default function SettingsPage() {
   const [saving, setSaving]   = useState(false);
   const [saved, setSaved]     = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const [configured, setConfigured] = useState<Record<string, boolean>>({});
+  const [savingKeys, setSavingKeys] = useState(false);
 
   useEffect(() => {
     api.getSettings().then(s => {
-      setCronSchedule(s.cron_schedule ?? '0 3 * * *');
+      const rec = s as Record<string, string | boolean>;
+      setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
+      setWebhookUrl((rec.notify_webhook_url as string) ?? '');
+      const conf: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(rec)) {
+        if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
+      }
+      setConfigured(conf);
     }).catch(() => null);
   }, []);
 
@@ -132,6 +143,70 @@ export default function SettingsPage() {
       </div>
 
       {/* ── IndexNow Info ── */}
+      <div className="card mb-4">
+        <div className="card-title"><KeyRound size={13} /> API Keys — Bing, CrUX &amp; AI providers</div>
+        <p className="text-dim" style={{ fontSize: 12, marginBottom: 12 }}>
+          Keys are write-only: they are stored server-side and never echoed back. A green badge means a key is configured.
+        </p>
+        {([
+          ['bing_api_key', 'Bing Webmaster API key', 'URL submission + quota via Bing Webmaster Tools'],
+          ['crux_api_key', 'CrUX API key', 'Core Web Vitals (Google Cloud API key, free)'],
+          ['openai_api_key', 'OpenAI API key', 'ChatGPT citation checks (web search)'],
+          ['anthropic_api_key', 'Anthropic API key', 'Claude citation checks (web search)'],
+          ['gemini_api_key', 'Gemini API key', 'Gemini citation checks (Google Search grounding)'],
+          ['perplexity_api_key', 'Perplexity API key', 'Perplexity (sonar) citation checks'],
+          ['xai_api_key', 'xAI API key', 'Grok citation checks (live search)'],
+        ] as const).map(([key, label, hint]) => (
+          <div key={key} className="form-row" style={{ marginBottom: 10 }}>
+            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {label}
+              {configured[key] && <span className="badge badge-ok">configured</span>}
+            </label>
+            <input
+              className="input"
+              type="password"
+              placeholder={configured[key] ? '•••••••• (set — enter a new value to replace)' : 'paste key…'}
+              value={keys[key] ?? ''}
+              onChange={e => setKeys(prev => ({ ...prev, [key]: e.target.value }))}
+              autoComplete="off"
+            />
+            <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>{hint}</div>
+          </div>
+        ))}
+        <div className="form-row" style={{ marginBottom: 10 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={12} /> Notification webhook URL
+            {webhookUrl && <span className="badge badge-ok">set</span>}
+          </label>
+          <input
+            className="input"
+            placeholder="Slack / Discord / ntfy webhook — run summaries and alerts"
+            value={webhookUrl}
+            onChange={e => setWebhookUrl(e.target.value)}
+          />
+        </div>
+        <button
+          className="btn btn-primary"
+          disabled={savingKeys}
+          onClick={async () => {
+            setSavingKeys(true);
+            const payload: Record<string, string> = { notify_webhook_url: webhookUrl };
+            for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
+            try {
+              await api.updateSettings(payload);
+              setKeys({});
+              const s = await api.getSettings() as Record<string, string | boolean>;
+              const conf: Record<string, boolean> = {};
+              for (const [k, v] of Object.entries(s)) if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
+              setConfigured(conf);
+            } catch { /* surfaced via badge state */ }
+            setSavingKeys(false);
+          }}
+        >
+          <Save size={13} /> {savingKeys ? 'Saving…' : 'Save keys'}
+        </button>
+      </div>
+
       <div className="card">
         <div className="card-title">IndexNow — How Key Verification Works</div>
         <div className="flex-col gap-3" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>

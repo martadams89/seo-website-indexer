@@ -83,6 +83,13 @@ import {
   forceStopRun,
 } from './scheduler.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
+import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, recordAlert } from './analytics/stats.js';
+import { auditSiteLlms } from './indexer/llms-audit.js';
+import { bingConfigured, getUrlSubmissionQuota, submitUrlBatch } from './indexer/bing.js';
+import { checkSiteHygiene } from './indexer/hygiene.js';
+import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS } from './ai/citations.js';
+import { fetchCrux, cruxConfigured } from './ai/crux.js';
+import { logSystem } from './utils/logger.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -564,18 +571,28 @@ app.get('/api/logs/stream', async (req, reply) => {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 // Keys that are safe to expose to the frontend (exclude sensitive auth tokens)
-const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id'];
+const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id', 'notify_webhook_url'];
+// Write-only secrets: settable via PUT, never echoed back — GET returns
+// `<key>_configured` booleans instead.
+const SECRET_SETTINGS = [
+  'bing_api_key', 'crux_api_key',
+  'openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'perplexity_api_key', 'xai_api_key',
+];
 
 app.get('/api/settings', async () => {
   const all = getAllSettings();
-  return Object.fromEntries(
+  const pub = Object.fromEntries(
     Object.entries(all).filter(([k]) => PUBLIC_SETTINGS.includes(k))
-  );
+  ) as Record<string, unknown>;
+  for (const key of SECRET_SETTINGS) {
+    pub[`${key}_configured`] = !!all[key];
+  }
+  return pub;
 });
 
 app.put('/api/settings', async (req) => {
   const body = req.body as Record<string, string>;
-  for (const key of PUBLIC_SETTINGS) {
+  for (const key of [...PUBLIC_SETTINGS, ...SECRET_SETTINGS]) {
     if (body[key] !== undefined) {
       setSetting(key, String(body[key]));
     }
@@ -717,6 +734,105 @@ try {
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+
+// ── Analytics ────────────────────────────────────────────────────────────────
+
+app.get('/api/analytics/overview', async () => getOverview());
+
+app.get('/api/analytics/site/:id', async (req, reply) => {
+  const detail = getSiteDetail((req.params as { id: string }).id);
+  if (!detail) return reply.code(404).send({ error: 'Site not found' });
+  return detail;
+});
+
+app.post('/api/analytics/snapshot', async () => ({ snapshots: snapshotAllSites().length }));
+
+app.get('/api/analytics/alerts', async () => getAlerts());
+app.post('/api/analytics/alerts/:id/ack', async (req) => {
+  ackAlert(Number((req.params as { id: string }).id));
+  return { ok: true };
+});
+
+// ── llms.txt lifecycle ───────────────────────────────────────────────────────
+
+app.get('/api/sites/:id/llms-audit', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const audit = await auditSiteLlms(site);
+  if (audit.drift) {
+    recordAlert(site.id, 'llms_drift', `${site.domain}: live llms.txt differs from generated version`, 'info');
+  }
+  return audit;
+});
+
+// ── Bing Webmaster ───────────────────────────────────────────────────────────
+
+app.get('/api/bing/quota/:siteId', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  if (!bingConfigured()) return reply.code(400).send({ error: 'Bing API key not configured' });
+  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
+  return await getUrlSubmissionQuota(origin);
+});
+
+app.post('/api/bing/submit/:siteId', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  if (!bingConfigured()) return reply.code(400).send({ error: 'Bing API key not configured' });
+  const { urls } = (req.body ?? {}) as { urls?: string[] };
+  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
+  const list = urls?.length ? urls : getUrlsBySite(site.id).slice(0, 100).map((u: { url: string }) => u.url);
+  const submitted = await submitUrlBatch(origin, list);
+  logSystem('ok', `Bing: submitted ${submitted} URLs for ${site.domain}`);
+  return { submitted };
+});
+
+// ── Site hygiene ─────────────────────────────────────────────────────────────
+
+app.get('/api/sites/:id/hygiene', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const result = await checkSiteHygiene(site);
+  for (const issue of result.issues.filter(i => i.kind === 'broken')) {
+    recordAlert(site.id, 'hygiene', `${issue.url}: ${issue.detail}`, 'warn');
+  }
+  return result;
+});
+
+// ── Core Web Vitals (CrUX) ───────────────────────────────────────────────────
+
+app.post('/api/crux/:siteId/refresh', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  if (!cruxConfigured()) return reply.code(400).send({ error: 'CrUX API key not configured' });
+  const result = await fetchCrux(site);
+  return result ?? { error: 'Origin not in the CrUX dataset (insufficient traffic)' };
+});
+
+// ── AI citation tracking ─────────────────────────────────────────────────────
+
+app.get('/api/ai/providers', async () => ({
+  all: PROVIDERS,
+  configured: configuredProviders(),
+}));
+
+app.get('/api/ai/prompts', async () => listPrompts());
+app.post('/api/ai/prompts', async (req, reply) => {
+  const { prompt, site_id } = (req.body ?? {}) as { prompt?: string; site_id?: string };
+  if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt required' });
+  return addPrompt(prompt.trim(), site_id ?? null);
+});
+app.delete('/api/ai/prompts/:id', async (req) => {
+  deletePrompt(Number((req.params as { id: string }).id));
+  return { ok: true };
+});
+
+app.get('/api/ai/results', async () => getResults());
+app.post('/api/ai/run/:promptId', async (req) => ({
+  results: await runPrompt(Number((req.params as { promptId: string }).promptId)),
+}));
+app.post('/api/ai/run-all', async () => ({ ran: await runAllPrompts() }));
+
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 SEO Website Indexer running at http://localhost:${PORT}\n`);

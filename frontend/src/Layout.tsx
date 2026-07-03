@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users,
   ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff
-} from 'lucide-react';
+, BarChart3, Bot } from 'lucide-react';
 import { useApp } from './AppContext';
 import { createLogStream } from './api';
 import { ToastHost } from './components/Toast';
@@ -13,6 +13,8 @@ import { ToastHost } from './components/Toast';
 const NAV = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/sites',    icon: Globe,           label: 'Sites' },
+  { to: '/analytics', icon: BarChart3,      label: 'Analytics' },
+  { to: '/citations', icon: Bot,            label: 'AI Citations' },
   { to: '/accounts', icon: Users,           label: 'Accounts' },
   { to: '/logs',     icon: ScrollText,      label: 'Live Logs' },
   { to: '/settings', icon: Settings,        label: 'Settings' },

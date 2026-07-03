@@ -1,0 +1,138 @@
+import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { RefreshCw, Bell, BellOff, ChevronRight, TrendingUp } from 'lucide-react';
+import { api, type AnalyticsOverview, type AlertRow } from '../api';
+import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
+import { useApp } from '../AppContext';
+
+const SEVERITY_COLOR: Record<string, string> = { info: 'var(--info)', warn: 'var(--warn)', error: 'var(--error)' };
+
+export default function AnalyticsPage() {
+  const { toast } = useApp();
+  const [data, setData] = useState<AnalyticsOverview | null>(null);
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAcked, setShowAcked] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [overview, alertRows] = await Promise.all([api.getAnalyticsOverview(), api.getAlerts()]);
+      setData(overview);
+      setAlerts(alertRows);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Failed to load analytics');
+    }
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function snapshot() {
+    try {
+      await api.snapshotStats();
+      toast('success', 'Snapshot recorded');
+      load();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Snapshot failed');
+    }
+  }
+
+  async function ack(id: number) {
+    await api.ackAlert(id).catch(() => null);
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, acked: 1 } : a));
+  }
+
+  const visibleAlerts = alerts.filter(a => showAcked || !a.acked);
+
+  if (loading) return <div className="page-loading">Loading analytics…</div>;
+  if (!data) return <div className="page-loading">No analytics data.</div>;
+
+  const { totals, sites } = data;
+  const indexRate = totals.urls_total ? Math.round((totals.urls_indexed / totals.urls_total) * 100) : 0;
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Analytics</h1>
+          <p className="page-subtitle">Index health across every site — funnels, trends and alerts</p>
+        </div>
+        <button className="btn btn-secondary btn-sm" onClick={snapshot}>
+          <RefreshCw size={12} /> <span className="hide-mobile">Snapshot now</span>
+        </button>
+      </div>
+
+      {/* Portfolio totals */}
+      <div className="stat-grid">
+        <StatCard label="Sites" value={totals.sites} />
+        <StatCard label="URLs tracked" value={totals.urls_total} />
+        <StatCard label="Indexed" value={totals.urls_indexed} sub={`${indexRate}% of tracked`} tone="ok" />
+        <StatCard label="Stale (changed since crawl)" value={totals.urls_stale} tone={totals.urls_stale > 0 ? 'warn' : undefined} />
+        <StatCard label="Failing URLs" value={totals.failures} tone={totals.failures > 0 ? 'error' : undefined} />
+        <StatCard label="Open alerts" value={totals.open_alerts} tone={totals.open_alerts > 0 ? 'warn' : undefined} />
+      </div>
+
+      {/* Per-site cards */}
+      <h2 className="section-title"><TrendingUp size={14} /> Sites</h2>
+      <div className="site-card-grid">
+        {sites.map(s => {
+          const rate = s.urls_total ? Math.round((s.urls_indexed / s.urls_total) * 100) : 0;
+          return (
+            <Link key={s.site_id} to={`/analytics/${s.site_id}`} className="site-card">
+              <div className="site-card-head">
+                <div>
+                  <div className="site-card-name">{s.name}</div>
+                  <div className="site-card-domain">{s.domain}</div>
+                </div>
+                <ChevronRight size={16} className="text-dim" />
+              </div>
+              <div className="site-card-body">
+                <div className="site-card-rate">
+                  <span className="site-card-rate-num" style={{ color: rate >= 70 ? 'var(--ok)' : rate >= 40 ? 'var(--warn)' : 'var(--error)' }}>{rate}%</span>
+                  <span className="text-dim" style={{ fontSize: 11 }}>indexed</span>
+                </div>
+                <Sparkline points={s.trend.map(t => t.urls_indexed)} />
+              </div>
+              <FunnelBar stages={[
+                { label: 'Sitemap', value: s.urls_total, color: 'var(--info)' },
+                { label: 'Submitted', value: s.urls_submitted, color: 'var(--accent, #7c6cf5)' },
+                { label: 'Indexed', value: s.urls_indexed, color: 'var(--ok)' },
+              ]} />
+              <div className="site-card-foot">
+                {s.urls_stale > 0 && <span className="badge badge-warn">{s.urls_stale} stale</span>}
+                {s.failures > 0 && <span className="badge badge-error">{s.failures} failing</span>}
+                {s.urls_with_schema > 0 && <span className="badge">{s.urls_with_schema} schema</span>}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Alerts feed */}
+      <div className="flex items-center gap-2" style={{ marginTop: 28, marginBottom: 10, justifyContent: 'space-between' }}>
+        <h2 className="section-title" style={{ margin: 0 }}><Bell size={14} /> Alerts</h2>
+        <button className="btn btn-ghost btn-sm" onClick={() => setShowAcked(s => !s)}>
+          {showAcked ? <BellOff size={12} /> : <Bell size={12} />} {showAcked ? 'Hide acknowledged' : 'Show acknowledged'}
+        </button>
+      </div>
+      {visibleAlerts.length === 0 ? (
+        <div className="empty-note">No {showAcked ? '' : 'open '}alerts — all quiet.</div>
+      ) : (
+        <div className="alerts-list">
+          {visibleAlerts.slice(0, 50).map(a => (
+            <div key={a.id} className={`alert-row${a.acked ? ' acked' : ''}`}>
+              <span className="alert-dot" style={{ background: SEVERITY_COLOR[a.severity] ?? 'var(--warn)' }} />
+              <div className="alert-body">
+                <div className="alert-msg">{a.message}</div>
+                <div className="alert-meta">{a.kind} · {a.domain ?? 'all sites'} · {new Date(a.created_at + 'Z').toLocaleString()}</div>
+              </div>
+              {!a.acked && (
+                <button className="btn btn-ghost btn-sm" onClick={() => ack(a.id)}>Ack</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
