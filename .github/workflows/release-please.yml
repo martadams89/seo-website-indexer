@@ -1,0 +1,25 @@
+name: Release Please
+
+# Maintains a rolling "release PR" from Conventional Commits. Merging that PR
+# tags vX.Y.Z, publishes a GitHub Release with generated notes, and the
+# docker-publish workflow (triggered by the tag) ships the semver image.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
