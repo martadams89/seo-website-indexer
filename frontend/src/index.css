@@ -1526,3 +1526,30 @@ body {
   .health-strip { gap: 14px; }
   .health-strip-cta { flex-basis: 100%; margin-left: 0; }
 }
+
+/* ── Sites page (design-system pass) ─────────────────────────────────────── */
+.sites-table td { vertical-align: middle; }
+.sites-table tr:hover td { background: var(--bg-overlay); }
+.site-detail { animation: fadeIn .15s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.site-facts {
+  display: grid; gap: 8px 20px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  padding: 12px 14px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.site-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.site-fact-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
+.site-fact-value { font-size: 12.5px; word-break: break-all; }
+.site-fact-value.link { color: var(--accent, #7c6cf5); text-decoration: none; display: inline-flex; align-items: center; gap: 3px; }
+.site-fact-value.link:hover { text-decoration: underline; }
+.site-form { max-width: 640px; }
+.site-form-grid { display: grid; gap: 0 14px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 560px) { .site-form-grid { grid-template-columns: 1fr; } }
+.geo-mode-option {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.geo-mode-option:has(input:checked) { border-color: var(--accent, #7c6cf5); background: var(--bg-overlay); }
+.geo-mode-option input { margin-top: 3px; }
