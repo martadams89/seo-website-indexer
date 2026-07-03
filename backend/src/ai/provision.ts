@@ -32,9 +32,21 @@ async function gcall<T>(token: string, url: string, body?: unknown): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-export async function provisionGeminiKey(accountId: string): Promise<{ ok: true } | { ok: false; error: string; needsRelink?: boolean }> {
-  const project = getSetting('google_project_id');
-  if (!project) return { ok: false, error: 'No Google Cloud project configured (Settings → google_project_id).' };
+/**
+ * The OAuth client id encodes its project number ("123456789-abc.apps.…"),
+ * and Google resource paths accept project numbers interchangeably with
+ * project ids — so a linked account is enough; no separate setting needed.
+ */
+function deriveProjectNumber(clientId: string | null | undefined): string | null {
+  const m = /^(\d{6,})-/.exec(clientId ?? '');
+  return m ? m[1] : null;
+}
+
+export async function provisionGeminiKey(accountId: string, clientId?: string | null): Promise<{ ok: true; project: string } | { ok: false; error: string; needsRelink?: boolean }> {
+  const project = getSetting('google_project_id') || deriveProjectNumber(clientId);
+  if (!project) {
+    return { ok: false, error: 'Could not determine your Google Cloud project — set "Google Cloud project ID" in Settings (the project that owns your OAuth client).' };
+  }
 
   try {
     const token = await getAccessTokenForAccount(accountId);
@@ -65,7 +77,7 @@ export async function provisionGeminiKey(accountId: string): Promise<{ ok: true 
 
     setSetting('gemini_api_key', keyString);
     logSystem('ok', `Gemini API key provisioned on project ${project} and saved.`);
-    return { ok: true };
+    return { ok: true, project };
   } catch (e) {
     if (e instanceof RelinkNeededError) return { ok: false, error: e.message, needsRelink: true };
     const msg = e instanceof Error ? e.message : String(e);

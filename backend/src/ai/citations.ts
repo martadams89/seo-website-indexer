@@ -79,7 +79,7 @@ async function askAnthropic(prompt: string, key: string): Promise<ProviderAnswer
 }
 
 async function askGemini(prompt: string, key: string): Promise<ProviderAnswer> {
-  const model = 'gemini-2.0-flash';
+  const model = 'gemini-flash-latest';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
