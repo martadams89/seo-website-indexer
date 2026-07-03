@@ -279,6 +279,8 @@ export const api = {
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
   runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
   runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
+  provisionGeminiKey: () =>
+    apiFetch<{ ok: boolean; error?: string; needsRelink?: boolean }>('/api/ai/provision/gemini', { method: 'POST', body: JSON.stringify({}) }),
 };
 
 // ── Analytics types ───────────────────────────────────────────────────────────

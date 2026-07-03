@@ -3,6 +3,17 @@ import { Save, LogOut, KeyRound, Bell } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api } from '../api';
 
+const KEY_LINKS: Record<string, string> = {
+  bing_api_key: 'https://www.bing.com/webmasters/',
+  crux_api_key: 'https://console.cloud.google.com/apis/credentials',
+  openai_api_key: 'https://platform.openai.com/api-keys',
+  anthropic_api_key: 'https://console.anthropic.com/settings/keys',
+  gemini_api_key: 'https://aistudio.google.com/apikey',
+  perplexity_api_key: 'https://www.perplexity.ai/settings/api',
+  xai_api_key: 'https://console.x.ai/',
+  brave_api_key: 'https://brave.com/search/api/',
+};
+
 export default function SettingsPage() {
   const { status, refresh } = useApp();
   const [cronSchedule, setCronSchedule] = useState('');
@@ -13,6 +24,8 @@ export default function SettingsPage() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [savingKeys, setSavingKeys] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -171,7 +184,33 @@ export default function SettingsPage() {
               onChange={e => setKeys(prev => ({ ...prev, [key]: e.target.value }))}
               autoComplete="off"
             />
-            <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>{hint}</div>
+            <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>
+              {hint}
+              {KEY_LINKS[key] && <> · <a href={KEY_LINKS[key]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--info)' }}>get a key ↗</a></>}
+            </div>
+            {key === 'gemini_api_key' && (
+              <div style={{ marginTop: 6 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={provisioning}
+                  onClick={async () => {
+                    setProvisioning(true);
+                    setProvisionMsg(null);
+                    try {
+                      await api.provisionGeminiKey();
+                      setProvisionMsg('Gemini key created on your Google project and saved — no copy-paste needed.');
+                      setConfigured(prev => ({ ...prev, gemini_api_key: true }));
+                    } catch (e) {
+                      setProvisionMsg(e instanceof Error ? e.message : 'Provisioning failed');
+                    }
+                    setProvisioning(false);
+                  }}
+                >
+                  {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
+                </button>
+                {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
+              </div>
+            )}
           </div>
         ))}
         <div className="form-row" style={{ marginBottom: 10 }}>

@@ -37,6 +37,10 @@ export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/webmasters',
   'https://www.googleapis.com/auth/indexing',
   'https://www.googleapis.com/auth/userinfo.email',
+  // Needed for one-click Gemini key provisioning (API Keys API + Service
+  // Usage). Accounts linked before this scope existed must re-link once to
+  // use that feature; everything else works without it.
+  'https://www.googleapis.com/auth/cloud-platform',
 ].join(' ');
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────

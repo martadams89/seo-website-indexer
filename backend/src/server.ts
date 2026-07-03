@@ -90,6 +90,7 @@ import { checkSiteHygiene } from './indexer/hygiene.js';
 import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
+import { provisionGeminiKey } from './ai/provision.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -833,6 +834,17 @@ app.post('/api/ai/run/:promptId', async (req) => ({
   results: await runPrompt(Number((req.params as { promptId: string }).promptId)),
 }));
 app.post('/api/ai/run-all', async () => ({ ran: await runAllPrompts() }));
+
+// One-click Gemini key using the linked Google account's OAuth.
+app.post('/api/ai/provision/gemini', async (req, reply) => {
+  const { account_id } = (req.body ?? {}) as { account_id?: string };
+  const accounts = getAllGoogleAccounts();
+  const account = account_id ? accounts.find(a => a.id === account_id) : accounts[0];
+  if (!account) return reply.code(400).send({ error: 'No Google account linked yet (Accounts page).' });
+  const result = await provisionGeminiKey(account.id);
+  if (!result.ok) return reply.code(422).send(result);
+  return result;
+});
 
 
 await app.listen({ port: PORT, host: HOST });
