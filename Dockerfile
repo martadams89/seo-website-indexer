@@ -1,5 +1,5 @@
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -8,7 +8,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Build backend ────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:20-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS backend-builder
 
 WORKDIR /app/backend
 COPY backend/package*.json ./
@@ -17,7 +17,7 @@ COPY backend/ ./
 RUN npm run build
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 # Install dumb-init for proper signal handling, su-exec for privilege drop,
 # and wget for the HEALTHCHECK probe.
