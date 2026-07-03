@@ -5,9 +5,9 @@
     ":semanticCommits",
     ":dependencyDashboard"
   ],
-  "schedule": ["before 6am on monday"],
-  "timezone": "Europe/London",
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "rangeStrategy": "bump",
   "lockFileMaintenance": {
     "enabled": true,
@@ -16,24 +16,41 @@
   "packageRules": [
     {
       "description": "Auto-merge safe updates once CI is green (patch/minor, pinned digests, GitHub Actions). Majors stay as PRs for a human.",
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
       "automerge": true,
       "platformAutomerge": true
     },
     {
       "description": "Group all non-major npm updates into one weekly PR per workspace",
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "npm dependencies (non-major)"
     },
     {
-      "description": "better-sqlite3 majors track Node ABI — never auto-merge",
-      "matchPackageNames": ["better-sqlite3"],
-      "matchUpdateTypes": ["major"],
+      "description": "better-sqlite3 majors track Node ABI \u2014 never auto-merge",
+      "matchPackageNames": [
+        "better-sqlite3"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false,
-      "addLabels": ["needs-review"]
+      "addLabels": [
+        "needs-review"
+      ]
     }
   ],
   "prConcurrentLimit": 5,
-  "prHourlyLimit": 3
+  "prHourlyLimit": 3,
+  "description": "Self-hosted via .github/workflows/renovate.yml (weekly cron + manual dispatch); cadence lives there, not here."
 }

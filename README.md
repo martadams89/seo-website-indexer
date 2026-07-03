@@ -499,7 +499,7 @@ This repo looks after itself:
 
 - **Automated releases** — [release-please](https://github.com/googleapis/release-please) turns [Conventional Commits](CONTRIBUTING.md#commit-messages--conventional-commits-required) into a rolling release PR with a generated changelog. Merging it tags `vX.Y.Z`, publishes a GitHub Release with notes, and the Docker workflow ships `latest`, `X.Y.Z` and `X.Y` image tags automatically. The running version is visible at `/api/status`.
 - **Automated dependency updates** — [Renovate](https://docs.renovatebot.com) opens grouped weekly PRs; patch/minor updates, action pins and lockfile maintenance **auto-merge once CI is green** (unit tests + typecheck + lint + build + Docker build). Majors — and `better-sqlite3` majors especially, which track the Node ABI — wait for a human.
-- **To enable on a fork**: install the [Renovate GitHub App](https://github.com/apps/renovate), allow auto-merge in repo settings, and mark the CI jobs as required checks so auto-merge is actually gated on them.
+- **Self-hosted Renovate** — runs as a [workflow](.github/workflows/renovate.yml) (Mondays + manual dispatch), no third-party app. One-time setup on a fork: add a fine-grained PAT as the `RENOVATE_TOKEN` secret (Contents, Pull requests, Workflows — read/write), allow auto-merge in repo settings, and require the status checks **`backend`**, **`frontend`** and **`build-and-push`** on `main` so auto-merge is gated on green CI. Renovate updates its own action pin, so the bot maintains itself too.
 
 ---
 
