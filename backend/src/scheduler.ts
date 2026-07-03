@@ -846,6 +846,8 @@ async function _doRun(
 
   for (const site of allSites) {
     if (_stopRequested) break;
+    // Monitor-only sites keep their hand-maintained files — never overwrite.
+    if (!site.geo_manage) continue;
     // Only deploy if a target is configured.
     if (!site.deploy_webhook_url && !site.ftp_host) continue;
     try {

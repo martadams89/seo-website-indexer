@@ -23,7 +23,7 @@ const NAV = [
 // ── Layout Component ──────────────────────────────────────────────────────────
 
 export default function Layout() {
-  const { status, appendLog, theme, toggleTheme, sseConnected, setSseConnected } = useApp();
+  const { status, appendLog, theme, toggleTheme, sseConnected, setSseConnected, markSseAlive } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
@@ -40,7 +40,7 @@ export default function Layout() {
 
   // SSE connection for live logs
   useEffect(() => {
-    const disconnect = createLogStream(appendLog, () => setSseConnected(true));
+    const disconnect = createLogStream(appendLog, markSseAlive);
     return disconnect;
   }, [appendLog, setSseConnected]);
 

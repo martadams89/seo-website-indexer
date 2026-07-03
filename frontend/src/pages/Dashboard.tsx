@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp, Unlock } from 'lucide-react';
 import { useApp, useToast } from '../AppContext';
-import { api } from '../api';
 import { formatDistanceToNow } from 'date-fns';
 import { QuotaWidget } from '../components/QuotaWidget';
+import { Link } from 'react-router-dom';
+import { api, type AnalyticsOverview, type AlertRow } from '../api';
 
 export default function Dashboard() {
   const { status, sites, runs, logs, refresh } = useApp();
@@ -12,6 +13,13 @@ export default function Dashboard() {
   const [stopping, setStopping] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [runError, setRunError] = useState('');
+  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+
+  useEffect(() => {
+    api.getAnalyticsOverview().then(setOverview).catch(() => null);
+    api.getAlerts().then(a => setAlerts(a.filter(x => !x.acked).slice(0, 5))).catch(() => null);
+  }, []);
 
   const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
   const totalSubmitted = todayRuns.reduce((s, r) => s + r.total_submitted, 0);
@@ -182,6 +190,49 @@ export default function Dashboard() {
           <div className="stat-sub">{isCurrentlyRunning ? '🟢 Running now' : 'Next run: scheduled'}</div>
         </div>
       </div>
+
+      {/* ── Index health (analytics engine) ── */}
+      {overview && overview.totals.urls_total > 0 && (
+        <Link to="/analytics" className="health-strip mb-4">
+          <div className="health-strip-item">
+            <span className="health-strip-value" style={{ color: 'var(--ok)' }}>
+              {Math.round((overview.totals.urls_indexed / Math.max(overview.totals.urls_total, 1)) * 100)}%
+            </span>
+            <span className="health-strip-label">indexed</span>
+          </div>
+          <div className="health-strip-item">
+            <span className="health-strip-value">{overview.totals.urls_total.toLocaleString()}</span>
+            <span className="health-strip-label">URLs tracked</span>
+          </div>
+          <div className="health-strip-item">
+            <span className="health-strip-value" style={{ color: overview.totals.urls_stale ? 'var(--warn)' : undefined }}>{overview.totals.urls_stale}</span>
+            <span className="health-strip-label">stale</span>
+          </div>
+          <div className="health-strip-item">
+            <span className="health-strip-value" style={{ color: overview.totals.failures ? 'var(--error)' : undefined }}>{overview.totals.failures}</span>
+            <span className="health-strip-label">failing</span>
+          </div>
+          <div className="health-strip-item">
+            <span className="health-strip-value" style={{ color: overview.totals.open_alerts ? 'var(--warn)' : undefined }}>{overview.totals.open_alerts}</span>
+            <span className="health-strip-label">open alerts</span>
+          </div>
+          <span className="health-strip-cta">Full analytics →</span>
+        </Link>
+      )}
+
+      {alerts.length > 0 && (
+        <div className="card mb-4" style={{ borderColor: 'var(--warn)' }}>
+          <div className="card-title">⚠ Open alerts</div>
+          {alerts.map(a => (
+            <div key={a.id} className="dash-alert-row">
+              <span className="alert-dot" style={{ background: a.severity === 'error' ? 'var(--error)' : 'var(--warn)' }} />
+              <span style={{ flex: 1, fontSize: 12.5 }}>{a.message}</span>
+              <span className="text-dim" style={{ fontSize: 11 }}>{a.domain ?? ''}</span>
+            </div>
+          ))}
+          <Link to="/analytics" className="text-dim" style={{ fontSize: 11 }}>Manage in Analytics →</Link>
+        </div>
+      )}
 
       <div className="grid-2 mb-4">
         {/* ── Sites overview ── */}

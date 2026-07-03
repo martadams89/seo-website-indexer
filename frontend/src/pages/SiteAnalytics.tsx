@@ -16,6 +16,7 @@ export default function SiteAnalyticsPage() {
   const [hygieneLoading, setHygieneLoading] = useState(false);
   const [bingQuota, setBingQuota] = useState<{ DailyQuota: number; MonthlyQuota: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [cruxMsg, setCruxMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try { setData(await api.getSiteAnalytics(siteId)); }
@@ -46,7 +47,7 @@ export default function SiteAnalyticsPage() {
   }
 
   if (!data) return <div className="page-loading">Loading site analytics…</div>;
-  const { site, snapshot, trend, states, freshness, crux } = data;
+  const { site, snapshot, trend, states, freshness, failures, crux } = data;
   const rate = snapshot.urls_total ? Math.round((snapshot.urls_indexed / snapshot.urls_total) * 100) : 0;
   const lastCrux = crux[crux.length - 1];
 
@@ -60,7 +61,11 @@ export default function SiteAnalyticsPage() {
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" disabled={busy === 'crux'}
-            onClick={() => act('crux', () => api.refreshCrux(siteId).then(load), 'Core Web Vitals refreshed')}>
+            onClick={() => act('crux', async () => {
+              const r = await api.refreshCrux(siteId);
+              setCruxMsg('error' in r ? r.error : null);
+              await load();
+            }, 'Core Web Vitals refreshed')}>
             <Gauge size={12} /> <span className="hide-mobile">Refresh CWV</span>
           </button>
           <button className="btn btn-secondary btn-sm" disabled={busy === 'bing'}
@@ -123,7 +128,13 @@ export default function SiteAnalyticsPage() {
               <span className={`badge ${lastCrux.inp_ms != null && lastCrux.inp_ms <= 200 ? 'badge-ok' : 'badge-warn'}`}>INP {lastCrux.inp_ms != null ? `${lastCrux.inp_ms}ms` : '—'}</span>
               <span className={`badge ${lastCrux.cls != null && lastCrux.cls <= 0.1 ? 'badge-ok' : 'badge-warn'}`}>CLS {lastCrux.cls ?? '—'}</span>
             </div>
-          ) : <div className="empty-note">No CrUX data — add a CrUX API key in Settings and refresh.</div>}
+          ) : (
+            <div className="empty-note">
+              {cruxMsg
+                ? cruxMsg
+                : 'No CrUX data yet — add a CrUX API key in Settings (enable the Chrome UX Report API first), then hit "Refresh CWV" above. Low-traffic origins aren\u2019t in Google\u2019s dataset at all.'}
+            </div>
+          )}
         </div>
       </div>
 
@@ -149,19 +160,56 @@ export default function SiteAnalyticsPage() {
         )}
       </div>
 
+      {/* Failing URLs */}
+      {failures.length > 0 && (
+        <div className="panel">
+          <h3 className="panel-title" style={{ color: 'var(--error)' }}>Failing URLs ({failures.length})</h3>
+          <div className="table-scroll" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            <table className="mini-table">
+              <thead><tr><th>URL</th><th>API</th><th>Fails</th><th>Last failure</th></tr></thead>
+              <tbody>
+                {failures.map((f, i) => (
+                  <tr key={i}>
+                    <td className="cell-url">{f.url.replace(/^https?:\/\/[^/]+/, '')}</td>
+                    <td><span className="badge badge-warn">{f.api}</span></td>
+                    <td style={{ fontWeight: 600 }}>{f.fail_count}</td>
+                    <td>{new Date(f.last_failed_at + 'Z').toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-dim" style={{ fontSize: 11, marginTop: 6 }}>
+            Details of each failure are in the run logs around the timestamp shown.
+          </div>
+        </div>
+      )}
+
       {/* llms.txt lifecycle */}
       <div className="panel">
         <div className="flex items-center gap-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <h3 className="panel-title" style={{ margin: 0 }}><FileText size={13} /> llms.txt &amp; robots.txt</h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2" style={{ alignItems: 'center' }}>
             <button className="btn btn-secondary btn-sm" onClick={loadLlms} disabled={llmsLoading}>
               {llmsLoading ? 'Auditing…' : 'Audit now'}
             </button>
-            <button className="btn btn-primary btn-sm" disabled={busy === 'deploy'}
-              onClick={() => act('deploy', () => api.deployGeo(siteId).then(loadLlms), 'GEO files deployed')}>
-              <UploadCloud size={12} /> Deploy
-            </button>
+            {!!site.geo_manage && (site.deploy_webhook_url || site.ftp_host) && (
+              <button className="btn btn-primary btn-sm" disabled={busy === 'deploy'}
+                onClick={() => {
+                  if (!confirm('Deploy will REPLACE the live llms.txt and robots.txt with the generated versions shown below. If your live files are richer (hand-written), cancel and stay in monitor-only mode.')) return;
+                  act('deploy', () => api.deployGeo(siteId).then(loadLlms), 'GEO files deployed');
+                }}>
+                <UploadCloud size={12} /> Deploy
+              </button>
+            )}
           </div>
+        </div>
+        <div className="empty-note" style={{ marginTop: 10 }}>
+          {site.geo_manage
+            ? ((site.deploy_webhook_url || site.ftp_host)
+                ? 'Managed mode: the tool generates these files and deploys them on every run. Deploy replaces the live files.'
+                : 'Managed mode, but no deployment method is set — edit this site on the Sites page and add a deploy webhook URL or FTP/SFTP credentials.')
+            : 'Monitor-only (default): your live files are treated as the source of truth — the tool lints and freshness-checks them but never overwrites. If your llms.txt is hand-written and richer than the generated baseline, this is the mode you want. Enable managed mode in the site\u2019s settings only if you want the tool to own these files.'}
         </div>
         {llms && (
           <div style={{ marginTop: 12 }}>
@@ -169,7 +217,9 @@ export default function SiteAnalyticsPage() {
               <span className={`badge ${llms.live.status === 200 ? 'badge-ok' : 'badge-error'}`}>llms.txt {llms.live.status === 200 ? 'live' : `HTTP ${llms.live.status || 'unreachable'}`}</span>
               <span className={`badge ${llms.liveFull ? 'badge-ok' : ''}`}>llms-full.txt {llms.liveFull ? 'live' : 'absent'}</span>
               <span className={`badge ${llms.robotsLive.status === 200 ? 'badge-ok' : 'badge-error'}`}>robots.txt {llms.robotsLive.status === 200 ? 'live' : 'missing'}</span>
-              <span className={`badge ${llms.drift ? 'badge-warn' : 'badge-ok'}`}>{llms.drift ? 'DRIFT vs generated' : 'in sync'}</span>
+              {site.geo_manage
+                ? <span className={`badge ${llms.drift ? 'badge-warn' : 'badge-ok'}`}>{llms.drift ? 'DRIFT vs generated' : 'in sync'}</span>
+                : <span className="badge">{llms.drift ? 'differs from generated baseline (expected — hand-maintained)' : 'matches generated baseline'}</span>}
               <span className={`badge ${llms.lint.ok ? 'badge-ok' : 'badge-warn'}`}>{llms.lint.ok ? <><CheckCircle2 size={11} /> lint clean</> : `${llms.lint.issues.length} lint issue${llms.lint.issues.length === 1 ? '' : 's'}`}</span>
             </div>
             {!llms.lint.ok && (

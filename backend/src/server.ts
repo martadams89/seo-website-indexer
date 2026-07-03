@@ -87,7 +87,7 @@ import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, reco
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
-import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS } from './ai/citations.js';
+import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, getThread, replyInThread, type Provider } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
@@ -416,6 +416,7 @@ app.put('/api/sites/:id', async (req, reply) => {
     ftp_user: string | null;
     ftp_pass: string | null;
     ftp_path: string | null;
+    geo_manage: number | null;
   }>;
 
   // Accept both camelCase and snake_case for the google account id so the
@@ -450,6 +451,7 @@ app.put('/api/sites/:id', async (req, reply) => {
       ftp_user: updates.ftp_user !== undefined ? updates.ftp_user : existing.ftp_user,
       ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
       ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
+      geo_manage: updates.geo_manage !== undefined ? Number(updates.geo_manage) : existing.geo_manage,
     });
   } catch (e) {
     console.error(`[PUT /api/sites/${id}] upsertSite failed:`, e);
@@ -557,8 +559,10 @@ app.get('/api/logs/stream', async (req, reply) => {
     send({ type: 'log', ...entry });
   });
 
+  // Real ping events (not SSE comments) so the client's liveness watchdog
+  // sees activity even when no logs are flowing.
   const keepAlive = setInterval(() => {
-    reply.raw.write(': keepalive\n\n');
+    send({ type: 'ping', ts: new Date().toISOString() });
   }, 15_000);
 
   req.socket.on('close', () => {
@@ -684,14 +688,23 @@ app.post('/api/scheduler/release-lock', async (_req, reply) => {
 // ── GEO File Deploy (robots.txt + llms.txt) ───────────────────────────────────
 
 app.post('/api/sites/:id/deploy-geo', async (req, reply) => {
-  const { id } = req.params as { id: string };
-  const site = getSiteById(id);
+  const site = getSiteById((req.params as { id: string }).id);
   if (!site) return reply.status(404).send({ error: 'Site not found.' });
+  if (!site.geo_manage) {
+    return reply.status(409).send({
+      error: 'This site is in monitor-only mode — its llms.txt/robots.txt are maintained outside this tool. Enable "managed" mode on the site first if you really want the tool to generate and deploy them.',
+    });
+  }
+  if (!site.deploy_webhook_url && !site.ftp_host) {
+    return reply.status(409).send({
+      error: 'No deployment method configured. Edit the site (Sites page) and set either a deploy webhook URL or FTP/SFTP credentials.',
+    });
+  }
   try {
     const result = await deployGeoFiles(site);
-    return { ok: true, ...result };
+    return result;
   } catch (e) {
-    return reply.status(500).send({ error: String(e) });
+    return reply.status(502).send({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -771,7 +784,9 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
   const site = getSiteById((req.params as { id: string }).id);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
   const audit = await auditSiteLlms(site);
-  if (audit.drift) {
+  // Drift only matters when the tool owns the files; hand-maintained (monitor-
+  // only) sites are EXPECTED to be richer than the generated baseline.
+  if (audit.drift && site.geo_manage) {
     recordAlert(site.id, 'llms_drift', `${site.domain}: live llms.txt differs from generated version`, 'info');
   }
   return audit;
@@ -854,6 +869,24 @@ app.post('/api/ai/run/:promptId', async (req) => ({
   results: await runPrompt(Number((req.params as { promptId: string }).promptId)),
 }));
 app.post('/api/ai/run-all', async () => ({ ran: await runAllPrompts() }));
+
+// Conversation thread for one prompt × provider (root run + follow-ups).
+app.get('/api/ai/prompts/:id/thread/:provider', async (req) => {
+  const { id, provider } = req.params as { id: string; provider: string };
+  return getThread(Number(id), provider);
+});
+
+// Follow-up question in an existing thread — same provider, full context.
+app.post('/api/ai/prompts/:id/reply', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const { provider, message } = (req.body ?? {}) as { provider?: string; message?: string };
+  if (!provider || !message?.trim()) return reply.code(400).send({ error: 'provider and message required' });
+  try {
+    return await replyInThread(Number(id), provider as Provider, message.trim());
+  } catch (e) {
+    return reply.code(422).send({ error: e instanceof Error ? e.message : 'reply failed' });
+  }
+});
 
 // One-click Gemini key using the linked Google account's OAuth.
 app.post('/api/ai/provision/gemini', async (req, reply) => {

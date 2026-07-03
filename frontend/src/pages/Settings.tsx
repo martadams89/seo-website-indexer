@@ -1,73 +1,152 @@
 import { useState, useEffect } from 'react';
-import { Save, LogOut, KeyRound, Bell } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { api } from '../api';
 
-const KEY_LINKS: Record<string, string> = {
-  bing_api_key: 'https://www.bing.com/webmasters/',
-  crux_api_key: 'https://console.cloud.google.com/apis/credentials',
-  openai_api_key: 'https://platform.openai.com/api-keys',
-  anthropic_api_key: 'https://console.anthropic.com/settings/keys',
-  gemini_api_key: 'https://aistudio.google.com/apikey',
-  perplexity_api_key: 'https://www.perplexity.ai/settings/api',
-  xai_api_key: 'https://console.x.ai/',
-  brave_api_key: 'https://brave.com/search/api/',
-};
+type Tab = 'schedule' | 'google' | 'keys' | 'notify';
+
+interface KeyGuide {
+  key: string;
+  label: string;
+  hint: string;
+  free?: string;
+  steps: Array<{ text: string; href?: string; linkLabel?: string }>;
+}
+
+const KEY_GUIDES: KeyGuide[] = [
+  {
+    key: 'bing_api_key',
+    label: 'Bing Webmaster API key',
+    hint: 'Direct URL submission into your verified Bing properties + daily quota. Optional — IndexNow already notifies Bing.',
+    free: 'free',
+    steps: [
+      { text: 'Open Bing Webmaster Tools and sign in.', href: 'https://www.bing.com/webmasters/', linkLabel: 'bing.com/webmasters' },
+      { text: 'Verify your sites — "Import from Google Search Console" does it in one click.' },
+      { text: 'Gear icon (top right) → API access → API Key → generate & copy. One key covers all your verified sites.' },
+    ],
+  },
+  {
+    key: 'crux_api_key',
+    label: 'CrUX API key (Core Web Vitals)',
+    hint: 'Real-user p75 LCP / INP / CLS per site, straight from Chrome telemetry.',
+    free: 'free',
+    steps: [
+      { text: 'Enable the Chrome UX Report API on your Google Cloud project (the same project as your OAuth client is fine) — click "Enable".', href: 'https://console.cloud.google.com/apis/library/chromeuxreport.googleapis.com', linkLabel: 'Enable Chrome UX Report API' },
+      { text: 'Create an API key: Credentials → Create credentials → API key.', href: 'https://console.cloud.google.com/apis/credentials', linkLabel: 'Credentials console' },
+      { text: 'Recommended: edit the key → API restrictions → restrict to "Chrome UX Report API".' },
+      { text: 'Heads-up: CrUX only has data for origins with enough real Chrome traffic. Low-traffic sites return "origin not in the dataset" — that is Google, not a broken key.' },
+    ],
+  },
+  {
+    key: 'gemini_api_key',
+    label: 'Gemini API key',
+    hint: 'Gemini citation checks with Google Search grounding.',
+    free: 'free tier',
+    steps: [
+      { text: 'Easiest: use the ⚡ one-click button below — it creates a service-restricted key on your own Google project via your linked account.' },
+      { text: 'Manual alternative: create a key in Google AI Studio.', href: 'https://aistudio.google.com/apikey', linkLabel: 'aistudio.google.com/apikey' },
+    ],
+  },
+  {
+    key: 'brave_api_key',
+    label: 'Brave Search API key',
+    hint: 'Retrieval-layer presence — Brave grounds Claude’s web search. Strong zero-cost citation signal.',
+    free: 'free ~2k/mo, no card',
+    steps: [
+      { text: 'Sign up for the free "Data for Search" plan (no payment card needed).', href: 'https://brave.com/search/api/', linkLabel: 'brave.com/search/api' },
+      { text: 'Dashboard → API Keys → copy your subscription token.' },
+    ],
+  },
+  {
+    key: 'openai_api_key',
+    label: 'OpenAI API key',
+    hint: 'ChatGPT citation checks with web search.',
+    steps: [
+      { text: 'Create a key in the OpenAI platform (billing must be enabled; each check costs well under a penny).', href: 'https://platform.openai.com/api-keys', linkLabel: 'platform.openai.com/api-keys' },
+    ],
+  },
+  {
+    key: 'anthropic_api_key',
+    label: 'Anthropic API key',
+    hint: 'Claude citation checks with web search.',
+    steps: [
+      { text: 'Create a key in the Anthropic console (billing required).', href: 'https://console.anthropic.com/settings/keys', linkLabel: 'console.anthropic.com' },
+    ],
+  },
+  {
+    key: 'perplexity_api_key',
+    label: 'Perplexity API key',
+    hint: 'Perplexity (sonar) checks — returns explicit citation lists.',
+    steps: [
+      { text: 'Settings → API → generate (requires API credits).', href: 'https://www.perplexity.ai/settings/api', linkLabel: 'perplexity.ai/settings/api' },
+    ],
+  },
+  {
+    key: 'xai_api_key',
+    label: 'xAI API key',
+    hint: 'Grok citation checks with live search.',
+    steps: [
+      { text: 'Create a key in the xAI console.', href: 'https://console.x.ai/', linkLabel: 'console.x.ai' },
+    ],
+  },
+];
+
+const CRON_PRESETS = [
+  { label: 'Every hour',   value: '0 * * * *' },
+  { label: 'Every 6h',     value: '0 */6 * * *' },
+  { label: '3am daily',    value: '0 3 * * *' },
+  { label: 'Every Monday', value: '0 3 * * 1' },
+];
+
+const TABS: Array<{ id: Tab; label: string; icon: typeof Clock }> = [
+  { id: 'schedule', label: 'Scheduling', icon: Clock },
+  { id: 'google',   label: 'Google',     icon: User },
+  { id: 'keys',     label: 'API Keys',   icon: KeyRound },
+  { id: 'notify',   label: 'Notifications', icon: Bell },
+];
 
 export default function SettingsPage() {
   const { status, refresh } = useApp();
+  const [tab, setTab] = useState<Tab>('schedule');
   const [cronSchedule, setCronSchedule] = useState('');
-  const [saving, setSaving]   = useState(false);
-  const [saved, setSaved]     = useState(false);
-  const [clearLoading, setClearLoading] = useState(false);
+  const [projectId, setProjectId] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
-  const [savingKeys, setSavingKeys] = useState(false);
-  const [bingKey, setBingKey] = useState('');
-  const [bingConfigured, setBingConfigured] = useState(false);
-  const [bingSaving, setBingSaving] = useState(false);
-  const [bingSaved, setBingSaved] = useState(false);
+  const [saving, setSaving] = useState<Tab | null>(null);
+  const [saved, setSaved] = useState<Tab | null>(null);
+  const [clearLoading, setClearLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getSettings().then(s => {
-      const rec = s as Record<string, string | boolean>;
-      setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
-      setWebhookUrl((rec.notify_webhook_url as string) ?? '');
-      const conf: Record<string, boolean> = {};
-      for (const [k, v] of Object.entries(rec)) {
-        if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
-      }
-      setConfigured(conf);
-      setBingConfigured(!!rec.bing_api_key_configured);
-    }).catch(() => null);
-  }, []);
-
-  async function saveSettings() {
-    setSaving(true);
-    setSaved(false);
-    try {
-      await api.updateSettings({ cron_schedule: cronSchedule });
-      setSaved(true);
-      await refresh();
-      setTimeout(() => setSaved(false), 3000);
-    } catch { /* ignore */ }
-    setSaving(false);
+  async function loadSettings() {
+    const s = await api.getSettings().catch(() => null);
+    if (!s) return;
+    const rec = s as Record<string, string | boolean>;
+    setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
+    setWebhookUrl((rec.notify_webhook_url as string) ?? '');
+    setProjectId((rec.google_project_id as string) ?? '');
+    const conf: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(rec)) {
+      if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
+    }
+    setConfigured(conf);
   }
 
-  async function saveBing() {
-    setBingSaving(true);
-    setBingSaved(false);
+  useEffect(() => { loadSettings(); }, []);
+
+  async function save(which: Tab, payload: Record<string, string>) {
+    setSaving(which);
+    setSaved(null);
     try {
-      await api.updateSettings({ bing_api_key: bingKey.trim() });
-      setBingConfigured(bingKey.trim().length > 0);
-      setBingKey('');
-      setBingSaved(true);
-      setTimeout(() => setBingSaved(false), 3000);
-    } catch { /* ignore */ }
-    setBingSaving(false);
+      await api.updateSettings(payload);
+      setKeys({});
+      await loadSettings();
+      await refresh();
+      setSaved(which);
+      setTimeout(() => setSaved(s => (s === which ? null : s)), 3000);
+    } catch { /* badge state reflects reality */ }
+    setSaving(null);
   }
 
   async function clearAuth() {
@@ -79,293 +158,218 @@ export default function SettingsPage() {
     window.location.href = '/setup';
   }
 
-  const CRON_PRESETS = [
-    { label: 'Every hour',   value: '0 * * * *' },
-    { label: 'Every 6h',     value: '0 */6 * * *' },
-    { label: '3am daily',    value: '0 3 * * *' },
-    { label: 'Every Monday', value: '0 3 * * 1' },
-  ];
-
   return (
-    <div style={{ maxWidth: 640 }}>
+    <div style={{ maxWidth: 720 }}>
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">Configure scheduling and authentication</p>
+        <p className="page-subtitle">Scheduling, accounts, keys and notifications</p>
       </div>
 
-      {/* ── Schedule ── */}
-      <div className="card mb-4">
-        <div className="card-title">Scheduling</div>
-
-        <div className="input-group mb-3">
-          <label className="input-label">Cron Expression</label>
-          <input
-            className="input"
-            style={{ fontFamily: 'JetBrains Mono' }}
-            value={cronSchedule}
-            onChange={e => setCronSchedule(e.target.value)}
-            placeholder="0 3 * * *"
-          />
-          <span className="input-hint">Server timezone (UTC). Current: <code style={{ fontFamily: 'JetBrains Mono' }}>{status?.scheduler.cronSchedule}</code></span>
-        </div>
-
-        <div className="flex gap-2 flex-wrap mb-3">
-          {CRON_PRESETS.map(p => (
-            <button key={p.value} className="btn btn-secondary btn-sm" onClick={() => setCronSchedule(p.value)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="alert alert-info mb-3">
-          <div className="alert-content" style={{ fontSize: 12 }}>
-            <strong>Google Indexing API limit:</strong> 200 URLs/day across all sites in a single Google Cloud project.
-            The scheduler distributes the budget round-robin across your sites, prioritising new and changed URLs
-            (detected via <code>&lt;lastmod&gt;</code> in sitemaps).
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button className="btn btn-primary" disabled={saving} onClick={saveSettings}>
-            {saving ? <><span className="spinner" /> Saving…</> : saved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save Schedule</>}
-          </button>
-          {saved && <span className="text-ok text-sm">Schedule updated and restarted.</span>}
-        </div>
-      </div>
-
-      {/* ── Auth ── */}
-      <div className="card mb-4">
-        <div className="card-title">Google Authentication</div>
-
-        <div className="flex items-center gap-3 mb-3">
-          <div style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: status?.auth.authenticated ? 'var(--ok)' : 'var(--error)',
-            boxShadow: status?.auth.authenticated ? '0 0 8px var(--ok)' : 'none',
-          }} />
-          <div>
-            {status?.auth.authenticated ? (
-              <>
-                <span className="text-ok" style={{ fontWeight: 600 }}>Connected (Google OAuth 2.0)</span>
-                {status.auth.expiresAt && (
-                  <div className="text-dim text-xs mt-1">
-                    Session active — token expires: {new Date(status.auth.expiresAt).toLocaleDateString()} (auto-refresh enabled)
-                  </div>
-                )}
-              </>
-            ) : (
-              <span className="text-error" style={{ fontWeight: 600 }}>Not authenticated</span>
+      {/* Tab bar */}
+      <div className="settings-tabs">
+        {TABS.map(t => (
+          <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+            <t.icon size={13} /> {t.label}
+            {t.id === 'keys' && (
+              <span className="settings-tab-count">{KEY_GUIDES.filter(g => configured[g.key]).length}/{KEY_GUIDES.length}</span>
             )}
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-          {!status?.auth.authenticated && (
-            <a href="/setup" className="btn btn-primary btn-sm">
-              Set Up Authentication
-            </a>
-          )}
-          {status?.auth.authenticated && (
-            <button className="btn btn-danger btn-sm" disabled={clearLoading} onClick={clearAuth}>
-              {clearLoading ? <><span className="spinner" /> Clearing…</> : <><LogOut size={12} /> Clear Credentials</>}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Bing Webmaster ── */}
-      <div className="card mb-4">
-        <div className="card-title">Bing Webmaster URL Submission</div>
-
-        <div className="flex items-center gap-3 mb-3">
-          <div style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: bingConfigured ? 'var(--ok)' : 'var(--text-dim)',
-            boxShadow: bingConfigured ? '0 0 8px var(--ok)' : 'none',
-          }} />
-          <span style={{ fontWeight: 600, color: bingConfigured ? 'var(--ok)' : 'var(--text-secondary)' }}>
-            {bingConfigured ? 'API key configured' : 'Not configured (optional)'}
-          </span>
-        </div>
-
-        <div className="alert alert-info mb-3">
-          <div className="alert-content" style={{ fontSize: 12 }}>
-            IndexNow already notifies Bing, so this is <strong>optional</strong>. Add a Bing Webmaster API key to also
-            submit changed pages directly into your verified Bing property and surface your daily Bing quota.
-            Get a key from <a href="https://www.bing.com/webmasters" target="_blank" rel="noopener noreferrer">Bing Webmaster Tools</a> → <strong>Settings → API access</strong>. One key covers all your verified sites.
-          </div>
-        </div>
-
-        <div className="input-group mb-3">
-          <label className="input-label">Bing API Key</label>
-          <input
-            className="input"
-            type="password"
-            style={{ fontFamily: 'JetBrains Mono' }}
-            value={bingKey}
-            onChange={e => setBingKey(e.target.value)}
-            placeholder={bingConfigured ? '•••••••• (leave blank to keep current)' : 'Paste your Bing Webmaster API key'}
-            autoComplete="off"
-          />
-          <span className="input-hint">Stored server-side; never returned in plaintext. Submit an empty value to clear it.</span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button className="btn btn-primary" disabled={bingSaving || (!bingKey && !bingConfigured)} onClick={saveBing}>
-            {bingSaving ? <><span className="spinner" /> Saving…</> : bingSaved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save Bing Key</>}
           </button>
-          {bingSaved && <span className="text-ok text-sm">Bing settings updated.</span>}
-        </div>
+        ))}
       </div>
 
-      {/* ── IndexNow Info ── */}
-      <div className="card mb-4">
-        <div className="card-title"><KeyRound size={13} /> API Keys — Bing, CrUX &amp; AI providers</div>
-        <p className="text-dim" style={{ fontSize: 12, marginBottom: 12 }}>
-          Keys are write-only: they are stored server-side and never echoed back. A green badge means a key is configured.
-        </p>
-        {([
-          ['crux_api_key', 'CrUX API key', 'Core Web Vitals (Google Cloud API key, free)'],
-          ['openai_api_key', 'OpenAI API key', 'ChatGPT citation checks (web search)'],
-          ['anthropic_api_key', 'Anthropic API key', 'Claude citation checks (web search)'],
-          ['gemini_api_key', 'Gemini API key', 'Gemini citation checks (Google Search grounding)'],
-          ['perplexity_api_key', 'Perplexity API key', 'Perplexity (sonar) citation checks'],
-          ['xai_api_key', 'xAI API key', 'Grok citation checks (live search)'],
-          ['brave_api_key', 'Brave Search API key', 'FREE tier (~2,000 queries/mo, no card) — retrieval-layer presence; Brave grounds Claude\u2019s web search'],
-        ] as const).map(([key, label, hint]) => (
-          <div key={key} className="form-row" style={{ marginBottom: 10 }}>
-            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {label}
-              {configured[key] && <span className="badge badge-ok">configured</span>}
-            </label>
+      {/* ── Scheduling ── */}
+      {tab === 'schedule' && (
+        <div className="card">
+          <div className="card-title">Indexing schedule</div>
+          <div className="input-group mb-3">
+            <label className="input-label">Cron Expression</label>
             <input
               className="input"
-              type="password"
-              placeholder={configured[key] ? '•••••••• (set — enter a new value to replace)' : 'paste key…'}
-              value={keys[key] ?? ''}
-              onChange={e => setKeys(prev => ({ ...prev, [key]: e.target.value }))}
-              autoComplete="off"
+              style={{ fontFamily: 'JetBrains Mono' }}
+              value={cronSchedule}
+              onChange={e => setCronSchedule(e.target.value)}
+              placeholder="0 3 * * *"
             />
-            <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>
-              {hint}
-              {KEY_LINKS[key] && <> · <a href={KEY_LINKS[key]} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--info)' }}>get a key ↗</a></>}
+            <span className="input-hint">Server timezone (UTC). Current: <code style={{ fontFamily: 'JetBrains Mono' }}>{status?.scheduler.cronSchedule}</code></span>
+          </div>
+          <div className="flex gap-2 flex-wrap mb-3">
+            {CRON_PRESETS.map(p => (
+              <button key={p.value} className="btn btn-secondary btn-sm" onClick={() => setCronSchedule(p.value)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="alert alert-info mb-3">
+            <div className="alert-content" style={{ fontSize: 12 }}>
+              <strong>Google Indexing API limit:</strong> 200 URLs/day per Google Cloud project. The scheduler
+              round-robins the budget across sites, prioritising new and changed URLs (via sitemap <code>&lt;lastmod&gt;</code>).
+              IndexNow key setup lives on the <strong>Sites</strong> page (per-site verify), with full options in the
+              {' '}<a href="https://github.com/martadams89/seo-website-indexer#indexnow--setting-up-the-key-file" target="_blank" rel="noopener noreferrer">README ↗</a>.
             </div>
-            {key === 'gemini_api_key' && (
-              <div style={{ marginTop: 6 }}>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  disabled={provisioning}
-                  onClick={async () => {
-                    setProvisioning(true);
-                    setProvisionMsg(null);
-                    try {
-                      await api.provisionGeminiKey();
-                      setProvisionMsg('Gemini key created on your Google project and saved — no copy-paste needed.');
-                      setConfigured(prev => ({ ...prev, gemini_api_key: true }));
-                    } catch (e) {
-                      setProvisionMsg(e instanceof Error ? e.message : 'Provisioning failed');
-                    }
-                    setProvisioning(false);
-                  }}
-                >
-                  {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
-                </button>
-                {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
-              </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="btn btn-primary" disabled={saving === 'schedule'} onClick={() => save('schedule', { cron_schedule: cronSchedule })}>
+              {saving === 'schedule' ? <><span className="spinner" /> Saving…</> : saved === 'schedule' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save Schedule</>}
+            </button>
+            {saved === 'schedule' && <span className="text-ok text-sm">Schedule updated and restarted.</span>}
+          </div>
+        </div>
+      )}
+
+      {/* ── Google ── */}
+      {tab === 'google' && (
+        <div className="card">
+          <div className="card-title">Google account</div>
+          <div className="flex items-center gap-3 mb-3">
+            <div style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: status?.auth.authenticated ? 'var(--ok)' : 'var(--error)',
+              boxShadow: status?.auth.authenticated ? '0 0 8px var(--ok)' : 'none',
+            }} />
+            <div>
+              {status?.auth.authenticated ? (
+                <>
+                  <span className="text-ok" style={{ fontWeight: 600 }}>Connected (Google OAuth 2.0)</span>
+                  {status.auth.expiresAt && (
+                    <div className="text-dim text-xs mt-1">
+                      Session active — token expires: {new Date(status.auth.expiresAt).toLocaleDateString()} (auto-refresh enabled)
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span className="text-error" style={{ fontWeight: 600 }}>Not authenticated</span>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 mb-4">
+            {!status?.auth.authenticated && (
+              <a href="/setup" className="btn btn-primary btn-sm">Set Up Authentication</a>
+            )}
+            {status?.auth.authenticated && (
+              <button className="btn btn-danger btn-sm" disabled={clearLoading} onClick={clearAuth}>
+                {clearLoading ? <><span className="spinner" /> Clearing…</> : <><LogOut size={12} /> Clear Credentials</>}
+              </button>
             )}
           </div>
-        ))}
-        <div className="form-row" style={{ marginBottom: 10 }}>
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bell size={12} /> Notification webhook URL
-            {webhookUrl && <span className="badge badge-ok">set</span>}
-          </label>
-          <input
-            className="input"
-            placeholder="Slack / Discord / ntfy webhook — run summaries and alerts"
-            value={webhookUrl}
-            onChange={e => setWebhookUrl(e.target.value)}
-          />
+
+          <div className="input-group mb-3">
+            <label className="input-label">Google Cloud project ID <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+            <input
+              className="input"
+              placeholder="auto-derived from your linked OAuth client — set only to override"
+              value={projectId}
+              onChange={e => setProjectId(e.target.value)}
+            />
+            <span className="input-hint">Used by the one-click Gemini key. Leave blank to use the project that owns your OAuth client.</span>
+          </div>
+          <button className="btn btn-primary" disabled={saving === 'google'} onClick={() => save('google', { google_project_id: projectId.trim() })}>
+            {saving === 'google' ? <><span className="spinner" /> Saving…</> : saved === 'google' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
+          </button>
         </div>
-        <button
-          className="btn btn-primary"
-          disabled={savingKeys}
-          onClick={async () => {
-            setSavingKeys(true);
-            const payload: Record<string, string> = { notify_webhook_url: webhookUrl };
-            for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
-            try {
-              await api.updateSettings(payload);
-              setKeys({});
-              const s = await api.getSettings() as Record<string, string | boolean>;
-              const conf: Record<string, boolean> = {};
-              for (const [k, v] of Object.entries(s)) if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
-              setConfigured(conf);
-            } catch { /* surfaced via badge state */ }
-            setSavingKeys(false);
-          }}
-        >
-          <Save size={13} /> {savingKeys ? 'Saving…' : 'Save keys'}
-        </button>
-      </div>
+      )}
 
-      <div className="card">
-        <div className="card-title">IndexNow — How Key Verification Works</div>
-        <div className="flex-col gap-3" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-          <p>
-            IndexNow requires you to prove site ownership by serving a key file at
-            <code className="font-mono" style={{ color: 'var(--text-code)', margin: '0 4px' }}>https://yourdomain.com/{'{key}'}.txt</code>
-            containing exactly the key as plain text.
+      {/* ── API Keys ── */}
+      {tab === 'keys' && (
+        <div className="card">
+          <div className="card-title">API keys</div>
+          <p className="text-dim" style={{ fontSize: 12, marginBottom: 14 }}>
+            Everything here is optional — the indexing loop needs none of it. Keys are write-only: stored server-side,
+            never echoed back. Expand a key for the exact steps to get one.
           </p>
-
-          <div className="alert alert-warn">
-            <div className="alert-content">
-              <div className="alert-title">Why you got a 403 "UserForbiddedToAccessSite" error</div>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                The key file was not accessible from Bing's servers. This is the most common cause of IndexNow failures.
+          {KEY_GUIDES.map(g => (
+            <details key={g.key} className="key-guide">
+              <summary>
+                <span className="key-guide-label">{g.label}</span>
+                {g.free && <span className="badge badge-ok">{g.free}</span>}
+                {configured[g.key]
+                  ? <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>configured</span>
+                  : <span className="badge" style={{ marginLeft: 'auto' }}>not set</span>}
+              </summary>
+              <div className="key-guide-body">
+                <p className="text-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>{g.hint}</p>
+                <ol className="key-guide-steps">
+                  {g.steps.map((s, i) => (
+                    <li key={i}>
+                      {s.text}
+                      {s.href && (
+                        <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder={configured[g.key] ? '•••••••• (set — paste a new value to replace, save empty to keep)' : 'paste key…'}
+                  value={keys[g.key] ?? ''}
+                  onChange={e => setKeys(prev => ({ ...prev, [g.key]: e.target.value }))}
+                  autoComplete="off"
+                />
+                {g.key === 'gemini_api_key' && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={provisioning}
+                      onClick={async () => {
+                        setProvisioning(true);
+                        setProvisionMsg(null);
+                        try {
+                          await api.provisionGeminiKey();
+                          setProvisionMsg('Gemini key created on your Google project and saved — no copy-paste needed.');
+                          setConfigured(prev => ({ ...prev, gemini_api_key: true }));
+                        } catch (e) {
+                          setProvisionMsg(e instanceof Error ? e.message : 'Provisioning failed');
+                        }
+                        setProvisioning(false);
+                      }}
+                    >
+                      {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
+                    </button>
+                    {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
+                  </div>
+                )}
               </div>
-            </div>
-          </div>
-
-          <div className="card" style={{ background: 'var(--bg-input)' }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Option A — This container as your domain proxy (recommended)</div>
-            <p style={{ fontSize: 12 }}>
-              If you can route your domain's traffic through this container (via reverse proxy like nginx/Caddy/Cloudflare),
-              the key file is served automatically at <code className="font-mono" style={{ color: 'var(--text-code)' }}>/{'{key}'}.txt</code>.
-              No manual file deployment needed.
-            </p>
-            <pre style={{
-              background: 'var(--bg-overlay)', padding: 10, borderRadius: 6, marginTop: 8,
-              fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-code)', overflowX: 'auto',
-            }}>
-{`# nginx example — proxy key file through to this container
-location ~* \\.txt$ {
-    proxy_pass http://seo-indexer:3000;
-}`}
-            </pre>
-          </div>
-
-          <div className="card" style={{ background: 'var(--bg-input)' }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Option B — Static file on your website</div>
-            <p style={{ fontSize: 12 }}>
-              Copy the key shown on the Sites page and create a file on your website:
-            </p>
-            <pre style={{
-              background: 'var(--bg-overlay)', padding: 10, borderRadius: 6, marginTop: 8,
-              fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-code)', overflowX: 'auto',
-            }}>
-{`# Create in your public/ or static/ directory:
-echo "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-# Then deploy your site normally.
-# File must be accessible at: https://yourdomain.com/YOUR_KEY.txt`}
-            </pre>
-          </div>
-
-          <p style={{ fontSize: 12 }}>
-            Once deployed, go to <strong>Sites → IndexNow Setup → Verify Key File</strong> to confirm it works.
-          </p>
+            </details>
+          ))}
+          <button
+            className="btn btn-primary"
+            style={{ marginTop: 12 }}
+            disabled={saving === 'keys'}
+            onClick={() => {
+              const payload: Record<string, string> = {};
+              for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
+              save('keys', payload);
+            }}
+          >
+            <Save size={13} /> {saving === 'keys' ? 'Saving…' : saved === 'keys' ? 'Saved ✓' : 'Save keys'}
+          </button>
         </div>
-      </div>
+      )}
+
+      {/* ── Notifications ── */}
+      {tab === 'notify' && (
+        <div className="card">
+          <div className="card-title">Notifications</div>
+          <div className="input-group mb-3">
+            <label className="input-label">Webhook URL {webhookUrl && <span className="badge badge-ok">set</span>}</label>
+            <input
+              className="input"
+              placeholder="https://hooks.slack.com/… · https://discord.com/api/webhooks/… · https://ntfy.sh/your-topic"
+              value={webhookUrl}
+              onChange={e => setWebhookUrl(e.target.value)}
+            />
+            <span className="input-hint">
+              Run summaries and alerts (index drops, schema regressions, quota) are pushed after every run.
+              Slack, Discord and ntfy payloads are detected automatically; anything else receives generic JSON
+              <code style={{ fontFamily: 'JetBrains Mono', margin: '0 4px' }}>{'{title, body}'}</code>.
+              Save empty to disable.
+            </span>
+          </div>
+          <button className="btn btn-primary" disabled={saving === 'notify'} onClick={() => save('notify', { notify_webhook_url: webhookUrl })}>
+            {saving === 'notify' ? <><span className="spinner" /> Saving…</> : saved === 'notify' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
