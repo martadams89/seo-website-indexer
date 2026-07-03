@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/martadams89/seo-website-indexer/compare/v1.0.0...v1.0.1) (2026-07-03)
+
+
+### 🐛 Bug Fixes
+
+* one-click Gemini works with OAuth-only setups; gemini-flash-latest model ([a56e39c](https://github.com/martadams89/seo-website-indexer/commit/a56e39ca22e832bb96f53a27d209ecd4335adb95))
+* one-click Gemini works with OAuth-only setups; gemini-flash-latest model ([e82cca4](https://github.com/martadams89/seo-website-indexer/commit/e82cca468b7b3c0ec000262f7966aeb4935fbd42))
+
 ## [1.0.0](https://github.com/martadams89/seo-website-indexer/compare/v0.9.0...v1.0.0) (2026-07-03)
 
 
