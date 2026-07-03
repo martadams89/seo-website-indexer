@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Filter, Download, Pause, Play, ArrowDown, Search, X } from 'lucide-react';
-import { List, type RowComponentProps } from 'react-window';
 import { useApp } from '../AppContext';
-import { createLogStream, type LogEntry } from '../api';
+import type { LogEntry } from '../api';
 
 const LEVEL_COLORS: Record<string, string> = {
   ok:    'var(--ok)',
@@ -43,38 +42,11 @@ function LogLine({ log }: { log: LogEntry }) {
   );
 }
 
-// ── Virtualized row for react-window v2 ──────────────────────────────────────
-// Heavy lists (>200 entries) render via this row. Fixed height for performance.
-const ROW_HEIGHT = 26;
-function VirtualLogRow({ index, style, items }: RowComponentProps<{ items: LogEntry[] }>) {
-  const log = items[index];
-  if (!log) return null;
-  return (
-    <div style={style} className={`log-vlist-row log-${log.level}`}>
-      <span className="log-ts">{log.created_at ? new Date(log.created_at).toLocaleTimeString() : '--:--:--'}</span>
-      <span className="log-lvl">{log.level.toUpperCase()}</span>
-      <span className="log-msg">{log.message}{log.url ? `  ${log.url}` : ''}</span>
-    </div>
-  );
-}
-
-function VirtualizedLogs({ items }: { items: LogEntry[] }) {
-  return (
-    <List
-      rowComponent={VirtualLogRow}
-      rowCount={items.length}
-      rowHeight={ROW_HEIGHT}
-      rowProps={{ items }}
-      defaultHeight={400}
-      overscanCount={10}
-      style={{ width: '100%', height: '100%', minHeight: 240 }}
-    />
-  );
-}
-
 export default function LogsPage() {
-  const { logs: initialLogs, appendLog, status } = useApp();
-  const [liveLogs, setLiveLogs] = useState<LogEntry[]>(initialLogs);
+  // Layout already holds the single SSE subscription and feeds context — this
+  // page just renders context state. (A second EventSource here used to
+  // double-append every live entry.)
+  const { logs, status } = useApp();
   const [filter, setFilter]     = useState<string>('all');
   const [search, setSearch]     = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -82,35 +54,37 @@ export default function LogsPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
 
-  // Keep local live logs updated from context
-  useEffect(() => {
-    setLiveLogs(initialLogs);
-  }, [initialLogs]);
-
-  // SSE subscription on this page (duplicates might arrive from context — that's fine)
-  useEffect(() => {
-    const unsub = createLogStream((entry) => {
-      appendLog(entry);
-      setLiveLogs(prev => [entry, ...prev].slice(0, 1000));
-    });
-    return unsub;
-  }, [appendLog]);
-
-  // Detect when the user manually scrolls up — pause auto-scroll
-  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+  // Pause auto-follow when the user scrolls away from the bottom.
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > 80;
     userScrolledUp.current = scrolledUp;
     setShowJump(scrolledUp);
-  }, []);
+  }
 
-  // Auto-scroll to bottom when new logs arrive (unless user scrolled up)
+  // Counts + filter in one memoised pass (recomputed once per log batch).
+  const { counts, filtered } = useMemo(() => {
+    const counts = { all: logs.length, ok: 0, info: 0, warn: 0, error: 0 } as Record<string, number>;
+    const needle = search.toLowerCase();
+    const filtered: LogEntry[] = [];
+    // context stores newest-first; render oldest-first so the bottom is "latest"
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const l = logs[i];
+      if (l.level in counts) counts[l.level]++;
+      if (filter !== 'all' && l.level !== filter) continue;
+      if (needle && !l.message.toLowerCase().includes(needle) && !(l.url ?? '').toLowerCase().includes(needle)) continue;
+      filtered.push(l);
+    }
+    return { counts, filtered };
+  }, [logs, filter, search]);
+
+  // Follow the tail as new entries arrive (unless paused or scrolled up).
   useEffect(() => {
     if (autoScroll && !userScrolledUp.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [liveLogs, autoScroll]);
+  }, [filtered.length, autoScroll]);
 
   function jumpToBottom() {
     if (scrollRef.current) {
@@ -120,19 +94,8 @@ export default function LogsPage() {
     }
   }
 
-  const filtered = liveLogs.filter(l => {
-    if (filter !== 'all' && l.level !== filter) return false;
-    if (search) {
-      const needle = search.toLowerCase();
-      if (!l.message.toLowerCase().includes(needle) && !(l.url ?? '').toLowerCase().includes(needle)) {
-        return false;
-      }
-    }
-    return true;
-  });
-
   function downloadLogs() {
-    const text = liveLogs.map(l =>
+    const text = [...logs].reverse().map(l =>
       `[${l.created_at ?? '?'}] [${l.level.toUpperCase()}] ${l.message}${l.url ? ' ' + l.url : ''}`
     ).join('\n');
     const blob = new Blob([text], { type: 'text/plain' });
@@ -140,18 +103,8 @@ export default function LogsPage() {
     a.href = URL.createObjectURL(blob);
     a.download = `seo-indexer-logs-${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
+    URL.revokeObjectURL(a.href);
   }
-
-  const counts = {
-    all:   liveLogs.length,
-    ok:    liveLogs.filter(l => l.level === 'ok').length,
-    info:  liveLogs.filter(l => l.level === 'info').length,
-    warn:  liveLogs.filter(l => l.level === 'warn').length,
-    error: liveLogs.filter(l => l.level === 'error').length,
-  };
-
-  // Reversed (oldest → newest) memoized list used by the virtualized renderer.
-  const virtualItems = useMemo(() => [...filtered].reverse(), [filtered]);
 
   return (
     <div className="logs-page">
@@ -234,10 +187,8 @@ export default function LogsPage() {
                 ? 'No matching logs. Adjust filter/search to see more.'
                 : 'No logs yet. Trigger a run from the Dashboard.'}
             </div>
-          ) : filtered.length > 200 ? (
-            <VirtualizedLogs items={virtualItems} />
           ) : (
-            [...filtered].reverse().map((log, i) => <LogLine key={`${log.id ?? 'x'}-${i}`} log={log} />)
+            filtered.map((log, i) => <LogLine key={log.id ?? `${log.created_at}-${i}`} log={log} />)
           )}
         </div>
 

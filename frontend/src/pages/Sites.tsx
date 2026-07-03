@@ -119,7 +119,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
                   const val = e.target.value;
                   if (!val) return;
                   
-                  let parsedDomain = '';
+                  let parsedDomain: string;
                   if (val.startsWith('sc-domain:')) {
                     parsedDomain = val.replace('sc-domain:', '');
                   } else {

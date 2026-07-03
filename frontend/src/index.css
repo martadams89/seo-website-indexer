@@ -608,6 +608,10 @@ body {
   line-height: 1.6;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* keep the page body still while the panel scrolls (mobile scroll-chaining) */
+  overscroll-behavior: contain;
+  /* we manage tail-follow ourselves — browser scroll anchoring fights it */
+  overflow-anchor: none;
   max-height: 480px;
   padding: 10px 12px;
 }
@@ -1039,26 +1043,6 @@ body {
 .quota-bar-fill[data-level="medium"] { background: linear-gradient(90deg, var(--warn), hsl(28, 90%, 55%)); }
 .quota-bar-fill[data-level="high"]   { background: linear-gradient(90deg, var(--error), hsl(355, 80%, 60%)); }
 
-/* ── Virtualized log list ──────────────────────────────────────────────────── */
-.log-vlist-row {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  align-items: center;
-}
-.log-vlist-row .log-ts { color: var(--text-dim); flex-shrink: 0; }
-.log-vlist-row .log-lvl { flex-shrink: 0; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
-.log-vlist-row .log-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.log-vlist-row.log-info  .log-lvl { background: var(--info-dim);  color: var(--info); }
-.log-vlist-row.log-warn  .log-lvl { background: var(--warn-dim);  color: var(--warn); }
-.log-vlist-row.log-error .log-lvl { background: var(--error-dim); color: var(--error); }
-.log-vlist-row.log-debug .log-lvl { background: var(--bg-input);  color: var(--text-dim); }
 
 /* ──────────────────────────────────────────────────────────────────────────────
    MOBILE UI POLISH

@@ -58,6 +58,7 @@ import {
   getAllUrlFailures,
   getRunLock,
   getDb,
+  pruneOldLogs,
 } from './db/database.js';
 import {
   getAuthStatus,
@@ -719,6 +720,12 @@ try {
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 SEO Website Indexer running at http://localhost:${PORT}\n`);
+
+// Bound the SQLite log table on long-lived installs (30-day retention).
+try {
+  const pruned = pruneOldLogs();
+  if (pruned > 0) console.log(`Pruned ${pruned} log entries older than 30 days`);
+} catch { /* non-fatal */ }
 
 // Start scheduled indexing
 startScheduler();

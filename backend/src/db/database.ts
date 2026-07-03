@@ -20,6 +20,9 @@ export function getDb(): Database.Database {
     _db = new Database(DB_PATH);
     _db.pragma('journal_mode = WAL');
     _db.pragma('foreign_keys = ON');
+    // Scheduler + HTTP handlers write concurrently; wait for locks instead of
+    // throwing SQLITE_BUSY.
+    _db.pragma('busy_timeout = 5000');
     initSchema(_db);
     migrateSettingsToAccounts(_db);
     backfillSiteAccounts(_db);
@@ -120,6 +123,7 @@ function initSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_url_failures_last ON url_failures(last_failed_at);
+    CREATE INDEX IF NOT EXISTS idx_url_state_site ON url_state(site_id);
   `);
 
   // Backwards compatibility migrations
@@ -400,6 +404,16 @@ export interface LogEntry {
   site_id?: string;
   url?: string;
   created_at?: string;
+}
+
+/**
+ * Prune old run logs so the SQLite file stays bounded on long-lived installs.
+ * Keeps 30 days; called at startup and once per scheduler day-roll.
+ */
+export function pruneOldLogs(days = 30): number {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const res = getDb().prepare('DELETE FROM run_logs WHERE created_at < ?').run(cutoff);
+  return res.changes;
 }
 
 export function insertLog(entry: LogEntry): void {

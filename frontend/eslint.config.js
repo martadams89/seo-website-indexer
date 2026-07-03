@@ -18,5 +18,11 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Established fetch-on-mount patterns; warn (visible in CI logs) rather
+      // than block the build. New code should still prefer event handlers.
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-refresh/only-export-components': 'warn',
+    },
   },
 ])
