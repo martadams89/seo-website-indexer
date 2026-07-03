@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [saved, setSaved]     = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [savingKeys, setSavingKeys] = useState(false);
@@ -36,6 +37,7 @@ export default function SettingsPage() {
       const rec = s as Record<string, string | boolean>;
       setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
       setWebhookUrl((rec.notify_webhook_url as string) ?? '');
+      setProjectId((rec.google_project_id as string) ?? '');
       const conf: Record<string, boolean> = {};
       for (const [k, v] of Object.entries(rec)) {
         if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
@@ -276,6 +278,16 @@ export default function SettingsPage() {
           </div>
         ))}
         <div className="form-row" style={{ marginBottom: 10 }}>
+          <label className="label">Google Cloud project ID <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+          <input
+            className="input"
+            placeholder="auto-derived from your linked OAuth client — set only to override"
+            value={projectId}
+            onChange={e => setProjectId(e.target.value)}
+          />
+          <div className="text-dim" style={{ fontSize: 11, marginTop: 3 }}>Used by the one-click Gemini key button. Leave blank to use the project that owns your OAuth client.</div>
+        </div>
+        <div className="form-row" style={{ marginBottom: 10 }}>
           <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Bell size={12} /> Notification webhook URL
             {webhookUrl && <span className="badge badge-ok">set</span>}
@@ -292,7 +304,7 @@ export default function SettingsPage() {
           disabled={savingKeys}
           onClick={async () => {
             setSavingKeys(true);
-            const payload: Record<string, string> = { notify_webhook_url: webhookUrl };
+            const payload: Record<string, string> = { notify_webhook_url: webhookUrl, google_project_id: projectId.trim() };
             for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
             try {
               await api.updateSettings(payload);
