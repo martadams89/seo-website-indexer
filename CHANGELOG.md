@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/martadams89/seo-website-indexer/compare/v1.6.0...v1.6.1) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* unblock Node 24 — bump better-sqlite3 to v12 (Node 20–26 prebuilds) ([#63](https://github.com/martadams89/seo-website-indexer/issues/63)) ([0f018cc](https://github.com/martadams89/seo-website-indexer/commit/0f018ccbb4073a30e65130cb4a3399b682c5d15a))
+
 ## [1.6.0](https://github.com/martadams89/seo-website-indexer/compare/v1.5.0...v1.6.0) (2026-07-04)
 
 
