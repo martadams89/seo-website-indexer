@@ -74,6 +74,16 @@ export function buildLlmsTxt(site: Site): string {
   ].join('\n');
 }
 
+/** Deterministic llms-sitemap.xml listing the site's LLM files (llmstxt.org). */
+export function buildLlmsSitemap(site: Site, hasFull = false): string {
+  const host = normaliseDomain(site.domain);
+  const now = new Date().toISOString();
+  const entry = (loc: string) => `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${now}</lastmod>\n  </url>`;
+  const urls = [entry(`https://${host}/llms.txt`)];
+  if (hasFull) urls.push(entry(`https://${host}/llms-full.txt`));
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`;
+}
+
 export type DeployTarget = 'robots' | 'llms';
 
 export interface DeployResult {
@@ -134,15 +144,18 @@ async function deployFile(site: Site, filename: string, content: string): Promis
  * Deploys robots.txt + llms.txt for a site. Returns per-file results.
  * Logs progress to the system log.
  */
-export async function deployGeoFiles(site: Site): Promise<{ robots: DeployResult; llms: DeployResult }> {
-  logSystem('info', `${site.domain} — deploying robots.txt + llms.txt`, site.id);
+export async function deployGeoFiles(site: Site): Promise<{ robots: DeployResult; llms: DeployResult; llmsSitemap: DeployResult }> {
+  logSystem('info', `${site.domain} — deploying robots.txt + llms.txt + llms-sitemap.xml`, site.id);
 
   const robotsContent = buildRobotsTxt(site);
-  const llmsContent   = buildLlmsTxt(site);
+  // Prefer the AI-generated / hand-edited llms.txt when one has been saved.
+  const llmsContent   = site.llms_txt_content?.trim() ? site.llms_txt_content : buildLlmsTxt(site);
+  const sitemapContent = buildLlmsSitemap(site);
 
-  const [robots, llms] = await Promise.all([
+  const [robots, llms, llmsSitemap] = await Promise.all([
     deployFile(site, 'robots.txt', robotsContent),
     deployFile(site, 'llms.txt',   llmsContent),
+    deployFile(site, 'llms-sitemap.xml', sitemapContent),
   ]);
 
   if (robots.ok) logSystem('ok', `${site.domain} — robots.txt deployed via ${robots.method}`, site.id);
@@ -151,5 +164,8 @@ export async function deployGeoFiles(site: Site): Promise<{ robots: DeployResult
   if (llms.ok) logSystem('ok', `${site.domain} — llms.txt deployed via ${llms.method}`, site.id);
   else logSystem('warn', `${site.domain} — llms.txt deploy: ${llms.message}`, site.id);
 
-  return { robots, llms };
+  if (llmsSitemap.ok) logSystem('ok', `${site.domain} — llms-sitemap.xml deployed via ${llmsSitemap.method}`, site.id);
+  else logSystem('warn', `${site.domain} — llms-sitemap.xml deploy: ${llmsSitemap.message}`, site.id);
+
+  return { robots, llms, llmsSitemap };
 }

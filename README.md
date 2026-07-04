@@ -46,7 +46,7 @@ Search engines only recrawl what they're told about, and AI answer engines only 
 - **AI citation tracking (GEO)** — run tracked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search** and record whether the answers cite your domains; per-prompt × provider matrix with answer excerpts. Providers are optional — add whichever keys you have
 - **One-click Gemini key** — provisions a service-restricted Gemini API key on *your* Google Cloud project using the already-linked account; no console visit, no copy-paste, free tier
 - **Bing Webmaster API** — URL batch submission + quota on Bing's own (separate) submission allowance, alongside IndexNow
-- **llms.txt lifecycle** — live-fetch, structural lint, drift detection against the generated file, and one-click deploy (webhook/FTP)
+- **llms.txt lifecycle** — live-fetch, structural lint, drift detection, one-click deploy (webhook/FTP), plus **AI generation**: a configured LLM writes a comprehensive, spec-compliant `llms.txt` from your site's real pages (with an auto-built `llms-sitemap.xml`)
 - **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
 - **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
 - **Notifications** — run summaries and alerts to Slack, Discord, ntfy, Telegram, email or any generic webhook; each is a first-class channel and fires in parallel
@@ -480,6 +480,12 @@ Sitemap: https://example.com/llms-sitemap.xml
 | `llms.txt`, `llms-full.txt`, other non-HTML | ❌ | ❌ | ❌ | ✅ |
 
 Non-HTML files are intentionally kept out of Google/Bing search submission (they aren't indexable pages and would just create "Excluded" noise), but **are** pushed to IndexNow so Bing and AI answer engines re-crawl your latest AI index. Their change-state is tracked the same way as pages, so they're only re-submitted when their `<lastmod>` changes.
+
+### Generate `llms.txt` with AI
+
+Under a site's **Delivery & GEO** tab, click **Generate with AI** to have a configured LLM (any of your OpenAI / Anthropic / Gemini / xAI / Perplexity keys) write a **comprehensive, spec-compliant `llms.txt`** for you — instead of the minimal built-in template. It scrapes your site's own pages (titles + descriptions from the URLs the crawler already knows) and feeds them to the model with a detailed prompt, so the result reflects your actual content and structure.
+
+Review/edit the generated Markdown, then **Save**. In *Managed* mode the saved `llms.txt` (plus an auto-generated `llms-sitemap.xml`) is deployed to your site root on every run via your webhook/FTP delivery method. Clear it to fall back to the built-in template.
 
 ---
 

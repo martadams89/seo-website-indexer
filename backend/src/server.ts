@@ -47,6 +47,7 @@ import {
   getSiteById,
   upsertSite,
   deleteSite,
+  setSiteLlmsContent,
   getAllSettings,
   getSetting,
   setSetting,
@@ -89,6 +90,7 @@ import {
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
+import { generateLlmsTxt, llmsGenerationProvider } from './ai/generate-llms.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
@@ -1492,7 +1494,31 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
   if (audit.drift && site.geo_manage) {
     recordAlert(site.id, 'llms_drift', `${site.domain}: live llms.txt differs from generated version`, 'info');
   }
-  return audit;
+  // Surface any saved custom (AI-generated / edited) llms.txt + whether an AI
+  // provider is available to generate one.
+  return { ...audit, custom: site.llms_txt_content ?? null, aiProvider: llmsGenerationProvider() };
+});
+
+// Generate a comprehensive llms.txt with a configured AI provider (does not
+// save — the client reviews/edits, then PUTs it below).
+app.post('/api/sites/:id/llms/generate', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  try {
+    return await generateLlmsTxt(site);
+  } catch (e) {
+    const status = (e as { statusCode?: number }).statusCode ?? 502;
+    return reply.code(status).send({ error: e instanceof Error ? e.message : 'Generation failed.' });
+  }
+});
+
+// Save (or clear, with empty body) the custom llms.txt used for deploys.
+app.put('/api/sites/:id/llms', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const { content } = (req.body ?? {}) as { content?: string };
+  setSiteLlmsContent(site.id, content ?? null);
+  return { ok: true };
 });
 
 // ── Bing Webmaster ───────────────────────────────────────────────────────────

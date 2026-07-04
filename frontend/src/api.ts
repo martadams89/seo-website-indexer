@@ -91,6 +91,7 @@ export interface Site {
   ftp_user?: string | null;
   ftp_pass?: string | null;
   ftp_path?: string | null;
+  llms_txt_content?: string | null;
 }
 
 export interface UrlState {
@@ -322,6 +323,10 @@ export const api = {
 
   // ── llms.txt lifecycle ──
   getLlmsAudit: (siteId: string) => apiFetch<LlmsAudit>(`/api/sites/${siteId}/llms-audit`),
+  generateLlms: (siteId: string) =>
+    apiFetch<GeneratedLlms>(`/api/sites/${siteId}/llms/generate`, { method: 'POST' }),
+  saveLlms: (siteId: string, content: string) =>
+    apiFetch<{ ok: boolean }>(`/api/sites/${siteId}/llms`, { method: 'PUT', body: JSON.stringify({ content }) }),
 
   // ── Bing Webmaster ──
   getBingQuota: (siteId: string) => apiFetch<{ DailyQuota: number; MonthlyQuota: number }>(`/api/bing/quota/${siteId}`),
@@ -487,7 +492,10 @@ export interface LlmsAudit {
   robotsGenerated: string;
   lint: { ok: boolean; issues: string[]; stats: { bytes: number; lines: number; links: number; sections: number } };
   drift: boolean;
+  custom: string | null;
+  aiProvider: string | null;
 }
+export interface GeneratedLlms { content: string; provider: string; model: string; pagesScanned: number }
 export interface HygieneReport {
   checked: number;
   issues: Array<{ url: string; kind: string; detail: string }>;
