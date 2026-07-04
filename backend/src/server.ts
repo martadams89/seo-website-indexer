@@ -106,6 +106,7 @@ import {
   createPasswordReset, consumePasswordReset, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
+import { sendTestNotification, configuredChannels } from './utils/notify.js';
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
@@ -1116,7 +1117,15 @@ app.get('/api/logs/stream', async (req, reply) => {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 // Keys that are safe to expose to the frontend (exclude sensitive auth tokens)
-const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id', 'notify_webhook_url'];
+const PUBLIC_SETTINGS = [
+  'cron_schedule', 'google_project_id',
+  // Notification channels (each provider is independently configurable).
+  'notify_webhook_url',
+  'notify_slack_webhook', 'notify_discord_webhook',
+  'notify_ntfy_server', 'notify_ntfy_topic', 'notify_ntfy_token',
+  'notify_telegram_token', 'notify_telegram_chat',
+  'notify_email_to',
+];
 // Write-only secrets: settable via PUT, never echoed back — GET returns
 // `<key>_configured` booleans instead.
 const SECRET_SETTINGS = [
@@ -1157,6 +1166,15 @@ app.put('/api/settings', async (req) => {
     restartScheduler();
   }
   return { ok: true };
+});
+
+// Which notification channels are currently configured (for the Settings UI).
+app.get('/api/notifications/status', async () => ({ configured: configuredChannels() }));
+
+// Fire a test message at every configured channel; report per-channel results.
+app.post('/api/notifications/test', async () => {
+  const results = await sendTestNotification();
+  return { results };
 });
 
 // ── Quota Usage ───────────────────────────────────────────────────────────────

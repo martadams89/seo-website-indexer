@@ -49,7 +49,7 @@ Search engines only recrawl what they're told about, and AI answer engines only 
 - **llms.txt lifecycle** — live-fetch, structural lint, drift detection against the generated file, and one-click deploy (webhook/FTP)
 - **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
 - **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
-- **Notifications** — run summaries and alerts to Slack, Discord, ntfy or any generic webhook
+- **Notifications** — run summaries and alerts to Slack, Discord, ntfy, Telegram, email or any generic webhook; each is a first-class channel and fires in parallel
 - **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
 - **Modern auth** — email + password with **TOTP 2FA**, passwordless **passkeys (WebAuthn)**, and optional **SSO / OpenID Connect** (Google or any OIDC provider); DB-backed sessions, scrypt hashing, per-route brute-force limits
 - **Single container** — no external database, no Redis, no separate workers
@@ -568,6 +568,23 @@ Everything below is **optional** — the core indexing loop needs none of it. Ke
 **Why no headless-browser scraping of the chat UIs?** It violates those services' terms, requires maintaining logged-in sessions against active bot defences (risking the accounts), and logged-out answers are personalised/experiment-bucketed anyway — the API + retrieval-layer approach gives a cleaner signal with none of the exposure.
 
 **AI citation sweeps are manual by design** (the *Run all* button) so provider costs never accrue unattended. Wire `runAllPrompts()` into the scheduler if you want them recurring.
+
+---
+
+## Notifications
+
+Run summaries and alerts (index drops, structured-data regressions, quota exhaustion, hygiene issues) are pushed after every run. Configure any number of channels under **Settings → Notifications** — each is an independent, first-class provider, and every notification fans out to **all** configured channels in parallel. Use **Save & send test** to verify each one.
+
+| Channel | What you need | Notes |
+| --- | --- | --- |
+| **Slack** | Incoming Webhook URL | api.slack.com → create an Incoming Webhook, pick the channel. |
+| **Discord** | Channel Webhook URL | Channel → Integrations → Webhooks → New Webhook. |
+| **ntfy** | A topic (+ optional server & token) | Free push to phone/desktop; defaults to `https://ntfy.sh`. Set a server URL + token for private/self-hosted. |
+| **Telegram** | Bot token + chat ID | Create a bot with [@BotFather](https://t.me/BotFather); get your chat id from `getUpdates`. |
+| **Generic webhook** | Any URL | Receives `POST {"title": "…", "body": "…"}`. Slack/Discord/ntfy URLs in this field are still auto-detected for backwards compatibility. |
+| **Email** | Recipient address(es) | Requires SMTP (see [Email](#email-based-password-reset-optional)). |
+
+All channel config lives in the dashboard (stored in SQLite) — no env vars needed except SMTP for the email channel.
 
 ---
 
