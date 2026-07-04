@@ -64,10 +64,29 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [ssoProviders, setSsoProviders] = useState<Array<{ id: string; name: string }>>([]);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [forgotSent, setForgotSent] = useState('');
 
   useEffect(() => {
-    if (mode === 'login') api.ssoProviders().then(setSsoProviders).catch(() => setSsoProviders([]));
+    if (mode === 'login') {
+      api.ssoProviders().then(setSsoProviders).catch(() => setSsoProviders([]));
+      api.bootstrapStatus().then(s => setEmailEnabled(s.emailEnabled)).catch(() => setEmailEnabled(false));
+    }
   }, [mode]);
+
+  async function sendReset(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api.forgotPassword(email.trim());
+      setForgotSent(r.message);
+    } catch (err) {
+      setError((err as ApiError).message || 'Could not send the reset email.');
+    }
+    setBusy(false);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -104,6 +123,37 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
     setBusy(false);
   }
 
+  if (forgot) {
+    return (
+      <div className="auth-screen">
+        <form className="auth-card" onSubmit={sendReset}>
+          <div className="auth-logo">🔑</div>
+          <h1 className="auth-title">Reset your password</h1>
+          {forgotSent ? (
+            <>
+              <p className="auth-sub">{forgotSent}</p>
+              <button type="button" className="btn btn-secondary" onClick={() => { setForgot(false); setForgotSent(''); }}
+                style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>Back to sign in</button>
+            </>
+          ) : (
+            <>
+              <p className="auth-sub">Enter your account email and we'll send you a reset link.</p>
+              <label className="auth-field">
+                <span>Email</span>
+                <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="username" required />
+              </label>
+              {error && <div className="auth-error">{error}</div>}
+              <button className="btn btn-primary" type="submit" disabled={busy || !email.trim()} style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
+                {busy ? <Loader2 className="spin" size={14} /> : <KeyRound size={14} />} Send reset link
+              </button>
+              <button type="button" className="auth-link" onClick={() => { setForgot(false); setError(''); }}>Back to sign in</button>
+            </>
+          )}
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
@@ -132,6 +182,11 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
               <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)}
                 placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required />
             </label>
+            {mode === 'login' && emailEnabled && (
+              <button type="button" className="auth-link" onClick={() => { setForgot(true); setError(''); }}>
+                Forgot password?
+              </button>
+            )}
           </>
         )}
 

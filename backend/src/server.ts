@@ -102,8 +102,10 @@ import {
   createSession, getSessionUser, destroySession, setUserPassword,
   generateTotpSecret, totpUri, verifyTotp, setTotpSecret, getTotpSecret, enableTotp, disableTotp,
   toPublic, pruneExpiredSessions, listUsers, getUserById,
-  countSuperAdmins, setUserSuperAdmin, deleteUser, type User,
+  countSuperAdmins, setUserSuperAdmin, deleteUser,
+  createPasswordReset, consumePasswordReset, type User,
 } from './auth/users.js';
+import { emailConfigured, sendEmail } from './utils/email.js';
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
@@ -197,6 +199,7 @@ const AUTH_OPEN_PATHS = new Set<string>([
   '/api/auth/login', '/api/auth/signup', '/api/auth/bootstrap-status', '/api/auth/logout',
   '/api/auth/google/callback', '/health', '/api/livez', '/api/healthz',
   '/api/auth/passkeys/login/start', '/api/auth/passkeys/login/finish', '/api/auth/sso/providers',
+  '/api/auth/forgot-password', '/api/auth/reset-password',
 ]);
 // Pre-auth path prefixes (dynamic segments) — e.g. the SSO provider redirect
 // and callback which the identity provider hits with no session.
@@ -345,7 +348,7 @@ app.get('/api/status', async (req) => {
 
 // ── App authentication (users, sessions, 2FA) ─────────────────────────────────
 
-app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0 }));
+app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0, emailEnabled: emailConfigured() }));
 
 app.get('/api/auth/me', async (req, reply) => {
   const token = sessionTokenFromReq(req);
@@ -403,6 +406,42 @@ app.post('/api/auth/change-password', async (req, reply) => {
   }
   if (!newPassword || newPassword.length < 8) return reply.status(400).send({ error: 'New password must be at least 8 characters.' });
   setUserPassword(user.id, newPassword);
+  return { ok: true };
+});
+
+// ── Forgot / reset password (email link) ─────────────────────────────────────
+// Both OPEN + rate-limited. forgot-password always returns a generic success so
+// it never reveals which emails have accounts.
+app.post('/api/auth/forgot-password', AUTH_RATE_LIMIT, async (req) => {
+  const { email } = (req.body ?? {}) as { email?: string };
+  const generic = { ok: true, message: 'If that email has an account and email is configured, a reset link is on its way.' };
+  if (!email || !emailConfigured()) return generic;
+  const user = getUserByEmail(email.trim().toLowerCase());
+  if (!user) return generic;
+  const token = createPasswordReset(user.id);
+  const { origin } = rpInfo(req);
+  const link = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: 'Reset your SEO Website Indexer password',
+      text: `Someone requested a password reset for your account.\n\nReset it here (valid for 1 hour):\n${link}\n\nIf this wasn't you, you can ignore this email — your password is unchanged.`,
+      html: `<p>Someone requested a password reset for your account.</p>`
+        + `<p><a href="${link}">Reset your password</a> (valid for 1 hour).</p>`
+        + `<p style="color:#888;font-size:13px">If this wasn't you, ignore this email — your password is unchanged.</p>`,
+    });
+  } catch (e) {
+    logSystem('warn', `Password-reset email failed for ${user.email}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return generic;
+});
+
+app.post('/api/auth/reset-password', AUTH_RATE_LIMIT, async (req, reply) => {
+  const { token, password } = (req.body ?? {}) as { token?: string; password?: string };
+  if (!token) return reply.status(400).send({ error: 'Missing reset token.' });
+  if (!password || password.length < 8) return reply.status(400).send({ error: 'New password must be at least 8 characters.' });
+  const userId = consumePasswordReset(token, password);
+  if (!userId) return reply.status(400).send({ error: 'This reset link is invalid or has expired. Request a new one.' });
   return { ok: true };
 });
 

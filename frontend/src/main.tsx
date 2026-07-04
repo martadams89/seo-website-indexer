@@ -15,13 +15,30 @@ import CitationsPage from './pages/Citations'
 import SettingsPage from './pages/Settings'
 import SetupPage from './pages/Setup'
 import AccountsPage from './pages/Accounts'
+import ResetPasswordPage from './pages/ResetPassword'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthGate>
-      <WorkspaceProvider>
-      <AppProvider>
+      <Routes>
+        {/* Public, outside the auth gate — reached from the emailed reset link */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/*" element={
+          <AuthGate>
+          <WorkspaceProvider>
+          <AppProvider>
+            <InnerRoutes />
+          </AppProvider>
+          </WorkspaceProvider>
+          </AuthGate>
+        } />
+      </Routes>
+    </BrowserRouter>
+  </StrictMode>
+)
+
+function InnerRoutes() {
+  return (
         <Routes>
           {/* Setup has no sidebar */}
           <Route path="/setup" element={
@@ -41,9 +58,5 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>
-      </AppProvider>
-      </WorkspaceProvider>
-      </AuthGate>
-    </BrowserRouter>
-  </StrictMode>
-)
+  );
+}
