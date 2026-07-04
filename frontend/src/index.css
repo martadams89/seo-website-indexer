@@ -1638,3 +1638,11 @@ body {
   .mover-metrics { gap: 14px; width: 100%; justify-content: space-between; }
   .mover-chevron { display: none; }
 }
+
+/* ── Sortable table headers ───────────────────────────────────────────────── */
+.mini-table th.sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.mini-table th.sort-th:hover { color: var(--text-secondary); }
+.mini-table th.sort-th.active { color: var(--accent, #7c6cf5); }
+.sort-th-inner { display: inline-flex; align-items: center; gap: 3px; }
+.sort-th-icon { opacity: 0.45; flex-shrink: 0; }
+.sort-th.active .sort-th-icon { opacity: 1; }

@@ -6,6 +6,7 @@ import {
 import { Link } from 'react-router-dom';
 import { useApp } from '../AppContext';
 import { api, type Site, type GSCSite, type GoogleAccount, type UrlState } from '../api';
+import { useSort, SortTh } from '../components/SortableTable';
 import { InfoTooltip } from '../components/Tooltip';
 
 // ── Add Site Modal (GSC import wizard) ────────────────────────────────────────
@@ -170,6 +171,8 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
 
   useEffect(() => { loadUrls(); }, [loadUrls]);
 
+  const urlSort = useSort(urls as unknown as Array<Record<string, unknown>>);
+
   async function runSiteIndexing(dryRun = false) {
     setRunning(true);
     setRunMsg('');
@@ -237,10 +240,9 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
           <table className="mini-table">
             <thead>
               <tr>
-                <th>URL</th>
-                <th>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    Google state
+                <SortTh label="URL" sortKey="url" sort={urlSort.sort} onSort={urlSort.requestSort} />
+                <SortTh
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Google state
                     <InfoTooltip
                       content={
                         'Common GSC Indexing States:\n\n' +
@@ -253,14 +255,15 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
                       label="ⓘ"
                       position="bottom"
                     />
-                  </span>
-                </th>
-                <th>Schema</th>
-                <th>Submitted</th>
+                  </span>}
+                  sortKey="gsc_indexing_state" sort={urlSort.sort} onSort={urlSort.requestSort}
+                />
+                <SortTh label="Schema" sortKey="has_schema" sort={urlSort.sort} onSort={urlSort.requestSort} />
+                <SortTh label="Submitted" sortKey="google_submitted" sort={urlSort.sort} onSort={urlSort.requestSort} />
               </tr>
             </thead>
             <tbody>
-              {urls.map(u => {
+              {(urlSort.sorted as unknown as UrlState[]).map(u => {
                 const path = u.url.replace(`https://${site.domain}`, '').replace(`http://${site.domain}`, '');
                 return (
                   <tr key={u.url}>
