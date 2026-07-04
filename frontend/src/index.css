@@ -1646,3 +1646,39 @@ body {
 .sort-th-inner { display: inline-flex; align-items: center; gap: 3px; }
 .sort-th-icon { opacity: 0.45; flex-shrink: 0; }
 .sort-th.active .sort-th-icon { opacity: 1; }
+
+/* ── Auth screen (login / first-run signup) ───────────────────────────────── */
+.auth-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: var(--bg-app, var(--bg-input));
+}
+.auth-card {
+  width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px;
+  background: var(--bg-overlay); border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px); padding: 28px 26px;
+  box-shadow: 0 8px 40px -12px rgba(0,0,0,0.35);
+}
+.auth-logo { font-size: 30px; text-align: center; }
+.auth-title { font-size: 19px; font-weight: 800; text-align: center; margin: 0; }
+.auth-sub { font-size: 12.5px; color: var(--text-dim); text-align: center; margin: 0 0 6px; }
+.auth-field { display: flex; flex-direction: column; gap: 4px; }
+.auth-field > span { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; }
+.auth-error {
+  font-size: 12px; color: var(--error); background: var(--error-dim, rgba(220,50,50,0.1));
+  border: 1px solid var(--error); border-radius: var(--radius-md); padding: 7px 10px;
+}
+
+/* ── Signed-in user chip (sidebar) ────────────────────────────────────────── */
+.user-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px; margin-bottom: 10px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.user-chip-avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent, #7c6cf5); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px;
+}
+.user-chip-meta { flex: 1; min-width: 0; }
+.user-chip-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-chip-role { font-size: 10px; color: var(--text-dim); text-transform: capitalize; }

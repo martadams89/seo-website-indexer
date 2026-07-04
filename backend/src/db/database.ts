@@ -217,6 +217,31 @@ function initSchema(db: Database.Database): void {
       created_at   TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (site_id, query)
     );
+
+    -- ── App users & sessions (multi-tenant foundation) ───────────────────
+    CREATE TABLE IF NOT EXISTS users (
+      id             TEXT PRIMARY KEY,
+      email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name           TEXT,
+      password_hash  TEXT,                   -- scrypt hash (hex); null if SSO-only later
+      password_salt  TEXT,                   -- hex salt
+      totp_secret    TEXT,                   -- encrypted base32 secret; null until enrolled
+      totp_enabled   INTEGER NOT NULL DEFAULT 0,
+      role           TEXT NOT NULL DEFAULT 'user',   -- user | admin
+      is_super_admin INTEGER NOT NULL DEFAULT 0,     -- sees all workspaces (first admin)
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      last_login_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token       TEXT PRIMARY KEY,          -- opaque random token; the cookie holds it
+      user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at  TEXT NOT NULL,
+      user_agent  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
   `);
 
   // Backwards compatibility migrations

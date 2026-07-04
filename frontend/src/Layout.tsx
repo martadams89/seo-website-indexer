@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity, Users,
-  ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff
+  ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut
 , BarChart3, Bot } from 'lucide-react';
 import { useApp } from './AppContext';
+import { useAuth } from './auth/AuthGate';
 import { createLogStream } from './api';
 import { ToastHost } from './components/Toast';
 
@@ -24,6 +25,7 @@ const NAV = [
 
 export default function Layout() {
   const { status, appendLog, theme, toggleTheme, sseConnected, setSseConnected, markSseAlive } = useApp();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
@@ -106,6 +108,18 @@ export default function Layout() {
         </nav>
 
         <div className="sidebar-footer">
+          {/* Signed-in user + logout */}
+          <div className="user-chip">
+            <div className="user-chip-avatar">{(user.name || user.email).slice(0, 1).toUpperCase()}</div>
+            <div className="user-chip-meta">
+              <div className="user-chip-name">{user.name || user.email}</div>
+              <div className="user-chip-role">{user.is_super_admin ? 'Super-admin' : user.role}{user.totp_enabled ? ' · 2FA' : ''}</div>
+            </div>
+            <button className="btn-icon btn-icon-ghost" title="Sign out" aria-label="Sign out" onClick={() => logout()}>
+              <LogOut size={14} />
+            </button>
+          </div>
+
           {/* Auth status */}
           <div className="flex items-center gap-2" style={{ fontSize: 12 }}>
             <span style={{

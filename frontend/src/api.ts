@@ -17,12 +17,30 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
+    credentials: 'same-origin', // send the session cookie
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as Record<string, unknown>;
+    const err = new Error((body.error as string) ?? `HTTP ${res.status}`) as ApiError;
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.json() as Promise<T>;
+}
+
+export interface ApiError extends Error {
+  status?: number;
+  body?: Record<string, unknown>;
+}
+
+export interface CurrentUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  is_super_admin: boolean;
+  totp_enabled: boolean;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -167,6 +185,20 @@ export interface GSCSite {
 export const api = {
   // Status
   getStatus: () => apiFetch<AppStatus>('/api/status'),
+
+  // ── App authentication (users, sessions, 2FA) ──
+  bootstrapStatus: () => apiFetch<{ needsBootstrap: boolean }>('/api/auth/bootstrap-status'),
+  me: () => apiFetch<CurrentUser>('/api/auth/me'),
+  signup: (email: string, password: string, name?: string) =>
+    apiFetch<CurrentUser>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
+  login: (email: string, password: string, totp?: string) =>
+    apiFetch<CurrentUser>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password, totp }) }),
+  logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiFetch<{ ok: boolean }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  totpSetup: () => apiFetch<{ secret: string; uri: string }>('/api/auth/totp/setup', { method: 'POST' }),
+  totpEnable: (totp: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/enable', { method: 'POST', body: JSON.stringify({ totp }) }),
+  totpDisable: (password: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/disable', { method: 'POST', body: JSON.stringify({ password }) }),
 
   // Auth
   saveCredentials: (clientId: string, clientSecret: string) =>

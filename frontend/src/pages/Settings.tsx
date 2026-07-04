@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check } from 'lucide-react';
+import { useAuth } from '../auth/AuthGate';
 import { useApp } from '../AppContext';
 import { api } from '../api';
 
-type Tab = 'schedule' | 'google' | 'keys' | 'notify';
+type Tab = 'account' | 'schedule' | 'google' | 'keys' | 'notify';
 
 interface KeyGuide {
   key: string;
@@ -99,11 +100,133 @@ const CRON_PRESETS = [
 ];
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Clock }> = [
+  { id: 'account',  label: 'Account & Security', icon: ShieldCheck },
   { id: 'schedule', label: 'Scheduling', icon: Clock },
   { id: 'google',   label: 'Google',     icon: User },
   { id: 'keys',     label: 'API Keys',   icon: KeyRound },
   { id: 'notify',   label: 'Notifications', icon: Bell },
 ];
+
+function AccountTab() {
+  const { user, refreshUser } = useAuth();
+  const [curPw, setCurPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  // TOTP enrolment
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpMsg, setTotpMsg] = useState<string | null>(null);
+  const [disablePw, setDisablePw] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  async function changePassword() {
+    setPwBusy(true); setPwMsg(null);
+    try {
+      await api.changePassword(curPw, newPw);
+      setPwMsg({ ok: true, text: 'Password changed.' });
+      setCurPw(''); setNewPw('');
+    } catch (e) { setPwMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setPwBusy(false);
+  }
+
+  async function startTotp() {
+    setTotpMsg(null);
+    try { setTotpSetup(await api.totpSetup()); } catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+  async function enableTotp() {
+    setTotpMsg(null);
+    try {
+      await api.totpEnable(totpCode);
+      setTotpSetup(null); setTotpCode('');
+      await refreshUser();
+    } catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Invalid code'); }
+  }
+  async function disableTotp() {
+    setTotpMsg(null);
+    try { await api.totpDisable(disablePw); setDisablePw(''); await refreshUser(); }
+    catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+
+  return (
+    <>
+      <div className="card mb-4">
+        <div className="card-title"><User size={13} /> Profile</div>
+        <div className="site-facts">
+          <div className="site-fact"><span className="site-fact-label">Name</span><span className="site-fact-value">{user.name || '—'}</span></div>
+          <div className="site-fact"><span className="site-fact-label">Email</span><span className="site-fact-value">{user.email}</span></div>
+          <div className="site-fact"><span className="site-fact-label">Role</span><span className="site-fact-value">{user.is_super_admin ? 'Super-admin' : user.role}</span></div>
+          <div className="site-fact"><span className="site-fact-label">2FA</span><span className="site-fact-value">{user.totp_enabled ? 'Enabled' : 'Off'}</span></div>
+        </div>
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-title">Change password</div>
+        <div className="site-form" style={{ maxWidth: 420 }}>
+          <div className="input-group mb-3">
+            <label className="input-label">Current password</label>
+            <input className="input" type="password" value={curPw} onChange={e => setCurPw(e.target.value)} autoComplete="current-password" />
+          </div>
+          <div className="input-group mb-3">
+            <label className="input-label">New password</label>
+            <input className="input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="btn btn-primary btn-sm" disabled={pwBusy || !curPw || newPw.length < 8} onClick={changePassword}>
+              <Save size={13} /> {pwBusy ? 'Saving…' : 'Change password'}
+            </button>
+            {pwMsg && <span style={{ fontSize: 12, color: pwMsg.ok ? 'var(--ok)' : 'var(--error)' }}>{pwMsg.text}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title"><ShieldCheck size={13} /> Two-factor authentication (TOTP)</div>
+        {user.totp_enabled ? (
+          <div className="site-form" style={{ maxWidth: 420 }}>
+            <div className="empty-note" style={{ marginBottom: 10 }}><ShieldCheck size={12} /> 2FA is enabled on your account.</div>
+            <div className="input-group mb-3">
+              <label className="input-label">Confirm password to disable</label>
+              <input className="input" type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} autoComplete="current-password" />
+            </div>
+            <button className="btn btn-danger btn-sm" disabled={!disablePw} onClick={disableTotp}>Disable 2FA</button>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        ) : totpSetup ? (
+          <div className="site-form" style={{ maxWidth: 460 }}>
+            <p className="text-dim" style={{ fontSize: 12 }}>
+              Add this account to your authenticator app — scan the URI as a QR in a scanner, or enter the key manually — then enter the 6-digit code to confirm.
+            </p>
+            <div className="input-group mb-2">
+              <label className="input-label">Setup key</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <code style={{ flex: 1, fontSize: 12, wordBreak: 'break-all', background: 'var(--bg-input)', padding: '6px 10px', borderRadius: 6 }}>{totpSetup.secret}</code>
+                <button className="btn-icon btn-icon-ghost" onClick={() => { navigator.clipboard.writeText(totpSetup.uri); setCopied(true); setTimeout(() => setCopied(false), 1500); }} title="Copy otpauth URI">
+                  {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
+                </button>
+              </div>
+            </div>
+            <div className="input-group mb-3">
+              <label className="input-label">6-digit code</label>
+              <input className="input" value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" />
+            </div>
+            <div className="flex gap-2">
+              <button className="btn btn-primary btn-sm" disabled={totpCode.length !== 6} onClick={enableTotp}>Enable 2FA</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setTotpSetup(null); setTotpMsg(null); }}>Cancel</button>
+            </div>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        ) : (
+          <div className="site-form" style={{ maxWidth: 420 }}>
+            <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>Protect your account with a time-based one-time code from an authenticator app.</p>
+            <button className="btn btn-primary btn-sm" onClick={startTotp}><ShieldCheck size={13} /> Set up 2FA</button>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 export default function SettingsPage() {
   const { status, refresh } = useApp();
@@ -176,6 +299,9 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── Account & Security ── */}
+      {tab === 'account' && <AccountTab />}
 
       {/* ── Scheduling ── */}
       {tab === 'schedule' && (

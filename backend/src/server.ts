@@ -93,6 +93,12 @@ import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllProm
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
+import {
+  countUsers, getUserByEmail, createUser, verifyPassword, recordLogin,
+  createSession, getSessionUser, destroySession, setUserPassword,
+  generateTotpSecret, totpUri, verifyTotp, setTotpSecret, getTotpSecret, enableTotp, disableTotp,
+  toPublic, pruneExpiredSessions, type User,
+} from './auth/users.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,6 +159,47 @@ app.addHook('preHandler', async (req, reply) => {
   }
 });
 
+// ── Authentication gate ───────────────────────────────────────────────────────
+// Every /api route requires a valid session, except the auth handshake, health
+// probes, the OAuth callback (Google redirects there with no session) and the
+// IndexNow key file (served for search engines, non-/api). Until the first
+// admin exists the app is "un-bootstrapped": only the auth/health routes work,
+// so the UI can drive first-run signup.
+const AUTH_OPEN_PATHS = new Set<string>([
+  '/api/auth/login', '/api/auth/signup', '/api/auth/bootstrap-status', '/api/auth/logout',
+  '/api/auth/google/callback', '/health', '/api/livez', '/api/healthz',
+]);
+function sessionTokenFromReq(req: { headers: Record<string, unknown> }): string | undefined {
+  const raw = req.headers['cookie'];
+  if (typeof raw !== 'string') return undefined;
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === 'sid') return decodeURIComponent(v.join('='));
+  }
+  return undefined;
+}
+app.addHook('preHandler', async (req, reply) => {
+  const pathOnly = req.url.split('?')[0];
+  if (!pathOnly.startsWith('/api/')) return;            // static assets + key files
+  if (AUTH_OPEN_PATHS.has(pathOnly)) return;
+  const user = getSessionUser(sessionTokenFromReq(req));
+  if (!user) {
+    return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
+  }
+  (req as unknown as { user: User }).user = user;
+});
+
+// Cookie helpers — HttpOnly session cookie, Secure behind https/proxy.
+function setSessionCookie(req: { headers: Record<string, unknown> }, reply: { header: (k: string, v: string) => void }, token: string) {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').includes('https');
+  reply.header('Set-Cookie',
+    `sid=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${proto ? '; Secure' : ''}`);
+}
+function clearSessionCookie(reply: { header: (k: string, v: string) => void }) {
+  reply.header('Set-Cookie', 'sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+}
+function currentUser(req: unknown): User { return (req as { user: User }).user; }
+
 // ── Health ────────────────────────────────────────────────────────────────────
 
 app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
@@ -200,7 +247,94 @@ app.get('/api/status', async () => {
   };
 });
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── App authentication (users, sessions, 2FA) ─────────────────────────────────
+
+app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0 }));
+
+app.get('/api/auth/me', async (req, reply) => {
+  const token = sessionTokenFromReq(req);
+  const user = getSessionUser(token);
+  if (!user) return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
+  return toPublic(user);
+});
+
+// First-run only: create the super-admin. Refuses once any user exists.
+app.post('/api/auth/signup', async (req, reply) => {
+  if (countUsers() > 0) return reply.status(403).send({ error: 'Signup is closed — an admin already exists. Ask an admin to add you.' });
+  const { email, password, name } = (req.body ?? {}) as { email?: string; password?: string; name?: string };
+  if (!email?.includes('@') || !password || password.length < 8) {
+    return reply.status(400).send({ error: 'A valid email and a password of at least 8 characters are required.' });
+  }
+  const user = createUser({ email, password, name, role: 'admin', superAdmin: true });
+  recordLogin(user.id);
+  setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
+  logSystem('ok', `First admin account created: ${user.email}`);
+  return toPublic(user);
+});
+
+app.post('/api/auth/login', async (req, reply) => {
+  const { email, password, totp } = (req.body ?? {}) as { email?: string; password?: string; totp?: string };
+  const user = email ? getUserByEmail(email) : undefined;
+  // Uniform failure to avoid leaking which emails exist.
+  if (!user || !password || !verifyPassword(user, password)) {
+    return reply.status(401).send({ error: 'Incorrect email or password.' });
+  }
+  if (user.totp_enabled) {
+    if (!totp) return reply.status(401).send({ error: 'Two-factor code required.', totpRequired: true });
+    const secret = getTotpSecret(user);
+    if (!secret || !verifyTotp(secret, totp)) {
+      return reply.status(401).send({ error: 'Incorrect two-factor code.', totpRequired: true });
+    }
+  }
+  recordLogin(user.id);
+  setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
+  return toPublic(user);
+});
+
+app.post('/api/auth/logout', async (req, reply) => {
+  const token = sessionTokenFromReq(req);
+  if (token) destroySession(token);
+  clearSessionCookie(reply);
+  return { ok: true };
+});
+
+app.post('/api/auth/change-password', async (req, reply) => {
+  const user = currentUser(req);
+  const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
+  if (!currentPassword || !verifyPassword(user, currentPassword)) {
+    return reply.status(400).send({ error: 'Current password is incorrect.' });
+  }
+  if (!newPassword || newPassword.length < 8) return reply.status(400).send({ error: 'New password must be at least 8 characters.' });
+  setUserPassword(user.id, newPassword);
+  return { ok: true };
+});
+
+// TOTP enrolment: setup → returns secret + otpauth URI (stored, not yet enabled);
+// enable → verifies a code and turns it on; disable → requires the password.
+app.post('/api/auth/totp/setup', async (req) => {
+  const user = currentUser(req);
+  const secret = generateTotpSecret();
+  setTotpSecret(user.id, secret);
+  return { secret, uri: totpUri(secret, user.email) };
+});
+app.post('/api/auth/totp/enable', async (req, reply) => {
+  const user = currentUser(req);
+  const { totp } = (req.body ?? {}) as { totp?: string };
+  const secret = getTotpSecret(user);
+  if (!secret) return reply.status(400).send({ error: 'Run TOTP setup first.' });
+  if (!totp || !verifyTotp(secret, totp)) return reply.status(400).send({ error: 'That code is not valid — check your authenticator and try again.' });
+  enableTotp(user.id);
+  return { ok: true };
+});
+app.post('/api/auth/totp/disable', async (req, reply) => {
+  const user = currentUser(req);
+  const { password } = (req.body ?? {}) as { password?: string };
+  if (!password || !verifyPassword(user, password)) return reply.status(400).send({ error: 'Password is incorrect.' });
+  disableTotp(user.id);
+  return { ok: true };
+});
+
+// ── Google Search Console auth ────────────────────────────────────────────────
 
 app.get('/api/auth/accounts', async () => {
   const accounts = getAllGoogleAccounts();
@@ -1033,6 +1167,9 @@ try {
   const pruned = pruneOldLogs();
   if (pruned > 0) console.log(`Pruned ${pruned} log entries older than 30 days`);
 } catch { /* non-fatal */ }
+
+// Clear expired login sessions at startup.
+try { pruneExpiredSessions(); } catch { /* non-fatal */ }
 
 // Start scheduled indexing
 startScheduler();
