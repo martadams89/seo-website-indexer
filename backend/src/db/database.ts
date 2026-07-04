@@ -215,6 +215,12 @@ function initSchema(db: Database.Database): void {
   if (!siteCols.some(c => c.name === 'ftp_path')) {
     db.exec("ALTER TABLE sites ADD COLUMN ftp_path TEXT;");
   }
+  // 0 = monitor-only (default: the site's llms.txt/robots.txt are maintained
+  // by hand or another pipeline — the tool audits but NEVER deploys);
+  // 1 = managed (the tool generates and deploys the files).
+  if (!siteCols.some(c => c.name === 'geo_manage')) {
+    db.exec("ALTER TABLE sites ADD COLUMN geo_manage INTEGER DEFAULT 0;");
+  }
 
   const urlCols = db.prepare("PRAGMA table_info(url_state)").all() as { name: string }[];
   if (!urlCols.some(c => c.name === 'gsc_indexing_state')) {
@@ -234,6 +240,20 @@ function initSchema(db: Database.Database): void {
   // Google Indexing API, GSC sitemap submission, or URL Inspection.
   if (!urlCols.some(c => c.name === 'indexnow_only')) {
     db.exec("ALTER TABLE url_state ADD COLUMN indexnow_only INTEGER DEFAULT 0;");
+  }
+
+  // AI citations: conversation threading + provider citation URLs.
+  const aiCols = db.prepare("PRAGMA table_info(ai_results)").all() as { name: string }[];
+  if (aiCols.length > 0) {
+    if (!aiCols.some(c => c.name === 'parent_id')) {
+      db.exec("ALTER TABLE ai_results ADD COLUMN parent_id INTEGER REFERENCES ai_results(id) ON DELETE CASCADE;");
+    }
+    if (!aiCols.some(c => c.name === 'citations')) {
+      db.exec("ALTER TABLE ai_results ADD COLUMN citations TEXT;");
+    }
+    if (!aiCols.some(c => c.name === 'user_prompt')) {
+      db.exec("ALTER TABLE ai_results ADD COLUMN user_prompt TEXT;");
+    }
   }
 }
 
@@ -356,6 +376,7 @@ export interface Site {
   ftp_user?: string | null;
   ftp_pass?: string | null;
   ftp_path?: string | null;
+  geo_manage?: number | null;
 }
 
 export function getAllSites(): Site[] {
@@ -383,6 +404,7 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
     ftp_port: 21 as number | null,
     ftp_user: null as string | null,
     ftp_path: null as string | null,
+    geo_manage: 0 as number | null,
     ...site,
     // Always encrypt FTP password before writing
     ftp_pass: encrypt(site.ftp_pass ?? null),

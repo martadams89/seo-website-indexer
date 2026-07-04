@@ -37,6 +37,7 @@ interface AppContextValue {
   sseConnected: boolean;
   sseLastEventAt: number | null;
   setSseConnected: (v: boolean) => void;
+  markSseAlive: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -95,6 +96,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Any SSE traffic (connected/ping/log) proves the stream is alive.
+  const markSseAlive = useCallback(() => {
+    setSseLastEventAt(Date.now());
+    setSseConnected(true);
+  }, []);
+
   const appendLog = useCallback((entry: LogEntry) => {
     setSseLastEventAt(Date.now());
     setSseConnected(true);
@@ -128,6 +135,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       status, sites, runs, logs, loading, refresh, appendLog,
+      markSseAlive,
       toasts, toast, dismissToast,
       theme, toggleTheme,
       sseConnected, sseLastEventAt, setSseConnected,
