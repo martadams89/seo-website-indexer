@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, Smartphone } from 'lucide-react';
-import { api, type GoogleAccount } from '../api';
+import { api, getActiveWorkspaceId, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 
 export default function AccountsPage() {
@@ -74,7 +74,11 @@ export default function AccountsPage() {
       ];
       if (autoSetup) baseScopes.push('https://www.googleapis.com/auth/cloud-platform');
       const scope = baseScopes.join(' ');
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true`;
+      // Carry the active workspace as OAuth `state` so the callback attaches the
+      // account to the tenant the user is actually viewing (not just their first).
+      const ws = getActiveWorkspaceId();
+      const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true${stateParam}`;
 
       const width = 600;
       const height = 700;

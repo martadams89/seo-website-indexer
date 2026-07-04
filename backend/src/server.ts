@@ -309,10 +309,13 @@ app.get('/api/healthz', async (_req, reply) => {
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
-app.get('/api/status', async () => {
+app.get('/api/status', async (req) => {
   const auth = await getAuthStatus();
   const cronSchedule = getSetting('cron_schedule') ?? '0 3 * * *';
   const lock = getRunLock();
+  // Counts are tenant-scoped: a user sees their active workspace's totals, not
+  // the whole install's.
+  const ws = currentWorkspace(req);
   return {
     auth,
     scheduler: {
@@ -321,8 +324,8 @@ app.get('/api/status', async () => {
       cronSchedule,
       lock: lock ? { runId: lock.runId, acquiredAt: lock.acquiredAt } : null,
     },
-    sites: getAllSites().length,
-    accounts: getAllGoogleAccounts().length,
+    sites: ws ? getSitesForWorkspace(ws).length : 0,
+    accounts: ws ? getGoogleAccountsForWorkspace(ws).length : 0,
     version: process.env.APP_VERSION ?? 'dev',
   };
 });
@@ -1100,7 +1103,26 @@ app.put('/api/settings', async (req) => {
 app.get('/api/quota/today', async (req) => {
   const { day } = (req.query ?? {}) as { day?: string };
   const targetDay = day ?? new Date().toISOString().slice(0, 10);
-  const rows = getAllQuotaUsageForDay(targetDay);
+
+  // Tenant scope: only count quota buckets that belong to this workspace, so the
+  // bucket names (site ids, GSC property URLs, account ids) can't reveal other
+  // tenants. Buckets are keyed `site:<id>`, `property:<gscUrl>`, `account:<id>`
+  // or `project:<id>`. Google-indexing usage is summed from the `account:`
+  // buckets (each success also writes a `project:` bucket; using accounts avoids
+  // both the double-count and any cross-tenant project attribution).
+  const ws = currentWorkspace(req);
+  const wsSites = ws ? getSitesForWorkspace(ws) : [];
+  const siteIds = new Set(wsSites.map(s => s.id));
+  const gscUrls = new Set(wsSites.map(s => s.gsc_url));
+  const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
+  const accountIds = new Set(accounts.map(a => a.id));
+  const inWorkspace = (bucket: string): boolean => {
+    if (bucket.startsWith('site:')) return siteIds.has(bucket.slice(5));
+    if (bucket.startsWith('property:')) return gscUrls.has(bucket.slice('property:'.length));
+    if (bucket.startsWith('account:')) return accountIds.has(bucket.slice('account:'.length));
+    return false; // project: and anything else — excluded from the tenant view
+  };
+  const rows = getAllQuotaUsageForDay(targetDay).filter(r => inWorkspace(r.bucket));
 
   // Aggregate by API with helpful per-bucket detail.
   const grouped: Record<string, { total: number; buckets: Array<{ bucket: string; count: number }> }> = {};
@@ -1111,7 +1133,6 @@ app.get('/api/quota/today', async (req) => {
   }
 
   // Build summary limits using current configuration
-  const accounts = getAllGoogleAccounts();
   const distinctProjects = new Set(accounts.map(a => a.client_id)).size || 1;
   const summary = {
     day: targetDay,
@@ -1135,8 +1156,11 @@ app.get('/api/quota/today', async (req) => {
   return summary;
 });
 
-app.get('/api/url-failures', async () => {
-  return getAllUrlFailures();
+app.get('/api/url-failures', async (req) => {
+  // Only failures for sites in the active workspace.
+  const ws = currentWorkspace(req);
+  const siteIds = new Set(ws ? getSitesForWorkspace(ws).map(s => s.id) : []);
+  return getAllUrlFailures().filter(f => siteIds.has(f.site_id));
 });
 
 // ── Backups ───────────────────────────────────────────────────────────────────
@@ -1519,7 +1543,10 @@ app.post('/api/ai/prompts/:id/reply', async (req, reply) => {
 // One-click Gemini key using the linked Google account's OAuth.
 app.post('/api/ai/provision/gemini', async (req, reply) => {
   const { account_id } = (req.body ?? {}) as { account_id?: string };
-  const accounts = getAllGoogleAccounts();
+  // Scope to the workspace's own Google accounts — never fall back to another
+  // tenant's account.
+  const ws = currentWorkspace(req);
+  const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
   const account = account_id ? accounts.find(a => a.id === account_id) : accounts[0];
   if (!account) return reply.code(400).send({ error: 'No Google account linked yet (Accounts page).' });
   const result = await provisionGeminiKey(account.id, account.client_id);

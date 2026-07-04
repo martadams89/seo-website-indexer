@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Smartphone, ChevronRight, Copy, Check, ExternalLink, Key } from 'lucide-react';
-import { api } from '../api';
+import { api, getActiveWorkspaceId } from '../api';
 import { useApp } from '../AppContext';
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -78,7 +78,10 @@ export default function SetupPage() {
 
       // 3. Initiate Standard Web Application OAuth Flow
       const scope = 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/indexing https://www.googleapis.com/auth/userinfo.email';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+      // Attach the account to the workspace the user is in (OAuth `state`).
+      const ws = getActiveWorkspaceId();
+      const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent${stateParam}`;
 
       // 4. Open in popup window
       const width = 600;
