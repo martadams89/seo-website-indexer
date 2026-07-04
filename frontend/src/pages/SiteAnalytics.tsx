@@ -7,7 +7,7 @@ import { useApp } from '../AppContext';
 
 export default function SiteAnalyticsPage() {
   const { siteId = '' } = useParams();
-  const { toast } = useApp();
+  const { toast, status } = useApp();
   const [data, setData] = useState<SiteAnalytics | null>(null);
   const [llms, setLlms] = useState<LlmsAudit | null>(null);
   const [llmsLoading, setLlmsLoading] = useState(false);
@@ -74,6 +74,19 @@ export default function SiteAnalyticsPage() {
               setBingQuota(q);
             }, 'Bing quota fetched')}>
             <Activity size={12} /> <span className="hide-mobile">Bing quota</span>
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={busy === 'google-submit' || !status?.auth.authenticated || !site.google_account_id}
+            title={
+              !status?.auth.authenticated ? 'Connect a Google account in Settings first'
+                : !site.google_account_id ? 'This site has no linked Google account (IndexNow only) — assign one in the site’s Configuration tab'
+                : 'Submit new & changed URLs to the Google Indexing API'
+            }
+            onClick={() => act('google-submit',
+              () => api.triggerRun({ siteIds: [siteId], skipIndexNow: true, skipBing: true }),
+              'Google submission run triggered — watch Live Logs for progress')}>
+            <Send size={12} /> <span className="hide-mobile">Submit to Google</span>
           </button>
           <button className="btn btn-primary btn-sm" disabled={busy === 'bing-submit'}
             onClick={() => act('bing-submit', () => api.bingSubmit(siteId), 'Submitted to Bing Webmaster')}>

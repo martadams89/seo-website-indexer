@@ -220,7 +220,7 @@ export const api = {
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
-  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipSitemaps?: boolean; gscLimit?: number; googleLimit?: number }) =>
+  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; gscLimit?: number; googleLimit?: number }) =>
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),
