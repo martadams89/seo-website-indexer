@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/martadams89/seo-website-indexer/compare/v1.4.0...v1.5.0) (2026-07-04)
+
+
+### ✨ Features
+
+* surface search movers + query-drop alerts on the Analytics landing page ([#59](https://github.com/martadams89/seo-website-indexer/issues/59)) ([a01f08a](https://github.com/martadams89/seo-website-indexer/commit/a01f08a86843a13545f92a86c02307e04613d488))
+
 ## [1.4.0](https://github.com/martadams89/seo-website-indexer/compare/v1.3.0...v1.4.0) (2026-07-04)
 
 
