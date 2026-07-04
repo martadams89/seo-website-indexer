@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.4](https://github.com/martadams89/seo-website-indexer/compare/v1.2.3...v1.2.4) (2026-07-04)
+
+
+### 🧹 Maintenance
+
+* **deps:** update actions/checkout action to v7 ([#40](https://github.com/martadams89/seo-website-indexer/issues/40)) ([45983af](https://github.com/martadams89/seo-website-indexer/commit/45983afdabfbaa2d46a16e9bdd6ff98460681e21))
+* **deps:** update dependency typescript to v6 ([#44](https://github.com/martadams89/seo-website-indexer/issues/44)) ([1507c87](https://github.com/martadams89/seo-website-indexer/commit/1507c870a2453ad1cacfc66e4342f59dd262f4ec))
+
 ## [1.2.3](https://github.com/martadams89/seo-website-indexer/compare/v1.2.2...v1.2.3) (2026-07-04)
 
 
