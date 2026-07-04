@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/martadams89/seo-website-indexer/compare/v1.8.0...v1.8.1) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* close remaining cross-tenant leaks (OAuth state + global aggregates) ([#69](https://github.com/martadams89/seo-website-indexer/issues/69)) ([003572c](https://github.com/martadams89/seo-website-indexer/commit/003572c2a417555b5449b546daada93cd8b1e423))
+
 ## [1.8.0](https://github.com/martadams89/seo-website-indexer/compare/v1.7.0...v1.8.0) (2026-07-04)
 
 
