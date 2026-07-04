@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { BarChart3, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, X, LineChart } from 'lucide-react';
 import { api, type PerformanceResponse, type EnginePerformance } from '../api';
 import { MetricChart, StatCard } from './Charts';
+import { useSort, SortTh } from './SortableTable';
 import { useApp } from '../AppContext';
 
 const RANGES = [
@@ -103,6 +104,11 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
   const fmt = metric === 'ctr' ? fmtPct : metric === 'position' ? fmtPos : fmtInt;
   const chartColor = metric === 'position' ? 'var(--warn)' : 'var(--accent, #7c6cf5)';
 
+  // Sortable breakdown tables (default: clicks desc).
+  const breakdownRows = (breakdown === 'query' ? active?.queries : active?.pages) ?? [];
+  const bSort = useSort(breakdownRows as unknown as Array<Record<string, unknown>>, { key: 'clicks', dir: 'desc' });
+  const dimSort = useSort((dim?.rows ?? []) as unknown as Array<Record<string, unknown>>, { key: 'clicks', dir: 'desc' });
+
   return (
     <div className="panel">
       <div className="flex items-center gap-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -151,15 +157,20 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
             <div className="table-scroll" style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className="mini-table">
                 <thead><tr>
-                  <th>{breakdown === 'query' ? 'Query' : 'Page'}</th><th>Clicks</th><th>Impr.</th><th>CTR</th><th>Pos.</th>{breakdown === 'query' && <th />}
+                  <SortTh label={breakdown === 'query' ? 'Query' : 'Page'} sortKey={breakdown === 'query' ? 'query' : 'page'} sort={bSort.sort} onSort={bSort.requestSort} />
+                  <SortTh label="Clicks" sortKey="clicks" sort={bSort.sort} onSort={bSort.requestSort} align="right" />
+                  <SortTh label="Impr." sortKey="impressions" sort={bSort.sort} onSort={bSort.requestSort} align="right" />
+                  <SortTh label="CTR" sortKey="ctr" sort={bSort.sort} onSort={bSort.requestSort} align="right" />
+                  <SortTh label="Pos." sortKey="position" sort={bSort.sort} onSort={bSort.requestSort} align="right" />
+                  {breakdown === 'query' && <th />}
                 </tr></thead>
                 <tbody>
-                  {(breakdown === 'query' ? active.queries : active.pages).map((r, i) => {
+                  {(bSort.sorted as unknown as typeof breakdownRows).map((r, i) => {
                     const label = 'query' in r ? r.query : r.page.replace(/^https?:\/\/[^/]+/, '') || '/';
                     return (
                       <tr key={i}>
                         <td className={breakdown === 'page' ? 'cell-url' : undefined}>{label}</td>
-                        <td>{fmtInt(r.clicks)}</td><td>{fmtInt(r.impressions)}</td><td>{fmtPct(r.ctr)}</td><td>{r.position ? fmtPos(r.position) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtInt(r.clicks)}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.impressions)}</td><td style={{ textAlign: 'right' }}>{fmtPct(r.ctr)}</td><td style={{ textAlign: 'right' }}>{r.position ? fmtPos(r.position) : '—'}</td>
                         {breakdown === 'query' && 'query' in r && (
                           <td style={{ whiteSpace: 'nowrap' }}>
                             <button className="btn btn-ghost btn-sm" title="Position trend" onClick={() => openTrend(r.query)}><LineChart size={12} /></button>
@@ -180,10 +191,16 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
             : (
             <div className="table-scroll" style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className="mini-table">
-                <thead><tr><th style={{ textTransform: 'capitalize' }}>{breakdown}</th><th>Clicks</th><th>Impr.</th><th>CTR</th><th>Pos.</th></tr></thead>
+                <thead><tr>
+                  <SortTh label={breakdown === 'country' ? 'Country' : 'Device'} sortKey="key" sort={dimSort.sort} onSort={dimSort.requestSort} />
+                  <SortTh label="Clicks" sortKey="clicks" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
+                  <SortTh label="Impr." sortKey="impressions" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
+                  <SortTh label="CTR" sortKey="ctr" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
+                  <SortTh label="Pos." sortKey="position" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
+                </tr></thead>
                 <tbody>
-                  {dim.rows.map((r, i) => (
-                    <tr key={i}><td style={{ textTransform: breakdown === 'country' ? 'uppercase' : 'capitalize' }}>{r.key}</td><td>{fmtInt(r.clicks)}</td><td>{fmtInt(r.impressions)}</td><td>{fmtPct(r.ctr)}</td><td>{fmtPos(r.position)}</td></tr>
+                  {(dimSort.sorted as unknown as typeof dim.rows).map((r, i) => (
+                    <tr key={i}><td style={{ textTransform: breakdown === 'country' ? 'uppercase' : 'capitalize' }}>{r.key}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.clicks)}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.impressions)}</td><td style={{ textAlign: 'right' }}>{fmtPct(r.ctr)}</td><td style={{ textAlign: 'right' }}>{fmtPos(r.position)}</td></tr>
                   ))}
                 </tbody>
               </table>

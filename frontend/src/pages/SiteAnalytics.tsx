@@ -4,6 +4,7 @@ import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadC
 import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
+import { useSort, SortTh } from '../components/SortableTable';
 import { useApp } from '../AppContext';
 
 export default function SiteAnalyticsPage() {
@@ -70,6 +71,12 @@ export default function SiteAnalyticsPage() {
     }
     setBusy(null);
   }
+
+  // Sortable data tables (hooks must run before the early return below).
+  const freshSort = useSort((data?.freshness ?? []) as unknown as Array<Record<string, unknown>>);
+  const failSort = useSort((data?.failures ?? []) as unknown as Array<Record<string, unknown>>, { key: 'fail_count', dir: 'desc' });
+  const crawlSort = useSort((crawl?.issues ?? []) as unknown as Array<Record<string, unknown>>);
+  const hygieneSort = useSort((hygiene?.issues ?? []) as unknown as Array<Record<string, unknown>>);
 
   if (!data) return <div className="page-loading">Loading site analytics…</div>;
   const { site, snapshot, trend, states, freshness, failures, crux } = data;
@@ -189,9 +196,14 @@ export default function SiteAnalyticsPage() {
         {freshness.length === 0 ? <div className="empty-note">Nothing stale — Google has seen every change.</div> : (
           <div className="table-scroll" style={{ maxHeight: 260, overflowY: 'auto' }}>
             <table className="mini-table">
-              <thead><tr><th>URL</th><th>Changed</th><th>Last inspected</th><th>State</th></tr></thead>
+              <thead><tr>
+                <SortTh label="URL" sortKey="url" sort={freshSort.sort} onSort={freshSort.requestSort} />
+                <SortTh label="Changed" sortKey="last_seen_lastmod" sort={freshSort.sort} onSort={freshSort.requestSort} />
+                <SortTh label="Last inspected" sortKey="gsc_last_inspected" sort={freshSort.sort} onSort={freshSort.requestSort} />
+                <SortTh label="State" sortKey="gsc_indexing_state" sort={freshSort.sort} onSort={freshSort.requestSort} />
+              </tr></thead>
               <tbody>
-                {freshness.map(f => (
+                {(freshSort.sorted as unknown as typeof freshness).map(f => (
                   <tr key={f.url}>
                     <td className="cell-url">{f.url.replace(/^https?:\/\/[^/]+/, '')}</td>
                     <td>{f.last_seen_lastmod?.slice(0, 10)}</td>
@@ -211,13 +223,18 @@ export default function SiteAnalyticsPage() {
           <h3 className="panel-title" style={{ color: 'var(--error)' }}>Failing URLs ({failures.length})</h3>
           <div className="table-scroll" style={{ maxHeight: 220, overflowY: 'auto' }}>
             <table className="mini-table">
-              <thead><tr><th>URL</th><th>API</th><th>Fails</th><th>Last failure</th></tr></thead>
+              <thead><tr>
+                <SortTh label="URL" sortKey="url" sort={failSort.sort} onSort={failSort.requestSort} />
+                <SortTh label="API" sortKey="api" sort={failSort.sort} onSort={failSort.requestSort} />
+                <SortTh label="Fails" sortKey="fail_count" sort={failSort.sort} onSort={failSort.requestSort} align="right" />
+                <SortTh label="Last failure" sortKey="last_failed_at" sort={failSort.sort} onSort={failSort.requestSort} />
+              </tr></thead>
               <tbody>
-                {failures.map((f, i) => (
+                {(failSort.sorted as unknown as typeof failures).map((f, i) => (
                   <tr key={i}>
                     <td className="cell-url">{f.url.replace(/^https?:\/\/[^/]+/, '')}</td>
                     <td><span className="badge badge-warn">{f.api}</span></td>
-                    <td style={{ fontWeight: 600 }}>{f.fail_count}</td>
+                    <td style={{ fontWeight: 600, textAlign: 'right' }}>{f.fail_count}</td>
                     <td>{new Date(f.last_failed_at + 'Z').toLocaleString()}</td>
                   </tr>
                 ))}
@@ -244,12 +261,16 @@ export default function SiteAnalyticsPage() {
           ) : (
             <div className="table-scroll" style={{ maxHeight: 260, overflowY: 'auto', marginTop: 10 }}>
               <table className="mini-table">
-                <thead><tr><th>URL</th><th>HTTP</th><th>Issues</th></tr></thead>
+                <thead><tr>
+                  <SortTh label="URL" sortKey="url" sort={crawlSort.sort} onSort={crawlSort.requestSort} />
+                  <SortTh label="HTTP" sortKey="code" sort={crawlSort.sort} onSort={crawlSort.requestSort} align="right" />
+                  <th>Issues</th>
+                </tr></thead>
                 <tbody>
-                  {crawl.issues.map((c, i) => (
+                  {(crawlSort.sorted as unknown as typeof crawl.issues).map((c, i) => (
                     <tr key={i}>
                       <td className="cell-url">{c.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</td>
-                      <td>{c.code ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{c.code ?? '—'}</td>
                       <td>{c.issues.length ? c.issues.map(x => <span key={x} className="badge badge-warn" style={{ marginRight: 3 }}>{x}</span>) : <span className="text-dim">—</span>}</td>
                     </tr>
                   ))}
@@ -335,9 +356,13 @@ export default function SiteAnalyticsPage() {
               <div className="empty-note"><CheckCircle2 size={12} /> {hygiene.checked} URLs probed — no broken links or redirect chains.</div>
             ) : (
               <table className="mini-table">
-                <thead><tr><th>URL</th><th>Issue</th><th>Detail</th></tr></thead>
+                <thead><tr>
+                  <SortTh label="URL" sortKey="url" sort={hygieneSort.sort} onSort={hygieneSort.requestSort} />
+                  <SortTh label="Issue" sortKey="kind" sort={hygieneSort.sort} onSort={hygieneSort.requestSort} />
+                  <th>Detail</th>
+                </tr></thead>
                 <tbody>
-                  {hygiene.issues.map((i, n) => (
+                  {(hygieneSort.sorted as unknown as typeof hygiene.issues).map((i, n) => (
                     <tr key={n}>
                       <td className="cell-url">{i.url.replace(/^https?:\/\/[^/]+/, '')}</td>
                       <td><span className={`badge ${i.kind === 'broken' ? 'badge-error' : 'badge-warn'}`}>{i.kind}</span></td>
