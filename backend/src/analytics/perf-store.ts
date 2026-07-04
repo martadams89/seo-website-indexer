@@ -97,6 +97,38 @@ export function getWowDeltas(siteId: string, engine: Engine): WowDelta[] {
   ];
 }
 
+export interface SiteMover {
+  site_id: string;
+  name: string;
+  domain: string;
+  clicks: { current: number; previous: number; changePct: number };
+  impressions: { current: number; previous: number; changePct: number };
+  position: { current: number; previous: number; changePct: number };
+}
+
+/**
+ * Portfolio-wide search movers: each site's Google WoW deltas (7d vs prior 7d)
+ * from the cached rollups, for the Analytics landing page. Sites with no
+ * cached perf data yet are omitted. Sorted by absolute clicks change so the
+ * biggest movers (up or down) surface first.
+ */
+export function getPortfolioMovers(): SiteMover[] {
+  const pct = (c: number, p: number) => p === 0 ? (c > 0 ? 100 : 0) : ((c - p) / p) * 100;
+  const movers: SiteMover[] = [];
+  for (const site of getAllSites()) {
+    const cur = sumRange(site.id, 'google', 7, 0);
+    const prev = sumRange(site.id, 'google', 14, 7);
+    if (cur.clicks === 0 && cur.impressions === 0 && prev.clicks === 0 && prev.impressions === 0) continue;
+    movers.push({
+      site_id: site.id, name: site.name, domain: site.domain,
+      clicks: { current: cur.clicks, previous: prev.clicks, changePct: pct(cur.clicks, prev.clicks) },
+      impressions: { current: cur.impressions, previous: prev.impressions, changePct: pct(cur.impressions, prev.impressions) },
+      position: { current: cur.position, previous: prev.position, changePct: pct(cur.position, prev.position) },
+    });
+  }
+  return movers.sort((a, b) => Math.abs(b.clicks.changePct) - Math.abs(a.clicks.changePct));
+}
+
 // ── Query-position-over-time ─────────────────────────────────────────────────
 
 export interface QueryTrendPoint { day: string; clicks: number; impressions: number; position: number }
