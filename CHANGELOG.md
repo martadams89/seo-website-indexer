@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/martadams89/seo-website-indexer/compare/v1.3.0...v1.4.0) (2026-07-04)
+
+
+### ✨ Features
+
+* perf analytics depth — country/device, WoW deltas, query trends, per-query alerts ([#57](https://github.com/martadams89/seo-website-indexer/issues/57)) ([f2cd948](https://github.com/martadams89/seo-website-indexer/commit/f2cd948d67868d797b9943bdf54adfc5d196d376))
+
 ## [1.3.0](https://github.com/martadams89/seo-website-indexer/compare/v1.2.6...v1.3.0) (2026-07-04)
 
 
