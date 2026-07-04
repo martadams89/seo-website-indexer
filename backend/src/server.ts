@@ -39,6 +39,7 @@ import fastifyRateLimit from '@fastify/rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import QRCode from 'qrcode';
 
 import {
   getAllSites,
@@ -411,7 +412,11 @@ app.post('/api/auth/totp/setup', async (req) => {
   const user = currentUser(req);
   const secret = generateTotpSecret();
   setTotpSecret(user.id, secret);
-  return { secret, uri: totpUri(secret, user.email) };
+  const uri = totpUri(secret, user.email);
+  // A scannable QR (PNG data URL) of the otpauth URI, so the user can point
+  // their authenticator app at it instead of typing the secret.
+  const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
+  return { secret, uri, qr };
 });
 app.post('/api/auth/totp/enable', async (req, reply) => {
   const user = currentUser(req);

@@ -215,7 +215,7 @@ export const api = {
   logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) =>
     apiFetch<{ ok: boolean }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
-  totpSetup: () => apiFetch<{ secret: string; uri: string }>('/api/auth/totp/setup', { method: 'POST' }),
+  totpSetup: () => apiFetch<{ secret: string; uri: string; qr: string }>('/api/auth/totp/setup', { method: 'POST' }),
   totpEnable: (totp: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/enable', { method: 'POST', body: JSON.stringify({ totp }) }),
   totpDisable: (password: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/disable', { method: 'POST', body: JSON.stringify({ password }) }),
 

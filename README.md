@@ -131,6 +131,21 @@ SSO_AUTO_PROVISION=true
 
 > The very first user to sign in via SSO on an empty install becomes the super-admin (bootstraps the instance), regardless of `SSO_AUTO_PROVISION`.
 
+### Locked out? Recover from the command line
+
+There is no email-based reset yet, and the in-app *Change password* form needs your **current** password. If you're locked out, reset your account directly against the database with the bundled admin CLI (it respects `DATA_DIR`):
+
+```bash
+# Docker
+docker exec <container> node dist/cli/admin.js list                       # show accounts
+docker exec <container> node dist/cli/admin.js reset-password you@example.com          # prints a new random password
+docker exec <container> node dist/cli/admin.js reset-password you@example.com 'newpass' # or set your own
+docker exec <container> node dist/cli/admin.js disable-2fa you@example.com # lost your authenticator
+docker exec <container> node dist/cli/admin.js make-admin you@example.com  # grant super-admin
+
+# From source (dev): npm run admin -- reset-password you@example.com
+```
+
 ---
 
 ## Connecting Google (Search Console & Indexing)
