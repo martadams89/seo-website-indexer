@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/martadams89/seo-website-indexer/compare/v1.8.2...v1.9.0) (2026-07-04)
+
+
+### ✨ Features
+
+* tenancy hardening — docs, safe user deletion, auth throttling, tests, per-site Bing ([#75](https://github.com/martadams89/seo-website-indexer/issues/75)) ([2c37d86](https://github.com/martadams89/seo-website-indexer/commit/2c37d86b070146428ae9e70daa6b4b287fa9c475))
+
 ## [1.8.2](https://github.com/martadams89/seo-website-indexer/compare/v1.8.1...v1.8.2) (2026-07-04)
 
 
