@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/martadams89/seo-website-indexer/compare/v1.1.1...v1.2.0) (2026-07-04)
+
+
+### ✨ Features
+
+* **citations:** render LLM markdown; clean + structure Brave results ([5af131f](https://github.com/martadams89/seo-website-indexer/commit/5af131f134a575abde58525c0db47611521ba87e))
+
 ## [1.1.1](https://github.com/martadams89/seo-website-indexer/compare/v1.1.0...v1.1.1) (2026-07-04)
 
 
