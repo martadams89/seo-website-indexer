@@ -86,6 +86,7 @@ import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
+import { getGooglePerformance, getBingPerformance, getBingCrawlIssues } from './indexer/performance.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
 import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, getThread, replyInThread, type Provider } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
@@ -776,6 +777,65 @@ app.get('/api/analytics/alerts', async () => getAlerts());
 app.post('/api/analytics/alerts/:id/ack', async (req) => {
   ackAlert(Number((req.params as { id: string }).id));
   return { ok: true };
+});
+
+// ── Unified search performance (GSC + Bing) ──────────────────────────────────
+
+app.get('/api/performance/:siteId', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const days = Math.min(Math.max(Number((req.query as { days?: string }).days) || 28, 1), 365);
+  const [google, bing] = await Promise.all([
+    getGooglePerformance(site, days),
+    getBingPerformance(site, days),
+  ]);
+  return { days, google, bing };
+});
+
+app.get('/api/sites/:id/crawl-issues', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  return getBingCrawlIssues(site);
+});
+
+// Combined submit — push a site's URLs to Google, Bing, or both in one call.
+app.post('/api/submit/:siteId', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const { engines, urls } = (req.body ?? {}) as { engines?: Array<'google' | 'bing'>; urls?: string[] };
+  const targets = engines?.length ? engines : ['google', 'bing'];
+  const list = urls?.length ? urls : getUrlsBySite(site.id).slice(0, 100).map((u: { url: string }) => u.url);
+  const result: { google?: { runId?: string; error?: string }; bing?: { submitted?: number; error?: string } } = {};
+
+  if (targets.includes('google')) {
+    if (!site.google_account_id) {
+      result.google = { error: 'No Google account linked to this site.' };
+    } else if (isRunning()) {
+      result.google = { error: 'A run is already in progress.' };
+    } else {
+      try {
+        const runId = await runIndexing({ trigger: 'manual', siteIds: [site.id], skipIndexNow: true, skipBing: true });
+        result.google = { runId };
+      } catch (e) {
+        result.google = { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+  }
+  if (targets.includes('bing')) {
+    const apiKey = getSetting('bing_api_key');
+    if (!apiKey) {
+      result.bing = { error: 'No Bing Webmaster API key configured.' };
+    } else {
+      try {
+        const results = await submitToBingInBatches(apiKey, deriveBingSiteUrl(site.gsc_url, site.domain), list);
+        result.bing = { submitted: results.filter(r => r.success).reduce((s, r) => s + r.urlCount, 0) };
+      } catch (e) {
+        result.bing = { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+  }
+  logSystem('ok', `Combined submit for ${site.domain}: ${JSON.stringify(result)}`);
+  return result;
 });
 
 // ── llms.txt lifecycle ───────────────────────────────────────────────────────
