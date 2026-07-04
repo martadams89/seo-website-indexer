@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.6](https://github.com/martadams89/seo-website-indexer/compare/v1.2.5...v1.2.6) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* add Submit to Google button to the site analytics header ([#53](https://github.com/martadams89/seo-website-indexer/issues/53)) ([38c26c0](https://github.com/martadams89/seo-website-indexer/commit/38c26c0dc48c71743d388ff2880a0b42ceb46094))
+
 ## [1.2.5](https://github.com/martadams89/seo-website-indexer/compare/v1.2.4...v1.2.5) (2026-07-04)
 
 
