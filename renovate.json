@@ -15,8 +15,9 @@
   },
   "packageRules": [
     {
-      "description": "Auto-merge safe updates once CI is green (patch/minor, pinned digests, GitHub Actions). Majors stay as PRs for a human.",
+      "description": "Auto-merge everything \u2014 major/minor/patch/pin/digest \u2014 once required CI is green (backend tests+build, frontend lint+build, full Docker build). CI is the gate, not semver.",
       "matchUpdateTypes": [
+        "major",
         "minor",
         "patch",
         "pin",
@@ -37,14 +38,14 @@
       "groupName": "npm dependencies (non-major)"
     },
     {
-      "description": "better-sqlite3 majors track Node ABI \u2014 never auto-merge",
+      "description": "better-sqlite3 majors track Node ABI \u2014 still auto-merges (the Docker build step compiles/installs the native addon, so a real ABI break fails CI), but flagged for a look since it's a native module",
       "matchPackageNames": [
         "better-sqlite3"
       ],
       "matchUpdateTypes": [
         "major"
       ],
-      "automerge": false,
+      "automerge": true,
       "addLabels": [
         "needs-review"
       ]
