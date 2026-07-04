@@ -86,7 +86,8 @@ import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
-import { getGooglePerformance, getBingPerformance, getBingCrawlIssues } from './indexer/performance.js';
+import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
+import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
 import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, getThread, replyInThread, type Provider } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
@@ -796,6 +797,67 @@ app.get('/api/sites/:id/crawl-issues', async (req, reply) => {
   const site = getSiteById((req.params as { id: string }).id);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
   return getBingCrawlIssues(site);
+});
+
+// GSC country/device breakdown for a site + range.
+app.get('/api/performance/:siteId/dimension', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const q = req.query as { days?: string; dimension?: string };
+  const days = Math.min(Math.max(Number(q.days) || 28, 1), 365);
+  const dimension = q.dimension === 'device' ? 'device' : 'country';
+  return getGoogleDimension(site, days, dimension);
+});
+
+// Week-over-week deltas (last 7d vs prior 7d) from cached rollups.
+app.get('/api/performance/:siteId/deltas', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const engine = (req.query as { engine?: string }).engine === 'bing' ? 'bing' : 'google';
+  return { engine, deltas: getWowDeltas(site.id, engine) };
+});
+
+// On-demand refresh of a site's cached rollups (otherwise refreshed post-run).
+app.post('/api/performance/:siteId/snapshot', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  await snapshotSitePerformance(site);
+  return { ok: true };
+});
+
+// Query-position-over-time + trackable/tracked query management.
+app.get('/api/performance/:siteId/query-trend', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const query = (req.query as { query?: string }).query;
+  if (!query) return reply.code(400).send({ error: 'query required' });
+  return { query, points: getQueryTrend(site.id, query) };
+});
+
+app.get('/api/performance/:siteId/trackable-queries', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  return getTrackableQueries(site.id);
+});
+
+app.get('/api/performance/:siteId/tracked-queries', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  return listTrackedQueries(site.id);
+});
+
+app.post('/api/performance/:siteId/tracked-queries', async (req, reply) => {
+  const site = getSiteById((req.params as { siteId: string }).siteId);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const query = (req.body as { query?: string })?.query;
+  if (!query?.trim()) return reply.code(400).send({ error: 'query required' });
+  addTrackedQuery(site.id, query);
+  return { ok: true };
+});
+
+app.delete('/api/performance/tracked-queries/:id', async (req) => {
+  removeTrackedQuery(Number((req.params as { id: string }).id));
+  return { ok: true };
 });
 
 // Combined submit — push a site's URLs to Google, Bing, or both in one call.

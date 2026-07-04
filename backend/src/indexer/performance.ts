@@ -93,6 +93,57 @@ export async function getGooglePerformance(site: Site, days: number): Promise<En
   }
 }
 
+export interface DimensionRow { key: string; clicks: number; impressions: number; ctr: number; position: number }
+
+// GSC country/device breakdown. (Bing has no comparable public traffic-by-
+// country/device API, so this is Google-only — the UI says so.)
+export async function getGoogleDimension(
+  site: Site, days: number, dimension: 'country' | 'device'
+): Promise<{ available: boolean; reason?: string; rows: DimensionRow[] }> {
+  if (!site.google_account_id) return { available: false, reason: 'No Google account linked to this site.', rows: [] };
+  let token: string;
+  try {
+    token = await getAccessTokenForAccount(site.google_account_id);
+  } catch (e) {
+    return { available: false, reason: `Google auth error: ${e instanceof Error ? e.message : e}`, rows: [] };
+  }
+  const { startDate, endDate } = rangeDates(days);
+  try {
+    const rows = await gscQuery(token, site.gsc_url, { startDate, endDate, dimensions: [dimension], rowLimit: 50 });
+    return {
+      available: true,
+      rows: rows.map(r => ({ key: r.keys?.[0] ?? '', clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position })),
+    };
+  } catch (e) {
+    return { available: false, reason: e instanceof Error ? e.message : String(e), rows: [] };
+  }
+}
+
+export interface DailyQueryRow { date: string; query: string; clicks: number; impressions: number; position: number }
+
+// Per-day, per-query GSC rows — the raw material for query-position-over-time
+// trends and per-query alerting. (Bing exposes only aggregated query stats, no
+// per-day breakdown, so trends/alerts are Google-sourced.)
+export async function getGoogleDailyQueries(site: Site, days: number): Promise<DailyQueryRow[]> {
+  if (!site.google_account_id) return [];
+  let token: string;
+  try {
+    token = await getAccessTokenForAccount(site.google_account_id);
+  } catch {
+    return [];
+  }
+  const { startDate, endDate } = rangeDates(days);
+  try {
+    const rows = await gscQuery(token, site.gsc_url, { startDate, endDate, dimensions: ['date', 'query'], rowLimit: 5000 });
+    return rows.map(r => ({
+      date: r.keys?.[0] ?? '', query: r.keys?.[1] ?? '',
+      clicks: r.clicks, impressions: r.impressions, position: r.position,
+    })).filter(r => r.date && r.query);
+  } catch {
+    return [];
+  }
+}
+
 // ── Bing Webmaster — rank/traffic + query/page stats ─────────────────────────
 
 async function bingCall<T>(method: string, apiKey: string, siteUrl: string): Promise<T> {

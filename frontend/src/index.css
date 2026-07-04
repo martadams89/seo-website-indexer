@@ -1593,3 +1593,24 @@ body {
 .metric-chart-tip span { color: var(--text-dim); font-size: 9.5px; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Perf analytics depth ─────────────────────────────────────────────────── */
+.delta-chip { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 700; }
+.wow-row {
+  display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  font-size: 11.5px; color: var(--text-secondary);
+  padding: 6px 2px; border-bottom: 1px solid var(--border);
+}
+.wow-label { color: var(--text-dim); text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+.tracked-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 14px;
+  padding: 3px 8px 3px 10px; font-size: 12px;
+}
+.tracked-chip-name { background: none; border: none; cursor: pointer; color: inherit; font-size: 12px; padding: 0; }
+.tracked-chip-name:hover { color: var(--accent, #7c6cf5); text-decoration: underline; }
+.tracked-chip-x {
+  background: none; border: none; cursor: pointer; color: var(--text-dim);
+  display: inline-flex; padding: 2px; border-radius: 50%;
+}
+.tracked-chip-x:hover { color: var(--error); background: var(--bg-overlay); }

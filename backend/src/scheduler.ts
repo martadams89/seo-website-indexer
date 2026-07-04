@@ -49,6 +49,7 @@ import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexe
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
+import { snapshotAllPerformance } from './analytics/perf-store.js';
 import { sendNotification } from './utils/notify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -877,6 +878,15 @@ async function _doRun(
     snapshotAllSites();
   } catch (e) {
     log(runId, 'warn', `Stats snapshot failed: ${e instanceof Error ? e.message : e}`);
+  }
+  // Search-performance rollups (GSC + Bing) — cached for WoW deltas + query
+  // trends, and drives per-query drop alerts. Network-bound, so awaited but
+  // never allowed to fail the run.
+  try {
+    const n = await snapshotAllPerformance();
+    if (n > 0) log(runId, 'dim', `Search-performance rollups refreshed for ${n} site(s)`);
+  } catch (e) {
+    log(runId, 'warn', `Perf snapshot failed: ${e instanceof Error ? e.message : e}`);
   }
   sendNotification(
     isStopped ? 'Indexing run stopped' : 'Indexing run complete',

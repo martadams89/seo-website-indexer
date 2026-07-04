@@ -184,6 +184,39 @@ function initSchema(db: Database.Database): void {
       cls        REAL,
       PRIMARY KEY (site_id, day)
     );
+
+    -- ── Search-performance rollups (GSC + Bing, cached daily) ─────────────
+    CREATE TABLE IF NOT EXISTS perf_daily (
+      site_id     TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      engine      TEXT NOT NULL,            -- google | bing
+      day         TEXT NOT NULL,            -- YYYY-MM-DD
+      clicks      INTEGER NOT NULL DEFAULT 0,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      ctr         REAL NOT NULL DEFAULT 0,
+      position    REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (site_id, engine, day)
+    );
+
+    CREATE TABLE IF NOT EXISTS perf_query_daily (
+      site_id     TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      engine      TEXT NOT NULL,
+      day         TEXT NOT NULL,
+      query       TEXT NOT NULL,
+      clicks      INTEGER NOT NULL DEFAULT 0,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      position    REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (site_id, engine, day, query)
+    );
+    CREATE INDEX IF NOT EXISTS idx_perf_query_lookup ON perf_query_daily(site_id, engine, query, day);
+
+    CREATE TABLE IF NOT EXISTS tracked_queries (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id      TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      query        TEXT NOT NULL,
+      last_position REAL,                   -- last observed avg position (for drop detection)
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (site_id, query)
+    );
   `);
 
   // Backwards compatibility migrations

@@ -275,6 +275,25 @@ export const api = {
   submitCombined: (siteId: string, engines: Array<'google' | 'bing'>) =>
     apiFetch<{ google?: { runId?: string; error?: string }; bing?: { submitted?: number; error?: string } }>(
       `/api/submit/${siteId}`, { method: 'POST', body: JSON.stringify({ engines }) }),
+  getPerfDimension: (siteId: string, days: number, dimension: 'country' | 'device') =>
+    apiFetch<{ available: boolean; reason?: string; rows: Array<{ key: string; clicks: number; impressions: number; ctr: number; position: number }> }>(
+      `/api/performance/${siteId}/dimension?days=${days}&dimension=${dimension}`),
+  getPerfDeltas: (siteId: string, engine: 'google' | 'bing') =>
+    apiFetch<{ engine: string; deltas: Array<{ metric: string; current: number; previous: number; changePct: number }> }>(
+      `/api/performance/${siteId}/deltas?engine=${engine}`),
+  snapshotPerf: (siteId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/performance/${siteId}/snapshot`, { method: 'POST' }),
+  getQueryTrend: (siteId: string, query: string) =>
+    apiFetch<{ query: string; points: Array<{ day: string; clicks: number; impressions: number; position: number }> }>(
+      `/api/performance/${siteId}/query-trend?query=${encodeURIComponent(query)}`),
+  getTrackableQueries: (siteId: string) =>
+    apiFetch<Array<{ query: string; clicks: number }>>(`/api/performance/${siteId}/trackable-queries`),
+  getTrackedQueries: (siteId: string) =>
+    apiFetch<Array<{ id: number; query: string; last_position: number | null }>>(`/api/performance/${siteId}/tracked-queries`),
+  addTrackedQuery: (siteId: string, query: string) =>
+    apiFetch<{ ok: boolean }>(`/api/performance/${siteId}/tracked-queries`, { method: 'POST', body: JSON.stringify({ query }) }),
+  removeTrackedQuery: (id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/performance/tracked-queries/${id}`, { method: 'DELETE' }),
 
   // ── Hygiene / CrUX ──
   runHygiene: (siteId: string) => apiFetch<HygieneReport>(`/api/sites/${siteId}/hygiene`),
