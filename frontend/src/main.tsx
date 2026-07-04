@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import { AppProvider } from './AppContext'
+import { AuthGate } from './auth/AuthGate'
+import { WorkspaceProvider } from './workspace/WorkspaceContext'
 import Layout from './Layout'
 import Dashboard from './pages/Dashboard'
 import SitesPage from './pages/Sites'
@@ -17,6 +19,8 @@ import AccountsPage from './pages/Accounts'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
+      <AuthGate>
+      <WorkspaceProvider>
       <AppProvider>
         <Routes>
           {/* Setup has no sidebar */}
@@ -38,6 +42,8 @@ createRoot(document.getElementById('root')!).render(
           </Route>
         </Routes>
       </AppProvider>
+      </WorkspaceProvider>
+      </AuthGate>
     </BrowserRouter>
   </StrictMode>
 )

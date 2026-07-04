@@ -116,20 +116,26 @@ export interface SiteOverview extends SiteSnapshot {
   trend: Array<{ day: string; urls_indexed: number; urls_total: number }>;
 }
 
-export function getOverview(): {
+// Scoped to one workspace's sites (the tenant boundary). A null workspace
+// (user with no workspace) yields an empty overview.
+export function getOverview(workspaceId: string | null): {
   sites: SiteOverview[];
   totals: { sites: number; urls_total: number; urls_indexed: number; urls_stale: number; failures: number; open_alerts: number };
 } {
   const db = getDb();
   const sites: SiteOverview[] = [];
-  for (const site of getAllSites()) {
+  const wsSites = workspaceId ? getAllSites().filter(s => s.workspace_id === workspaceId) : [];
+  for (const site of wsSites) {
     const snap = computeSnapshot(site.id);
     const trend = db.prepare(
       'SELECT day, urls_indexed, urls_total FROM site_stats_daily WHERE site_id = ? ORDER BY day DESC LIMIT 30'
     ).all(site.id).reverse() as Array<{ day: string; urls_indexed: number; urls_total: number }>;
     sites.push({ ...snap, name: site.name, domain: site.domain, trend });
   }
-  const openAlerts = (db.prepare('SELECT COUNT(*) AS c FROM alerts WHERE acked = 0').get() as { c: number }).c;
+  const siteIds = sites.map(s => s.site_id);
+  const openAlerts = siteIds.length
+    ? (db.prepare(`SELECT COUNT(*) AS c FROM alerts WHERE acked = 0 AND site_id IN (${siteIds.map(() => '?').join(',')})`).get(...siteIds) as { c: number }).c
+    : 0;
   return {
     sites,
     totals: {
@@ -190,11 +196,22 @@ export function getSiteDetail(siteId: string): {
   };
 }
 
-export function getAlerts(limit = 100): Array<Record<string, unknown>> {
+// Alerts for a workspace's sites only (plus global site-less alerts).
+export function getAlerts(workspaceId: string | null, limit = 100): Array<Record<string, unknown>> {
   return getDb().prepare(`
-    SELECT a.*, s.domain FROM alerts a LEFT JOIN sites s ON s.id = a.site_id
+    SELECT a.*, s.domain FROM alerts a
+    JOIN sites s ON s.id = a.site_id
+    WHERE s.workspace_id = ?
     ORDER BY a.created_at DESC LIMIT ?
-  `).all(limit) as Array<Record<string, unknown>>;
+  `).all(workspaceId, limit) as Array<Record<string, unknown>>;
+}
+
+// Authorize an ack: the alert must belong to a site in the given workspace.
+export function alertInWorkspace(id: number, workspaceId: string | null): boolean {
+  const row = getDb().prepare(`
+    SELECT s.workspace_id AS ws FROM alerts a JOIN sites s ON s.id = a.site_id WHERE a.id = ?
+  `).get(id) as { ws: string | null } | undefined;
+  return !!row && row.ws === workspaceId;
 }
 
 export function ackAlert(id: number): void {

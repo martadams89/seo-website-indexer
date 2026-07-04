@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus } from 'lucide-react';
+import { useAuth } from '../auth/AuthGate';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api } from '../api';
+import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo } from '../api';
+import { registerPasskey } from '../auth/webauthn';
 
-type Tab = 'schedule' | 'google' | 'keys' | 'notify';
+type Tab = 'account' | 'workspace' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
 
 interface KeyGuide {
   key: string;
@@ -98,14 +101,393 @@ const CRON_PRESETS = [
   { label: 'Every Monday', value: '0 3 * * 1' },
 ];
 
-const TABS: Array<{ id: Tab; label: string; icon: typeof Clock }> = [
-  { id: 'schedule', label: 'Scheduling', icon: Clock },
-  { id: 'google',   label: 'Google',     icon: User },
-  { id: 'keys',     label: 'API Keys',   icon: KeyRound },
-  { id: 'notify',   label: 'Notifications', icon: Bell },
+const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boolean }> = [
+  { id: 'account',   label: 'Account & Security', icon: ShieldCheck },
+  { id: 'workspace', label: 'Workspace', icon: Building2 },
+  { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
+  { id: 'schedule',  label: 'Scheduling', icon: Clock },
+  { id: 'google',    label: 'Google',     icon: User },
+  { id: 'keys',      label: 'API Keys',   icon: KeyRound },
+  { id: 'notify',    label: 'Notifications', icon: Bell },
 ];
 
+function AccountTab() {
+  const { user, refreshUser } = useAuth();
+  const [curPw, setCurPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  // TOTP enrolment
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpMsg, setTotpMsg] = useState<string | null>(null);
+  const [disablePw, setDisablePw] = useState('');
+  const [copied, setCopied] = useState(false);
+  // Passkeys
+  const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
+  const [pkName, setPkName] = useState('');
+  const [pkMsg, setPkMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pkBusy, setPkBusy] = useState(false);
+
+  async function loadPasskeys() { setPasskeys(await api.listPasskeys().catch(() => [])); }
+  useEffect(() => { loadPasskeys(); }, []);
+
+  async function addPasskey() {
+    setPkBusy(true); setPkMsg(null);
+    try {
+      await registerPasskey(pkName.trim() || 'Passkey');
+      setPkName('');
+      setPkMsg({ ok: true, text: 'Passkey added.' });
+      await loadPasskeys();
+    } catch (e) {
+      setPkMsg({ ok: false, text: e instanceof Error ? e.message : 'Registration cancelled or failed.' });
+    }
+    setPkBusy(false);
+  }
+  async function removePasskey(id: string) {
+    await api.deletePasskey(id).catch(() => null);
+    await loadPasskeys();
+  }
+
+  async function changePassword() {
+    setPwBusy(true); setPwMsg(null);
+    try {
+      await api.changePassword(curPw, newPw);
+      setPwMsg({ ok: true, text: 'Password changed.' });
+      setCurPw(''); setNewPw('');
+    } catch (e) { setPwMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setPwBusy(false);
+  }
+
+  async function startTotp() {
+    setTotpMsg(null);
+    try { setTotpSetup(await api.totpSetup()); } catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+  async function enableTotp() {
+    setTotpMsg(null);
+    try {
+      await api.totpEnable(totpCode);
+      setTotpSetup(null); setTotpCode('');
+      await refreshUser();
+    } catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Invalid code'); }
+  }
+  async function disableTotp() {
+    setTotpMsg(null);
+    try { await api.totpDisable(disablePw); setDisablePw(''); await refreshUser(); }
+    catch (e) { setTotpMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+
+  return (
+    <>
+      <div className="card mb-4">
+        <div className="card-title"><User size={13} /> Profile</div>
+        <div className="site-facts">
+          <div className="site-fact"><span className="site-fact-label">Name</span><span className="site-fact-value">{user.name || '—'}</span></div>
+          <div className="site-fact"><span className="site-fact-label">Email</span><span className="site-fact-value">{user.email}</span></div>
+          <div className="site-fact"><span className="site-fact-label">Role</span><span className="site-fact-value">{user.is_super_admin ? 'Super-admin' : user.role}</span></div>
+          <div className="site-fact"><span className="site-fact-label">2FA</span><span className="site-fact-value">{user.totp_enabled ? 'Enabled' : 'Off'}</span></div>
+        </div>
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-title">Change password</div>
+        <div className="site-form" style={{ maxWidth: 420 }}>
+          <div className="input-group mb-3">
+            <label className="input-label">Current password</label>
+            <input className="input" type="password" value={curPw} onChange={e => setCurPw(e.target.value)} autoComplete="current-password" />
+          </div>
+          <div className="input-group mb-3">
+            <label className="input-label">New password</label>
+            <input className="input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="btn btn-primary btn-sm" disabled={pwBusy || !curPw || newPw.length < 8} onClick={changePassword}>
+              <Save size={13} /> {pwBusy ? 'Saving…' : 'Change password'}
+            </button>
+            {pwMsg && <span style={{ fontSize: 12, color: pwMsg.ok ? 'var(--ok)' : 'var(--error)' }}>{pwMsg.text}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title"><ShieldCheck size={13} /> Two-factor authentication (TOTP)</div>
+        {user.totp_enabled ? (
+          <div className="site-form" style={{ maxWidth: 420 }}>
+            <div className="empty-note" style={{ marginBottom: 10 }}><ShieldCheck size={12} /> 2FA is enabled on your account.</div>
+            <div className="input-group mb-3">
+              <label className="input-label">Confirm password to disable</label>
+              <input className="input" type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} autoComplete="current-password" />
+            </div>
+            <button className="btn btn-danger btn-sm" disabled={!disablePw} onClick={disableTotp}>Disable 2FA</button>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        ) : totpSetup ? (
+          <div className="site-form" style={{ maxWidth: 460 }}>
+            <p className="text-dim" style={{ fontSize: 12 }}>
+              Add this account to your authenticator app — scan the URI as a QR in a scanner, or enter the key manually — then enter the 6-digit code to confirm.
+            </p>
+            <div className="input-group mb-2">
+              <label className="input-label">Setup key</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <code style={{ flex: 1, fontSize: 12, wordBreak: 'break-all', background: 'var(--bg-input)', padding: '6px 10px', borderRadius: 6 }}>{totpSetup.secret}</code>
+                <button className="btn-icon btn-icon-ghost" onClick={() => { navigator.clipboard.writeText(totpSetup.uri); setCopied(true); setTimeout(() => setCopied(false), 1500); }} title="Copy otpauth URI">
+                  {copied ? <Check size={14} style={{ color: 'var(--ok)' }} /> : <Copy size={14} />}
+                </button>
+              </div>
+            </div>
+            <div className="input-group mb-3">
+              <label className="input-label">6-digit code</label>
+              <input className="input" value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" />
+            </div>
+            <div className="flex gap-2">
+              <button className="btn btn-primary btn-sm" disabled={totpCode.length !== 6} onClick={enableTotp}>Enable 2FA</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setTotpSetup(null); setTotpMsg(null); }}>Cancel</button>
+            </div>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        ) : (
+          <div className="site-form" style={{ maxWidth: 420 }}>
+            <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>Protect your account with a time-based one-time code from an authenticator app.</p>
+            <button className="btn btn-primary btn-sm" onClick={startTotp}><ShieldCheck size={13} /> Set up 2FA</button>
+            {totpMsg && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 6 }}>{totpMsg}</div>}
+          </div>
+        )}
+      </div>
+
+      <div className="card mt-4">
+        <div className="card-title"><Fingerprint size={13} /> Passkeys</div>
+        <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+          Sign in without a password using Face ID, Touch ID, Windows Hello or a security key. You can register more than one.
+        </p>
+        <div className="member-list">
+          {passkeys.map(pk => (
+            <div key={pk.id} className="member-row">
+              <div className="member-info">
+                <span className="member-name">{pk.name || 'Passkey'}</span>
+                <span className="member-role">Added {new Date(pk.created_at).toLocaleDateString()}</span>
+              </div>
+              <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removePasskey(pk.id)}><Trash2 size={13} /></button>
+            </div>
+          ))}
+          {passkeys.length === 0 && <div className="empty-note">No passkeys yet.</div>}
+        </div>
+        <div className="flex gap-2 mt-3" style={{ maxWidth: 420 }}>
+          <input className="input" placeholder="Name (e.g. MacBook Touch ID)" value={pkName} onChange={e => setPkName(e.target.value)} />
+          <button className="btn btn-primary btn-sm" disabled={pkBusy} onClick={addPasskey}>
+            {pkBusy ? '…' : <><Fingerprint size={13} /> Add passkey</>}
+          </button>
+        </div>
+        {pkMsg && <div style={{ fontSize: 12, marginTop: 8, color: pkMsg.ok ? 'var(--ok)' : 'var(--error)' }}>{pkMsg.text}</div>}
+      </div>
+    </>
+  );
+}
+
+// ── Workspace tab: rename, members, Bing accounts ────────────────────────────
+function WorkspaceTab() {
+  const { active, refreshWorkspaces } = useWorkspace();
+  const [name, setName] = useState(active?.name ?? '');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [bing, setBing] = useState<BingAccount[]>([]);
+  const [memberEmail, setMemberEmail] = useState('');
+  const [bingName, setBingName] = useState('');
+  const [bingKey, setBingKey] = useState('');
+
+  const canManage = !!active?.is_owner;
+
+  async function load() {
+    if (!active) return;
+    setMembers(await api.getWorkspaceMembers(active.id).catch(() => []));
+    setBing(await api.getBingAccounts().catch(() => []));
+  }
+  useEffect(() => { setName(active?.name ?? ''); load(); }, [active?.id]);
+
+  async function rename() {
+    if (!active) return;
+    setMsg(null);
+    try { await api.renameWorkspace(active.id, name.trim()); await refreshWorkspaces(); setMsg('Saved.'); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+  async function addMember() {
+    if (!active || !memberEmail.trim()) return;
+    setMsg(null);
+    try { await api.addWorkspaceMember(active.id, memberEmail.trim()); setMemberEmail(''); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+  async function removeMember(userId: string) {
+    if (!active) return;
+    await api.removeWorkspaceMember(active.id, userId).catch(() => null);
+    await load();
+  }
+  async function addBing() {
+    if (!bingKey.trim()) return;
+    setMsg(null);
+    try { await api.addBingAccount(bingName.trim() || 'Bing account', bingKey.trim()); setBingName(''); setBingKey(''); await load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+  }
+  async function removeBing(id: string) {
+    await api.removeBingAccount(id).catch(() => null);
+    await load();
+  }
+
+  if (!active) return <div className="card"><div className="empty-note">No workspace selected.</div></div>;
+
+  return (
+    <>
+      <div className="card mb-4">
+        <div className="card-title"><Building2 size={13} /> Workspace</div>
+        <div className="site-form" style={{ maxWidth: 420 }}>
+          <div className="input-group mb-3">
+            <label className="input-label">Name</label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} disabled={!canManage} />
+          </div>
+          {canManage && (
+            <button className="btn btn-primary btn-sm" disabled={!name.trim() || name.trim() === active.name} onClick={rename}>
+              <Save size={13} /> Save name
+            </button>
+          )}
+          {!canManage && <p className="text-dim" style={{ fontSize: 12 }}>You're a member of this workspace. Only the owner can change its settings.</p>}
+          {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg === 'Saved.' ? 'var(--ok)' : 'var(--error)' }}>{msg}</div>}
+        </div>
+      </div>
+
+      <div className="card mb-4">
+        <div className="card-title"><Users size={13} /> Members</div>
+        <div className="member-list">
+          {members.map(m => (
+            <div key={m.user_id} className="member-row">
+              <div className="member-info">
+                <span className="member-name">{m.name || m.email}</span>
+                <span className="member-role">{m.is_owner ? 'Owner' : m.role}</span>
+              </div>
+              {canManage && !m.is_owner && (
+                <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeMember(m.user_id)}><Trash2 size={13} /></button>
+              )}
+            </div>
+          ))}
+          {members.length === 0 && <div className="empty-note">Just you so far.</div>}
+        </div>
+        {canManage && (
+          <div className="flex gap-2 mt-3" style={{ maxWidth: 420 }}>
+            <input className="input" placeholder="teammate@example.com" value={memberEmail}
+              onChange={e => setMemberEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addMember(); }} />
+            <button className="btn btn-secondary btn-sm" disabled={!memberEmail.trim()} onClick={addMember}><Plus size={13} /> Add</button>
+          </div>
+        )}
+        {canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>The user must already have an account (create them under the Users tab).</p>}
+      </div>
+
+      <div className="card">
+        <div className="card-title"><KeyRound size={13} /> Bing Webmaster accounts</div>
+        <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+          Add one or more Bing API keys for this workspace. Each site can pick which account to use, or fall back to the first.
+        </p>
+        <div className="member-list">
+          {bing.map(b => (
+            <div key={b.id} className="member-row">
+              <span className="member-name">{b.name}</span>
+              {canManage && <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeBing(b.id)}><Trash2 size={13} /></button>}
+            </div>
+          ))}
+          {bing.length === 0 && <div className="empty-note">No Bing accounts yet.</div>}
+        </div>
+        {canManage && (
+          <div className="flex gap-2 mt-3 flex-wrap" style={{ maxWidth: 520 }}>
+            <input className="input" style={{ flex: '1 1 140px' }} placeholder="Label (e.g. Client A)" value={bingName} onChange={e => setBingName(e.target.value)} />
+            <input className="input" style={{ flex: '2 1 200px' }} type="password" placeholder="Bing API key" value={bingKey} onChange={e => setBingKey(e.target.value)} />
+            <button className="btn btn-secondary btn-sm" disabled={!bingKey.trim()} onClick={addBing}><Plus size={13} /> Add</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Users tab (super-admin): create / manage accounts ────────────────────────
+function UsersTab() {
+  const { user: me } = useAuth();
+  const [users, setUsers] = useState<CurrentUser[]>([]);
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [superAdmin, setSuperAdmin] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function load() { setUsers(await api.listUsers().catch(() => [])); }
+  useEffect(() => { load(); }, []);
+
+  async function create() {
+    setMsg(null);
+    try {
+      await api.createUser({ email: email.trim(), password, name: name.trim() || undefined, superAdmin });
+      setEmail(''); setName(''); setPassword(''); setSuperAdmin(false);
+      setMsg({ ok: true, text: 'User created with their own workspace.' });
+      await load();
+    } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+  }
+  async function remove(id: string) {
+    if (!confirm('Delete this user? Their owned workspaces and data are removed.')) return;
+    await api.deleteUser(id).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    await load();
+  }
+  async function toggleAdmin(u: CurrentUser) {
+    await api.updateUser(u.id, { superAdmin: !u.is_super_admin }).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    await load();
+  }
+
+  return (
+    <>
+      <div className="card mb-4">
+        <div className="card-title"><Users size={13} /> Users</div>
+        <div className="member-list">
+          {users.map(u => (
+            <div key={u.id} className="member-row">
+              <div className="member-info">
+                <span className="member-name">{u.name || u.email}{u.id === me.id && <span className="text-dim"> (you)</span>}</span>
+                <span className="member-role">{u.is_super_admin ? 'Super-admin' : u.role}{u.totp_enabled ? ' · 2FA' : ''}</span>
+              </div>
+              <div className="flex gap-1">
+                <button className="btn btn-secondary btn-sm" onClick={() => toggleAdmin(u)} disabled={u.id === me.id}>
+                  {u.is_super_admin ? 'Revoke admin' : 'Make admin'}
+                </button>
+                <button className="btn-icon btn-icon-ghost" title="Delete" onClick={() => remove(u.id)} disabled={u.id === me.id}><Trash2 size={13} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title"><Plus size={13} /> Add a user</div>
+        <div className="site-form" style={{ maxWidth: 420 }}>
+          <div className="input-group mb-3">
+            <label className="input-label">Email</label>
+            <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="off" />
+          </div>
+          <div className="input-group mb-3">
+            <label className="input-label">Name <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} autoComplete="off" />
+          </div>
+          <div className="input-group mb-3">
+            <label className="input-label">Temporary password</label>
+            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+          </div>
+          <label className="flex items-center gap-2 mb-3" style={{ fontSize: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={superAdmin} onChange={e => setSuperAdmin(e.target.checked)} /> Super-admin (full access to every workspace)
+          </label>
+          <button className="btn btn-primary btn-sm" disabled={!email.trim() || password.length < 8} onClick={create}>
+            <Plus size={13} /> Create user
+          </button>
+          {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? 'var(--ok)' : 'var(--error)' }}>{msg.text}</div>}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function SettingsPage() {
+  const { user } = useAuth();
   const { status, refresh } = useApp();
   const [tab, setTab] = useState<Tab>('schedule');
   const [cronSchedule, setCronSchedule] = useState('');
@@ -167,7 +549,7 @@ export default function SettingsPage() {
 
       {/* Tab bar */}
       <div className="settings-tabs">
-        {TABS.map(t => (
+        {TABS.filter(t => !t.superAdmin || user.is_super_admin).map(t => (
           <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
             <t.icon size={13} /> {t.label}
             {t.id === 'keys' && (
@@ -176,6 +558,15 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── Account & Security ── */}
+      {tab === 'account' && <AccountTab />}
+
+      {/* ── Workspace ── */}
+      {tab === 'workspace' && <WorkspaceTab />}
+
+      {/* ── Users (super-admin) ── */}
+      {tab === 'users' && user.is_super_admin && <UsersTab />}
 
       {/* ── Scheduling ── */}
       {tab === 'schedule' && (

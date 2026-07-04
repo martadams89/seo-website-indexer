@@ -112,10 +112,11 @@ export interface SiteMover {
  * cached perf data yet are omitted. Sorted by absolute clicks change so the
  * biggest movers (up or down) surface first.
  */
-export function getPortfolioMovers(): SiteMover[] {
+export function getPortfolioMovers(workspaceId: string | null): SiteMover[] {
   const pct = (c: number, p: number) => p === 0 ? (c > 0 ? 100 : 0) : ((c - p) / p) * 100;
   const movers: SiteMover[] = [];
-  for (const site of getAllSites()) {
+  const wsSites = workspaceId ? getAllSites().filter(s => s.workspace_id === workspaceId) : [];
+  for (const site of wsSites) {
     const cur = sumRange(site.id, 'google', 7, 0);
     const prev = sumRange(site.id, 'google', 14, 7);
     if (cur.clicks === 0 && cur.impressions === 0 && prev.clicks === 0 && prev.impressions === 0) continue;
