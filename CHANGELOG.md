@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/martadams89/seo-website-indexer/compare/v1.5.0...v1.6.0) (2026-07-04)
+
+
+### ✨ Features
+
+* sortable table columns across the data tables ([#61](https://github.com/martadams89/seo-website-indexer/issues/61)) ([a581e42](https://github.com/martadams89/seo-website-indexer/commit/a581e426dc81f2120f8552278694d15da31fbc83))
+
 ## [1.5.0](https://github.com/martadams89/seo-website-indexer/compare/v1.4.0...v1.5.0) (2026-07-04)
 
 
