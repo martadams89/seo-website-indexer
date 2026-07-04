@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/martadams89/seo-website-indexer/compare/v1.1.0...v1.1.1) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** hands-free release PRs — PAT token + auto-merge ([f0b75f1](https://github.com/martadams89/seo-website-indexer/commit/f0b75f1885e66ed1ba3edaa703cfbb42dcd5ddb6))
+* **ci:** hands-free release PRs — PAT token + auto-merge ([7f64173](https://github.com/martadams89/seo-website-indexer/commit/7f6417328e2f127e495f48495d69755ba5058b34))
+
 ## [1.1.0](https://github.com/martadams89/seo-website-indexer/compare/v1.0.1...v1.1.0) (2026-07-04)
 
 
