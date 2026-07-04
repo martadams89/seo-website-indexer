@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.5](https://github.com/martadams89/seo-website-indexer/compare/v1.2.4...v1.2.5) (2026-07-04)
+
+
+### 🧹 Maintenance
+
+* **deps:** update actions/setup-node action to v6 ([#41](https://github.com/martadams89/seo-website-indexer/issues/41)) ([c3014af](https://github.com/martadams89/seo-website-indexer/commit/c3014af0474825eb1bdb27ad52949a4bab6e83da))
+* **deps:** update dependency vitest to v4 ([#45](https://github.com/martadams89/seo-website-indexer/issues/45)) ([4dfdc74](https://github.com/martadams89/seo-website-indexer/commit/4dfdc746441945b6a91862bca20ae0bf87e60478))
+* **deps:** update docker/build-push-action action to v7 ([#50](https://github.com/martadams89/seo-website-indexer/issues/50)) ([699c6ab](https://github.com/martadams89/seo-website-indexer/commit/699c6ab0bdbe702fd54de77416dfc2794596e11f))
+* **deps:** update docker/login-action action to v4 ([#51](https://github.com/martadams89/seo-website-indexer/issues/51)) ([3a068a3](https://github.com/martadams89/seo-website-indexer/commit/3a068a357e978e2417f9ce273eea7ca98241f602))
+
 ## [1.2.4](https://github.com/martadams89/seo-website-indexer/compare/v1.2.3...v1.2.4) (2026-07-04)
 
 
