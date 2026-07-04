@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/martadams89/seo-website-indexer/compare/v1.2.6...v1.3.0) (2026-07-04)
+
+
+### ✨ Features
+
+* unified search-performance console (GSC + Bing) with combined submit ([#55](https://github.com/martadams89/seo-website-indexer/issues/55)) ([ad9c033](https://github.com/martadams89/seo-website-indexer/commit/ad9c0335dcc84f84f1c14894a52c3206734dfb79))
+
 ## [1.2.6](https://github.com/martadams89/seo-website-indexer/compare/v1.2.5...v1.2.6) (2026-07-04)
 
 
