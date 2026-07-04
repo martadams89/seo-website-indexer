@@ -30,6 +30,21 @@ export function deleteWorkspace(id: string): void {
   getDb().prepare('DELETE FROM workspaces WHERE id = ?').run(id);
 }
 
+/** How many workspaces a user owns (used to decide delete-vs-reassign). */
+export function ownedWorkspaceCount(userId: string): number {
+  return (getDb().prepare('SELECT COUNT(*) AS c FROM workspaces WHERE owner_user_id = ?').get(userId) as { c: number }).c;
+}
+
+/**
+ * Hand a departing user's owned workspaces (and their sites/accounts) to another
+ * user, so deleting an account never silently orphans a client's data. Returns
+ * the number of workspaces moved.
+ */
+export function reassignOwnedWorkspaces(fromUserId: string, toUserId: string): number {
+  const info = getDb().prepare('UPDATE workspaces SET owner_user_id = ? WHERE owner_user_id = ?').run(toUserId, fromUserId);
+  return info.changes;
+}
+
 /** Workspaces a user can access (owned + member), or all for a super-admin. */
 export function accessibleWorkspaces(user: User): Workspace[] {
   if (user.is_super_admin) {
