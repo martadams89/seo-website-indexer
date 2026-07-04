@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/martadams89/seo-website-indexer/compare/v1.12.0...v1.13.0) (2026-07-04)
+
+
+### ✨ Features
+
+* AI-generated llms.txt from real site content + llms-sitemap.xml ([#83](https://github.com/martadams89/seo-website-indexer/issues/83)) ([e25ca35](https://github.com/martadams89/seo-website-indexer/commit/e25ca35aeeb7be5ac285cfcc483c44da6d6eef9b))
+
 ## [1.12.0](https://github.com/martadams89/seo-website-indexer/compare/v1.11.0...v1.12.0) (2026-07-04)
 
 
