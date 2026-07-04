@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
+import { SearchPerformance } from '../components/SearchPerformance';
 import { useApp } from '../AppContext';
 
 export default function SiteAnalyticsPage() {
@@ -14,6 +15,8 @@ export default function SiteAnalyticsPage() {
   const [llmsTab, setLlmsTab] = useState<'live' | 'generated' | 'robots'>('live');
   const [hygiene, setHygiene] = useState<HygieneReport | null>(null);
   const [hygieneLoading, setHygieneLoading] = useState(false);
+  const [crawl, setCrawl] = useState<{ available: boolean; reason?: string; issues: Array<{ url: string; code?: number; issues: string[] }> } | null>(null);
+  const [crawlLoading, setCrawlLoading] = useState(false);
   const [bingQuota, setBingQuota] = useState<{ DailyQuota: number; MonthlyQuota: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [cruxMsg, setCruxMsg] = useState<string | null>(null);
@@ -39,10 +42,32 @@ export default function SiteAnalyticsPage() {
     setHygieneLoading(false);
   }
 
+  async function loadCrawlIssues() {
+    setCrawlLoading(true);
+    try { setCrawl(await api.getCrawlIssues(siteId)); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Crawl issues fetch failed'); }
+    setCrawlLoading(false);
+  }
+
   async function act(name: string, fn: () => Promise<unknown>, okMsg: string) {
     setBusy(name);
     try { await fn(); toast('success', okMsg); }
     catch (e) { toast('error', e instanceof Error ? e.message : `${name} failed`); }
+    setBusy(null);
+  }
+
+  async function submitBoth() {
+    setBusy('submit-both');
+    try {
+      const r = await api.submitCombined(siteId, ['google', 'bing']);
+      const parts: string[] = [];
+      if (r.google) parts.push(r.google.error ? `Google: ${r.google.error}` : 'Google run triggered');
+      if (r.bing) parts.push(r.bing.error ? `Bing: ${r.bing.error}` : `Bing: ${r.bing.submitted ?? 0} submitted`);
+      const anyError = !!(r.google?.error || r.bing?.error);
+      toast(anyError ? 'warning' : 'success', parts.join(' · ') || 'Nothing submitted');
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Combined submit failed');
+    }
     setBusy(null);
   }
 
@@ -92,8 +117,15 @@ export default function SiteAnalyticsPage() {
             onClick={() => act('bing-submit', () => api.bingSubmit(siteId), 'Submitted to Bing Webmaster')}>
             <Send size={12} /> <span className="hide-mobile">Submit to Bing</span>
           </button>
+          <button className="btn btn-primary btn-sm" disabled={busy === 'submit-both'}
+            title="Submit to Google (Indexing API run) and Bing (Webmaster) in one action"
+            onClick={submitBoth}>
+            <Send size={12} /> <span className="hide-mobile">Submit to both</span>
+          </button>
         </div>
       </div>
+
+      <SearchPerformance siteId={siteId} />
 
       {bingQuota && (
         <div className="empty-note" style={{ marginBottom: 16 }}>
@@ -197,6 +229,36 @@ export default function SiteAnalyticsPage() {
           </div>
         </div>
       )}
+
+      {/* Bing crawl issues (the "errors they find" surface) */}
+      <div className="panel">
+        <div className="flex items-center gap-2" style={{ justifyContent: 'space-between' }}>
+          <h3 className="panel-title" style={{ margin: 0 }}><AlertTriangle size={13} /> Bing crawl issues</h3>
+          <button className="btn btn-secondary btn-sm" disabled={crawlLoading} onClick={loadCrawlIssues}>
+            {crawlLoading ? 'Checking…' : 'Fetch'}
+          </button>
+        </div>
+        {crawl && (crawl.available ? (
+          crawl.issues.length === 0 ? (
+            <div className="empty-note" style={{ marginTop: 10 }}><CheckCircle2 size={12} /> Bing reports no crawl issues.</div>
+          ) : (
+            <div className="table-scroll" style={{ maxHeight: 260, overflowY: 'auto', marginTop: 10 }}>
+              <table className="mini-table">
+                <thead><tr><th>URL</th><th>HTTP</th><th>Issues</th></tr></thead>
+                <tbody>
+                  {crawl.issues.map((c, i) => (
+                    <tr key={i}>
+                      <td className="cell-url">{c.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</td>
+                      <td>{c.code ?? '—'}</td>
+                      <td>{c.issues.length ? c.issues.map(x => <span key={x} className="badge badge-warn" style={{ marginRight: 3 }}>{x}</span>) : <span className="text-dim">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : <div className="empty-note" style={{ marginTop: 10 }}>{crawl.reason}</div>)}
+      </div>
 
       {/* llms.txt lifecycle */}
       <div className="panel">

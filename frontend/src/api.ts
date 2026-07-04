@@ -267,6 +267,15 @@ export const api = {
   bingSubmit: (siteId: string, urls?: string[]) =>
     apiFetch<{ submitted: number }>(`/api/bing/submit/${siteId}`, { method: 'POST', body: JSON.stringify({ urls }) }),
 
+  // ── Unified search performance ──
+  getPerformance: (siteId: string, days: number) =>
+    apiFetch<PerformanceResponse>(`/api/performance/${siteId}?days=${days}`),
+  getCrawlIssues: (siteId: string) =>
+    apiFetch<{ available: boolean; reason?: string; issues: Array<{ url: string; code?: number; issues: string[] }> }>(`/api/sites/${siteId}/crawl-issues`),
+  submitCombined: (siteId: string, engines: Array<'google' | 'bing'>) =>
+    apiFetch<{ google?: { runId?: string; error?: string }; bing?: { submitted?: number; error?: string } }>(
+      `/api/submit/${siteId}`, { method: 'POST', body: JSON.stringify({ engines }) }),
+
   // ── Hygiene / CrUX ──
   runHygiene: (siteId: string) => apiFetch<HygieneReport>(`/api/sites/${siteId}/hygiene`),
   refreshCrux: (siteId: string) => apiFetch<CruxResult | { error: string }>(`/api/crux/${siteId}/refresh`, { method: 'POST' }),
@@ -332,6 +341,19 @@ export interface HygieneReport {
   issues: Array<{ url: string; kind: string; detail: string }>;
 }
 export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
+
+export interface PerfSeriesPoint { date: string; clicks: number; impressions: number; ctr: number; position: number }
+export interface PerfQueryRow { query: string; clicks: number; impressions: number; ctr: number; position: number }
+export interface PerfPageRow { page: string; clicks: number; impressions: number; ctr: number; position: number }
+export interface EnginePerformance {
+  available: boolean;
+  reason?: string;
+  totals: { clicks: number; impressions: number; ctr: number; position: number };
+  series: PerfSeriesPoint[];
+  queries: PerfQueryRow[];
+  pages: PerfPageRow[];
+}
+export interface PerformanceResponse { days: number; google: EnginePerformance; bing: EnginePerformance }
 export interface AiPrompt { id: number; site_id: string | null; prompt: string; enabled: number; created_at: string }
 export interface AiResult {
   id: number; prompt_id: number; prompt?: string; site_id?: string | null;
