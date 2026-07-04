@@ -98,13 +98,30 @@ async function askGemini(turns: ChatTurn[], key: string): Promise<ProviderAnswer
   const data = await res.json() as {
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> };
-      groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string } }> };
+      groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
     }>;
   };
   const cand = data.candidates?.[0];
   const text = (cand?.content?.parts ?? []).map(p => p.text ?? '').join('\n');
-  const citations = (cand?.groundingMetadata?.groundingChunks ?? [])
-    .map(c => c.web?.uri).filter((u): u is string => !!u);
+  const chunks = cand?.groundingMetadata?.groundingChunks ?? [];
+  // Gemini grounding returns opaque vertexaisearch.cloud.google.com redirect
+  // URLs — useless for domain matching and ugly in the UI. Resolve each 302 to
+  // the real source (best-effort, parallel), falling back to web.title, which
+  // Gemini sets to the source domain.
+  const citations = (await Promise.all(chunks.map(async c => {
+    const uri = c.web?.uri;
+    const title = c.web?.title;
+    if (uri && uri.includes('vertexaisearch.cloud.google.com')) {
+      try {
+        const r = await fetch(uri, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6_000) });
+        const loc = r.headers.get('location');
+        if (loc && loc.startsWith('http')) return loc;
+      } catch { /* fall through to title */ }
+      if (title) return title.startsWith('http') ? title : `https://${title}`;
+      return null; // an unresolvable redirect URL is worse than no citation
+    }
+    return uri ?? null;
+  }))).filter((u): u is string => !!u);
   return { text, model, citations };
 }
 
