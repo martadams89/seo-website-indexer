@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/martadams89/seo-website-indexer/compare/v1.0.1...v1.1.0) (2026-07-04)
+
+
+### ✨ Features
+
+* UX wave — conversational AI citations, tabbed Settings, GEO ownership modes, Sites redesign ([85afb56](https://github.com/martadams89/seo-website-indexer/commit/85afb56619c599e362bcf03bae7b49ef2e8435c5))
+* UX wave — conversational AI citations, tabbed Settings, GEO ownership modes, Sites redesign, dashboard health strip ([ceeaeaa](https://github.com/martadams89/seo-website-indexer/commit/ceeaeaa8e01ed8bfc8d7543f85e9916e1256fc7e))
+
 ## [1.0.1](https://github.com/martadams89/seo-website-indexer/compare/v1.0.0...v1.0.1) (2026-07-03)
 
 

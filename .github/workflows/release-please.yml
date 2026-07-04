@@ -20,6 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: rp
         with:
+          # The user PAT (same one Renovate uses), NOT the default GITHUB_TOKEN:
+          # PRs created by GITHUB_TOKEN never trigger workflows, so the release
+          # PR's required checks would sit "awaiting approval" forever and
+          # auto-merge would have nothing to gate on. With the PAT, CI runs on
+          # release PRs like any human-opened PR.
+          token: ${{ secrets.RENOVATE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Hands-free releases: arm auto-merge on the release PR so it lands the
+      # moment required checks pass. Every merged feat/fix then ships itself.
+      # (Delete this step to go back to merging release PRs by hand.)
+      - name: Enable auto-merge on the release PR
+        if: ${{ steps.rp.outputs.prs_created == 'true' && steps.rp.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+        run: gh pr merge --auto --squash "${{ fromJSON(steps.rp.outputs.pr).number }}" --repo "${{ github.repository }}" || true
