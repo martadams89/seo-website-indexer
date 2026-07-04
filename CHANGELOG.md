@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/martadams89/seo-website-indexer/compare/v1.10.0...v1.11.0) (2026-07-04)
+
+
+### ✨ Features
+
+* email-based password reset (SMTP) with forgot/reset flow ([#79](https://github.com/martadams89/seo-website-indexer/issues/79)) ([e2297d9](https://github.com/martadams89/seo-website-indexer/commit/e2297d94ae0abed7197e0e8ca60b4fbe0028622f))
+
 ## [1.10.0](https://github.com/martadams89/seo-website-indexer/compare/v1.9.0...v1.10.0) (2026-07-04)
 
 
