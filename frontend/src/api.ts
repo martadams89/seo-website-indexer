@@ -81,6 +81,7 @@ export interface Site {
   indexNowKey: string;
   indexNowVerified: boolean;
   google_account_id?: string | null;
+  bing_account_id?: string | null;
   robots_txt_status?: string | null;
   llms_txt_status?: string | null;
   deploy_webhook_url?: string | null;

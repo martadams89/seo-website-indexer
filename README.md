@@ -50,6 +50,8 @@ Search engines only recrawl what they're told about, and AI answer engines only 
 - **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
 - **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
 - **Notifications** — run summaries and alerts to Slack, Discord, ntfy or any generic webhook
+- **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
+- **Modern auth** — email + password with **TOTP 2FA**, passwordless **passkeys (WebAuthn)**, and optional **SSO / OpenID Connect** (Google or any OIDC provider); DB-backed sessions, scrypt hashing, per-route brute-force limits
 - **Single container** — no external database, no Redis, no separate workers
 
 ---
@@ -75,7 +77,65 @@ Then open **http://localhost:3000** and follow the three-step setup wizard.
 
 ---
 
-## Authentication
+## Accounts, workspaces & sign-in
+
+The dashboard is protected by its own login. On a **fresh install the first account you create becomes the super-admin** — after that, signup is closed and further users are added from **Settings → Users**.
+
+### Workspaces (multi-tenancy)
+
+Everything is organised into **workspaces** — the tenant boundary, i.e. one "client base":
+
+```
+Users ─┬─ own / belong to ─▶ Workspaces ─┬─▶ Google accounts
+       │                                  ├─▶ Bing accounts
+       └─ super-admin sees all            └─▶ Sites (+ analytics, alerts)
+```
+
+- Every site, Google/Bing account, alert and quota figure is **partitioned by workspace** — a user only ever sees data for workspaces they own or are a member of. A **super-admin** sees all.
+- Switch the active workspace from the **switcher in the sidebar**; create more with **+ New workspace**.
+- Manage a workspace under **Settings → Workspace** (rename, add/remove members, add Bing keys). Add teammates (who must already have an account) as members so they can collaborate on that client.
+- **Upgrading from a single-tenant install is automatic**: the first user to sign in claims all pre-existing sites/accounts (and the legacy global Bing key) into their *Default* workspace — nothing is lost.
+- Deleting a user **reassigns their owned workspaces to you** (the acting admin) rather than orphaning that client's data.
+
+### Sign-in methods
+
+| Method | Setup |
+| --- | --- |
+| **Password + TOTP 2FA** | Always available. Enable 2FA under Settings → Account & Security (any authenticator app). |
+| **Passkeys (WebAuthn)** | Register one under Settings → Account & Security, then use "Sign in with a passkey". **Requires HTTPS** in production (browsers only allow WebAuthn on secure origins; `localhost` is exempt for testing). |
+| **SSO / OpenID Connect** | Opt-in via env vars (below). Buttons appear on the login screen automatically once configured. |
+
+#### SSO / OIDC environment variables
+
+Set these on the container to enable SSO. Nothing is exposed until configured.
+
+```bash
+# Google
+SSO_GOOGLE_CLIENT_ID=...            # from a Google OAuth 2.0 "Web application" client
+SSO_GOOGLE_CLIENT_SECRET=...        # redirect URI: https://<host>/api/auth/sso/google/callback
+
+# Any generic OIDC provider (Authentik, Keycloak, Okta, Entra ID, …)
+SSO_OIDC_CLIENT_ID=...
+SSO_OIDC_CLIENT_SECRET=...
+SSO_OIDC_AUTH_URL=https://idp.example.com/authorize
+SSO_OIDC_TOKEN_URL=https://idp.example.com/token
+SSO_OIDC_USERINFO_URL=https://idp.example.com/userinfo
+SSO_OIDC_NAME="Company SSO"         # optional label on the button
+SSO_OIDC_SCOPE="openid email profile"   # optional, this is the default
+# redirect URI: https://<host>/api/auth/sso/oidc/callback
+
+# By default only users that already exist may sign in via SSO (email match).
+# Set this to auto-create a standard user on first SSO login:
+SSO_AUTO_PROVISION=true
+```
+
+> The very first user to sign in via SSO on an empty install becomes the super-admin (bootstraps the instance), regardless of `SSO_AUTO_PROVISION`.
+
+---
+
+## Connecting Google (Search Console & Indexing)
+
+> This is about linking a **Google account to a workspace** so the tool can call the Search Console / Indexing APIs on its behalf — separate from how *you* sign in to the dashboard (above). The account is attached to whichever workspace is active when you connect it.
 
 This application uses the secure **Google OAuth 2.0 Web Application Flow** (which is completely unrestricted by Google and operates using standard browser authorization redirects).
 
@@ -488,8 +548,12 @@ Everything below is **optional** — the core indexing loop needs none of it. Ke
 | `PORT`         | `3000`      | HTTP port                     |
 | `HOST`         | `0.0.0.0`   | Bind address                  |
 | `DATA_DIR`     | `/data`     | SQLite database directory     |
+| `APP_SECRET`   | *(auto)*    | Encryption key for secrets at rest (FTP passwords, Bing keys). Auto-generated into `DATA_DIR/.key` if unset; **set explicitly in production** so backups/restores stay portable. |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `300` / `1 minute` | Global per-IP API rate limit |
+| `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW` | `10` / `1 minute` | Tighter per-IP limit on credential endpoints (login, signup, passkey login) |
+| `SSO_GOOGLE_*`, `SSO_OIDC_*`, `SSO_AUTO_PROVISION` | — | Optional SSO / OpenID Connect — see [Sign-in methods](#sso--oidc-environment-variables) |
 
-All other settings (cron schedule, etc.) are configured via the UI and stored in SQLite.
+All other settings (cron schedule, API keys, etc.) are configured via the UI and stored in SQLite.
 
 ---
 

@@ -106,7 +106,7 @@ import {
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
-  listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember,
+  listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember, reassignOwnedWorkspaces,
   addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
 } from './auth/workspaces.js';
 import {
@@ -151,6 +151,18 @@ await app.register(fastifyRateLimit, {
   // SSE stream is exempt — long-lived connection
   allowList: (req) => req.url.startsWith('/api/logs/stream') || req.url === '/health' || req.url === '/api/healthz' || req.url === '/api/livez',
 });
+
+// Tighter per-route budget for credential-checking endpoints (brute-force
+// defence): a handful of attempts per minute per IP, far below the global cap.
+// Applied via each route's `config.rateLimit`.
+const AUTH_RATE_LIMIT = {
+  config: {
+    rateLimit: {
+      max: parseInt(process.env.AUTH_RATE_LIMIT_MAX ?? '10', 10),
+      timeWindow: process.env.AUTH_RATE_LIMIT_WINDOW ?? '1 minute',
+    },
+  },
+};
 
 // ── CSRF-lite: require X-Requested-With on state-changing requests ────────────
 // Browsers cannot send custom headers cross-origin without a CORS preflight.
@@ -342,7 +354,7 @@ app.get('/api/auth/me', async (req, reply) => {
 });
 
 // First-run only: create the super-admin. Refuses once any user exists.
-app.post('/api/auth/signup', async (req, reply) => {
+app.post('/api/auth/signup', AUTH_RATE_LIMIT, async (req, reply) => {
   if (countUsers() > 0) return reply.status(403).send({ error: 'Signup is closed — an admin already exists. Ask an admin to add you.' });
   const { email, password, name } = (req.body ?? {}) as { email?: string; password?: string; name?: string };
   if (!email?.includes('@') || !password || password.length < 8) {
@@ -356,7 +368,7 @@ app.post('/api/auth/signup', async (req, reply) => {
   return toPublic(user);
 });
 
-app.post('/api/auth/login', async (req, reply) => {
+app.post('/api/auth/login', AUTH_RATE_LIMIT, async (req, reply) => {
   const { email, password, totp } = (req.body ?? {}) as { email?: string; password?: string; totp?: string };
   const user = email ? getUserByEmail(email) : undefined;
   // Uniform failure to avoid leaking which emails exist.
@@ -448,14 +460,15 @@ app.post('/api/auth/passkeys/register/finish', async (req, reply) => {
   }
 });
 
-// Login start/finish are OPEN (pre-authentication).
-app.post('/api/auth/passkeys/login/start', async (req) => {
+// Login start/finish are OPEN (pre-authentication) — rate-limited to blunt
+// credential stuffing / assertion-guessing.
+app.post('/api/auth/passkeys/login/start', AUTH_RATE_LIMIT, async (req) => {
   const { rpID } = rpInfo(req);
   const { email } = (req.body ?? {}) as { email?: string };
   return beginAuthentication(rpID, email?.trim().toLowerCase() || undefined);
 });
 
-app.post('/api/auth/passkeys/login/finish', async (req, reply) => {
+app.post('/api/auth/passkeys/login/finish', AUTH_RATE_LIMIT, async (req, reply) => {
   const { rpID, origin } = rpInfo(req);
   const { challengeId, credential } = (req.body ?? {}) as { challengeId?: string; credential?: unknown };
   if (!challengeId || !credential) return reply.status(400).send({ error: 'Missing login data.' });
@@ -619,8 +632,12 @@ app.delete('/api/users/:id', async (req, reply) => {
   if (target.is_super_admin && countSuperAdmins() <= 1) {
     return reply.status(400).send({ error: 'At least one super-admin must remain.' });
   }
+  // Hand the departing user's owned workspaces (and their sites/accounts) to the
+  // acting admin so deletion never silently orphans a client's data. Their
+  // sessions + memberships cascade away via the schema's ON DELETE CASCADE.
+  const moved = reassignOwnedWorkspaces(id, currentUser(req).id);
   deleteUser(id);
-  return { ok: true };
+  return { ok: true, reassignedWorkspaces: moved };
 });
 
 // ── Google Search Console auth ────────────────────────────────────────────────

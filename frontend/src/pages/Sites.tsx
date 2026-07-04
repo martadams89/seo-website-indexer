@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../AppContext';
-import { api, type Site, type GSCSite, type GoogleAccount, type UrlState } from '../api';
+import { api, type Site, type GSCSite, type GoogleAccount, type BingAccount, type UrlState } from '../api';
 import { useSort, SortTh } from '../components/SortableTable';
 import { InfoTooltip } from '../components/Tooltip';
 
@@ -466,8 +466,12 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
   const [sitemapUrl, setSitemapUrl] = useState(site.sitemap_url);
   const [gscUrl, setGscUrl] = useState(site.gsc_url);
   const [googleAccountId, setGoogleAccountId] = useState(site.google_account_id || '');
+  const [bingAccountId, setBingAccountId] = useState(site.bing_account_id || '');
+  const [bingAccounts, setBingAccounts] = useState<BingAccount[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => { api.getBingAccounts().then(setBingAccounts).catch(() => setBingAccounts([])); }, []);
 
   async function save() {
     setSaving(true);
@@ -479,6 +483,7 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
         sitemap_url: sitemapUrl,
         gsc_url: gscUrl,
         googleAccountId: googleAccountId || null,
+        bing_account_id: bingAccountId || null,
       });
       // Round-trip check: the backend echoes the persisted row.
       const persisted = result.site?.google_account_id ?? null;
@@ -524,6 +529,16 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
             <option key={acc.id} value={acc.id}>{acc.email || `Account (${acc.id.slice(0, 8)})`}</option>
           ))}
         </select>
+      </div>
+      <div className="input-group">
+        <label className="input-label">Bing Account</label>
+        <select className="input" value={bingAccountId} onChange={e => setBingAccountId(e.target.value)}>
+          <option value="">Workspace default (first Bing account)</option>
+          {bingAccounts.map(b => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
+        <span className="input-hint">Which Bing Webmaster key this site submits through. Manage keys in Settings → Workspace.</span>
       </div>
       <div className="flex items-center gap-3">
         <button className="btn btn-primary btn-sm" disabled={saving || !name || !domain || !sitemapUrl || !gscUrl} onClick={save}>
