@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus, Send, Loader2, CheckCircle2, XCircle, MessageSquare, AtSign, Webhook } from 'lucide-react';
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo } from '../api';
+import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { registerPasskey } from '../auth/webauthn';
 
 type Tab = 'account' | 'workspace' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
@@ -489,13 +489,190 @@ function UsersTab() {
   );
 }
 
+// ── Notifications tab: each provider is a first-class, separately-configured channel ──
+interface NotifyField { key: string; label: string; placeholder?: string; secret?: boolean }
+interface NotifyProvider { id: NotifyChannel; name: string; icon: typeof Bell; blurb: string; fields: NotifyField[]; steps: Array<{ text: string; href?: string; linkLabel?: string }> }
+
+const NOTIFY_PROVIDERS: NotifyProvider[] = [
+  {
+    id: 'slack', name: 'Slack', icon: MessageSquare,
+    blurb: 'Post run summaries and alerts into a Slack channel via an Incoming Webhook.',
+    fields: [{ key: 'notify_slack_webhook', label: 'Incoming Webhook URL', placeholder: 'https://hooks.slack.com/services/…' }],
+    steps: [
+      { text: 'Create a Slack app and add an Incoming Webhook, or use a legacy webhook.', href: 'https://api.slack.com/messaging/webhooks', linkLabel: 'Slack Incoming Webhooks' },
+      { text: 'Pick the channel to post to and copy the webhook URL.' },
+    ],
+  },
+  {
+    id: 'discord', name: 'Discord', icon: MessageSquare,
+    blurb: 'Post to a Discord channel via a channel webhook.',
+    fields: [{ key: 'notify_discord_webhook', label: 'Webhook URL', placeholder: 'https://discord.com/api/webhooks/…' }],
+    steps: [
+      { text: 'Channel → Edit Channel → Integrations → Webhooks → New Webhook.' },
+      { text: 'Copy the webhook URL.' },
+    ],
+  },
+  {
+    id: 'ntfy', name: 'ntfy', icon: Bell,
+    blurb: 'Push to your phone/desktop via ntfy (self-hosted or ntfy.sh). Free, no account needed.',
+    fields: [
+      { key: 'notify_ntfy_topic', label: 'Topic', placeholder: 'my-seo-alerts (or a full https://…/topic URL)' },
+      { key: 'notify_ntfy_server', label: 'Server', placeholder: 'https://ntfy.sh (default)' },
+      { key: 'notify_ntfy_token', label: 'Access token (optional)', placeholder: 'tk_… for protected topics', secret: true },
+    ],
+    steps: [
+      { text: 'Pick a hard-to-guess topic name and subscribe to it in the ntfy app.', href: 'https://ntfy.sh/', linkLabel: 'ntfy.sh' },
+      { text: 'For a private/self-hosted server, set the server URL and an access token.' },
+    ],
+  },
+  {
+    id: 'telegram', name: 'Telegram', icon: Send,
+    blurb: 'Message yourself or a group through a Telegram bot.',
+    fields: [
+      { key: 'notify_telegram_token', label: 'Bot token', placeholder: '123456:ABC-DEF…', secret: true },
+      { key: 'notify_telegram_chat', label: 'Chat ID', placeholder: 'e.g. 123456789 or -100… for groups' },
+    ],
+    steps: [
+      { text: 'Create a bot with @BotFather and copy its token.', href: 'https://t.me/BotFather', linkLabel: '@BotFather' },
+      { text: 'Message your bot once, then get your chat id from https://api.telegram.org/bot<token>/getUpdates.' },
+    ],
+  },
+  {
+    id: 'webhook', name: 'Generic webhook', icon: Webhook,
+    blurb: 'POST a JSON {title, body} to any endpoint. (Slack/Discord/ntfy URLs here are still auto-detected for backwards compatibility.)',
+    fields: [{ key: 'notify_webhook_url', label: 'Webhook URL', placeholder: 'https://example.com/hook' }],
+    steps: [{ text: 'Your endpoint receives a POST with a JSON body: {"title": "…", "body": "…"}.' }],
+  },
+  {
+    id: 'email', name: 'Email', icon: AtSign,
+    blurb: 'Email run summaries and alerts. Requires SMTP to be configured on the server (SMTP_HOST env).',
+    fields: [{ key: 'notify_email_to', label: 'Send to', placeholder: 'you@example.com, ops@example.com' }],
+    steps: [{ text: 'Set the SMTP_* environment variables on the container (see the README), then add recipient addresses here.' }],
+  },
+];
+
+function NotificationsTab() {
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [results, setResults] = useState<NotifyChannelResult[] | null>(null);
+
+  useEffect(() => {
+    api.getSettings().then(s => {
+      const rec = s as Record<string, string>;
+      const keys = NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key));
+      const next: Record<string, string> = {};
+      for (const k of keys) next[k] = rec[k] ?? '';
+      setVals(next);
+    }).finally(() => setLoaded(true));
+  }, []);
+
+  function set(key: string, v: string) { setVals(prev => ({ ...prev, [key]: v })); setSaved(false); }
+
+  async function save() {
+    setSaving(true);
+    try { await api.updateSettings(vals); setSaved(true); setTimeout(() => setSaved(false), 3000); }
+    finally { setSaving(false); }
+  }
+  async function sendTest() {
+    setTesting(true); setResults(null);
+    try { await save(); const r = await api.testNotifications(); setResults(r.results); }
+    finally { setTesting(false); }
+  }
+
+  const providerConfigured = (p: NotifyProvider) =>
+    p.id === 'telegram'
+      ? !!(vals.notify_telegram_token && vals.notify_telegram_chat)
+      : !!vals[p.fields[0].key];
+
+  if (!loaded) return <div className="card"><div className="empty-note">Loading…</div></div>;
+
+  return (
+    <>
+      <div className="card mb-4">
+        <div className="card-title"><Bell size={13} /> Notifications</div>
+        <p className="text-dim" style={{ fontSize: 12 }}>
+          Run summaries and alerts (index drops, schema regressions, quota exhaustion, hygiene issues) are pushed after every run.
+          Configure any number of channels below — each notification is sent to <strong>all</strong> of them.
+        </p>
+      </div>
+
+      {NOTIFY_PROVIDERS.map(p => (
+        <details key={p.id} className="key-guide" open={providerConfigured(p)}>
+          <summary>
+            <p.icon size={14} />
+            <span className="key-guide-label">{p.name}</span>
+            {providerConfigured(p)
+              ? <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>configured</span>
+              : <span className="badge" style={{ marginLeft: 'auto' }}>off</span>}
+          </summary>
+          <div className="key-guide-body">
+            <p className="text-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>{p.blurb}</p>
+            {p.fields.map(f => (
+              <div className="input-group mb-2" key={f.key}>
+                <label className="input-label">{f.label}</label>
+                <input
+                  className="input"
+                  type={f.secret ? 'password' : 'text'}
+                  autoComplete="off"
+                  placeholder={f.placeholder}
+                  value={vals[f.key] ?? ''}
+                  onChange={e => set(f.key, e.target.value)}
+                />
+              </div>
+            ))}
+            <ol className="key-guide-steps">
+              {p.steps.map((s, i) => (
+                <li key={i}>{s.text}{s.href && <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>}</li>
+              ))}
+            </ol>
+          </div>
+        </details>
+      ))}
+
+      <div className="flex items-center gap-3" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" disabled={saving} onClick={save}>
+          {saving ? <><Loader2 className="spin" size={13} /> Saving…</> : saved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save channels</>}
+        </button>
+        <button className="btn btn-secondary" disabled={testing} onClick={sendTest}>
+          {testing ? <><Loader2 className="spin" size={13} /> Sending…</> : <><Send size={13} /> Save & send test</>}
+        </button>
+      </div>
+
+      {results && (
+        <div className="card mt-3">
+          <div className="card-title">Test results</div>
+          {results.length === 0 ? (
+            <div className="empty-note">No channels configured yet — add one above and save.</div>
+          ) : (
+            <div className="member-list">
+              {results.map(r => (
+                <div key={r.channel} className="member-row">
+                  <div className="member-info">
+                    <span className="member-name" style={{ textTransform: 'capitalize' }}>{r.channel}</span>
+                    {r.error && <span className="member-role" style={{ color: 'var(--error)' }}>{r.error}</span>}
+                  </div>
+                  {r.ok
+                    ? <CheckCircle2 size={16} style={{ color: 'var(--ok)' }} />
+                    : <XCircle size={16} style={{ color: 'var(--error)' }} />}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const { status, refresh } = useApp();
   const [tab, setTab] = useState<Tab>('schedule');
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [webhookUrl, setWebhookUrl] = useState('');
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<Tab | null>(null);
@@ -509,7 +686,6 @@ export default function SettingsPage() {
     if (!s) return;
     const rec = s as Record<string, string | boolean>;
     setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
-    setWebhookUrl((rec.notify_webhook_url as string) ?? '');
     setProjectId((rec.google_project_id as string) ?? '');
     const conf: Record<string, boolean> = {};
     for (const [k, v] of Object.entries(rec)) {
@@ -741,29 +917,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── Notifications ── */}
-      {tab === 'notify' && (
-        <div className="card">
-          <div className="card-title">Notifications</div>
-          <div className="input-group mb-3">
-            <label className="input-label">Webhook URL {webhookUrl && <span className="badge badge-ok">set</span>}</label>
-            <input
-              className="input"
-              placeholder="https://hooks.slack.com/… · https://discord.com/api/webhooks/… · https://ntfy.sh/your-topic"
-              value={webhookUrl}
-              onChange={e => setWebhookUrl(e.target.value)}
-            />
-            <span className="input-hint">
-              Run summaries and alerts (index drops, schema regressions, quota) are pushed after every run.
-              Slack, Discord and ntfy payloads are detected automatically; anything else receives generic JSON
-              <code style={{ fontFamily: 'JetBrains Mono', margin: '0 4px' }}>{'{title, body}'}</code>.
-              Save empty to disable.
-            </span>
-          </div>
-          <button className="btn btn-primary" disabled={saving === 'notify'} onClick={() => save('notify', { notify_webhook_url: webhookUrl })}>
-            {saving === 'notify' ? <><span className="spinner" /> Saving…</> : saved === 'notify' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
-          </button>
-        </div>
-      )}
+      {tab === 'notify' && <NotificationsTab />}
     </div>
   );
 }

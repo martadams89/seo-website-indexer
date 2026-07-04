@@ -292,6 +292,11 @@ export const api = {
       method: 'PUT', body: JSON.stringify(data),
     }),
 
+  // Notifications
+  notificationsStatus: () => apiFetch<{ configured: NotifyChannel[] }>('/api/notifications/status'),
+  testNotifications: () =>
+    apiFetch<{ results: NotifyChannelResult[] }>('/api/notifications/test', { method: 'POST' }),
+
   // Quota & failures
   getQuotaToday: () => apiFetch<QuotaSummary>('/api/quota/today'),
   getUrlFailures: () => apiFetch<UrlFailureRecord[]>('/api/url-failures'),
@@ -429,6 +434,9 @@ export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
 }
 export interface BingAccount { id: string; name: string; created_at: string }
+
+export type NotifyChannel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
+export interface NotifyChannelResult { channel: NotifyChannel; configured: boolean; ok: boolean; error?: string }
 export interface PasskeyInfo { id: string; name: string | null; created_at: string }
 
 // Minimal shapes of the WebAuthn JSON options the backend returns (subset used
