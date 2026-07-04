@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/martadams89/seo-website-indexer/compare/v1.2.1...v1.2.2) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* **citations:** resolve Gemini grounding redirects to real source URLs ([92f84c0](https://github.com/martadams89/seo-website-indexer/commit/92f84c08ef91d608425b51dd40e1cbb4f9e2399f))
+
 ## [1.2.1](https://github.com/martadams89/seo-website-indexer/compare/v1.2.0...v1.2.1) (2026-07-04)
 
 
