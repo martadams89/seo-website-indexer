@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare } from 'lucide-react';
+import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2 } from 'lucide-react';
 import { api, type AiPrompt, type AiResult } from '../api';
 import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
@@ -208,9 +208,18 @@ export default function CitationsPage() {
           <p className="page-subtitle">Do the answer engines cite your sites? Click a prompt to open its conversations.</p>
         </div>
         <button className="btn btn-primary btn-sm" disabled={running !== null || noKeys || prompts.length === 0} onClick={() => run('all')}>
-          <Play size={12} /> {running === 'all' ? 'Running…' : 'Run all'}
+          {running === 'all' ? <><Loader2 size={12} className="spin" /> Running…</> : <><Play size={12} /> Run all</>}
         </button>
       </div>
+
+      {running !== null && (
+        <div className="alert alert-info mb-4" role="status">
+          <div className="alert-content" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+            <Loader2 size={14} className="spin" />
+            Querying {running === 'all' ? 'all prompts across every configured provider' : 'the selected prompt'}… each provider does a live web search, so this can take up to a minute or so per provider. Results appear here when done.
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2" style={{ flexWrap: 'wrap', marginBottom: 18 }}>
         {providers.all.map(p => (
@@ -266,8 +275,9 @@ export default function CitationsPage() {
                   })}
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn btn-ghost btn-sm" disabled={running !== null || noKeys}
+                      title={running === p.id ? 'Running…' : 'Run this prompt'}
                       onClick={e => { e.stopPropagation(); run(p.id); }}>
-                      {running === p.id ? '…' : <Play size={12} />}
+                      {running === p.id ? <Loader2 size={13} className="spin" style={{ color: 'var(--accent)' }} /> : <Play size={12} />}
                     </button>
                     <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); remove(p.id); }}>
                       <Trash2 size={12} />
