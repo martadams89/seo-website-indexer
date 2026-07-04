@@ -167,6 +167,7 @@ export function getSiteDetail(siteId: string): {
   trend: SiteSnapshot[];
   states: Array<{ state: string; count: number }>;
   freshness: FreshnessEntry[];
+  failures: Array<{ url: string; api: string; fail_count: number; last_failed_at: string }>;
   crux: Array<{ day: string; lcp_ms: number | null; inp_ms: number | null; cls: number | null }>;
 } | null {
   const db = getDb();
@@ -181,6 +182,10 @@ export function getSiteDetail(siteId: string): {
       FROM url_state WHERE site_id = ? GROUP BY gsc_indexing_state ORDER BY count DESC
     `).all(siteId) as Array<{ state: string; count: number }>,
     freshness: getFreshnessRadar(siteId, 50),
+    failures: db.prepare(`
+      SELECT url, api, fail_count, last_failed_at FROM url_failures
+      WHERE site_id = ? ORDER BY last_failed_at DESC LIMIT 50
+    `).all(siteId) as Array<{ url: string; api: string; fail_count: number; last_failed_at: string }>,
     crux: db.prepare('SELECT day, lcp_ms, inp_ms, cls FROM crux_snapshots WHERE site_id = ? ORDER BY day DESC LIMIT 60').all(siteId).reverse() as Array<{ day: string; lcp_ms: number | null; inp_ms: number | null; cls: number | null }>,
   };
 }

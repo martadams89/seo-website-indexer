@@ -49,6 +49,7 @@ export interface Site {
   llms_txt_status?: string | null;
   deploy_webhook_url?: string | null;
   ftp_host?: string | null;
+  geo_manage?: number | null;
   ftp_port?: number | null;
   ftp_user?: string | null;
   ftp_pass?: string | null;
@@ -279,6 +280,10 @@ export const api = {
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
   runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
   runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
+  getAiThread: (promptId: number, provider: string) =>
+    apiFetch<AiResult[]>(`/api/ai/prompts/${promptId}/thread/${provider}`),
+  replyAiThread: (promptId: number, provider: string, message: string) =>
+    apiFetch<AiResult>(`/api/ai/prompts/${promptId}/reply`, { method: 'POST', body: JSON.stringify({ provider, message }) }),
   provisionGeminiKey: () =>
     apiFetch<{ ok: boolean; error?: string; needsRelink?: boolean }>('/api/ai/provision/gemini', { method: 'POST', body: JSON.stringify({}) }),
 };
@@ -305,6 +310,7 @@ export interface SiteAnalytics {
   trend: SiteSnapshot[];
   states: Array<{ state: string; count: number }>;
   freshness: Array<{ url: string; last_seen_lastmod: string; gsc_last_inspected: string | null; gsc_indexing_state: string | null }>;
+  failures: Array<{ url: string; api: string; fail_count: number; last_failed_at: string }>;
   crux: Array<{ day: string; lcp_ms: number | null; inp_ms: number | null; cls: number | null }>;
 }
 export interface AlertRow {
@@ -328,22 +334,46 @@ export interface HygieneReport {
 export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
 export interface AiPrompt { id: number; site_id: string | null; prompt: string; enabled: number; created_at: string }
 export interface AiResult {
-  id: number; prompt_id: number; prompt: string; site_id: string | null;
+  id: number; prompt_id: number; prompt?: string; site_id?: string | null;
   provider: string; model: string | null; cited: number; domains: string; excerpt: string | null;
   error: string | null; created_at: string;
+  parent_id?: number | null; citations?: string | null; user_prompt?: string | null;
 }
 export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; excerpt?: string; error?: string }
 
 // ── SSE Log Stream ────────────────────────────────────────────────────────────
 
-export function createLogStream(onMessage: (entry: LogEntry) => void, onConnected?: () => void): () => void {
-  const es = new EventSource(`${BASE}/api/logs/stream`);
-  es.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data) as { type: string } & LogEntry;
-      if (data.type === 'connected') { onConnected?.(); return; }
-      if (data.type === 'log') onMessage(data);
-    } catch { /* ignore */ }
+export function createLogStream(onMessage: (entry: LogEntry) => void, onAlive?: () => void): () => void {
+  let es: EventSource | null = null;
+  let closed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function connect() {
+    if (closed) return;
+    es = new EventSource(`${BASE}/api/logs/stream`);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data) as { type: string } & LogEntry;
+        // 'connected' and 'ping' both prove liveness; pings flow every 15s.
+        if (data.type === 'connected' || data.type === 'ping') { onAlive?.(); return; }
+        if (data.type === 'log') { onAlive?.(); onMessage(data); }
+      } catch { /* ignore */ }
+    };
+    // EventSource retries transient errors itself, but goes permanently CLOSED
+    // when the server restarts or the response ends — recreate it ourselves.
+    es.onerror = () => {
+      if (closed) return;
+      if (es?.readyState === EventSource.CLOSED) {
+        es.close();
+        retryTimer = setTimeout(connect, 3_000);
+      }
+    };
+  }
+  connect();
+
+  return () => {
+    closed = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    es?.close();
   };
-  return () => es.close();
 }
