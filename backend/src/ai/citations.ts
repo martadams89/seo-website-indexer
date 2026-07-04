@@ -153,7 +153,20 @@ async function askBrave(turns: ChatTurn[], key: string): Promise<ProviderAnswer>
   if (!res.ok) throw new Error(`Brave HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json() as { web?: { results?: Array<{ url?: string; title?: string; description?: string }> } };
   const results = data.web?.results ?? [];
-  const text = results.map((r, i) => `${i + 1}. ${r.title ?? ''} — ${r.url ?? ''}\n${r.description ?? ''}`).join('\n');
+  // Brave returns titles/descriptions with embedded <strong> highlighting and
+  // HTML entities — strip to clean text and emit markdown the UI can render.
+  const clean = (s?: string) => (s ?? '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+  const host = (u?: string) => { try { return new URL(u ?? '').hostname.replace(/^www\./, ''); } catch { return u ?? ''; } };
+  const text = results
+    .map((r, i) => `${i + 1}. **${clean(r.title)}** — ${host(r.url)}\n${clean(r.description)}`)
+    .join('\n\n');
   return { text, model: 'brave-search', citations: results.map(r => r.url).filter((u): u is string => !!u) };
 }
 
