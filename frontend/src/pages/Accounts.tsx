@@ -14,6 +14,7 @@ export default function AccountsPage() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const [autoSetup, setAutoSetup] = useState(true);
   const [connectError, setConnectError] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -63,8 +64,17 @@ export default function AccountsPage() {
         throw new Error('Google OAuth Client ID is missing.');
       }
 
-      const scope = 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/indexing https://www.googleapis.com/auth/userinfo.email';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+      // Base scopes always requested; the Cloud scope (opt-in) lets the tool
+      // auto-enable the required APIs after connecting and provision a Gemini
+      // key on request. Must match the backend OAUTH_SCOPES for those to work.
+      const baseScopes = [
+        'https://www.googleapis.com/auth/webmasters',
+        'https://www.googleapis.com/auth/indexing',
+        'https://www.googleapis.com/auth/userinfo.email',
+      ];
+      if (autoSetup) baseScopes.push('https://www.googleapis.com/auth/cloud-platform');
+      const scope = baseScopes.join(' ');
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true`;
 
       const width = 600;
       const height = 700;
@@ -149,6 +159,20 @@ export default function AccountsPage() {
               </button>
             </div>
           </div>
+
+          {/* Auto-setup opt-in (applies to both connect modes) */}
+          <label className="autosetup-row">
+            <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
+            <div>
+              <strong>Auto-configure Google APIs</strong> <span className="badge badge-ok">recommended</span>
+              <div className="text-dim" style={{ fontSize: 11.5 }}>
+                After you sign in, the tool enables the Web Search Indexing &amp; Search Console APIs on your
+                project for you, and can provision a one-click Gemini key later. This requests Google Cloud
+                access on the consent screen. Uncheck for the minimal scope (you'll enable those APIs by hand
+                in the Cloud console).
+              </div>
+            </div>
+          </label>
 
           {hasBuiltin ? (
             <div className="text-center py-3">

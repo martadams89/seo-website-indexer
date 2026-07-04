@@ -1646,3 +1646,11 @@ body {
 .sort-th-inner { display: inline-flex; align-items: center; gap: 3px; }
 .sort-th-icon { opacity: 0.45; flex-shrink: 0; }
 .sort-th.active .sort-th-icon { opacity: 1; }
+
+/* ── OAuth auto-setup opt-in ───────────────────────────────────────────────── */
+.autosetup-row {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; margin-bottom: 12px; cursor: pointer;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.autosetup-row input { margin-top: 3px; flex-shrink: 0; }
