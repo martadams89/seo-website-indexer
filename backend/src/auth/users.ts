@@ -6,7 +6,7 @@
  * Ownership/workspace scoping builds on top of `users` in a later phase; this
  * layer only handles identity + sessions.
  */
-import { randomBytes, scryptSync, timingSafeEqual, createHmac, randomUUID } from 'crypto';
+import { randomBytes, scryptSync, timingSafeEqual, createHmac, createHash, randomUUID } from 'crypto';
 import { getDb } from '../db/database.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 
@@ -137,6 +137,38 @@ export function destroySession(token: string): void {
 
 export function pruneExpiredSessions(): number {
   return getDb().prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run().changes;
+}
+
+// ── Password reset tokens (emailed link) ─────────────────────────────────────
+
+const RESET_TTL_MS = 60 * 60_000; // 1 hour
+function sha256(s: string): string { return createHash('sha256').update(s).digest('hex'); }
+
+/** Mint a single-use reset token for a user. Returns the RAW token (emailed);
+ *  only its hash is stored. Any prior unused tokens for the user are cleared. */
+export function createPasswordReset(userId: string): string {
+  const db = getDb();
+  db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
+  const token = randomBytes(32).toString('base64url');
+  const expires = new Date(Date.now() + RESET_TTL_MS).toISOString();
+  db.prepare('INSERT INTO password_resets(token_hash, user_id, expires_at) VALUES(?,?,?)')
+    .run(sha256(token), userId, expires);
+  return token;
+}
+
+/** Validate a reset token and, if good, set the new password + invalidate it and
+ *  all of the user's sessions. Returns the user id on success, else null. */
+export function consumePasswordReset(token: string, newPassword: string): string | null {
+  const db = getDb();
+  const hash = sha256(token);
+  const row = db.prepare('SELECT user_id, expires_at, used FROM password_resets WHERE token_hash = ?')
+    .get(hash) as { user_id: string; expires_at: string; used: number } | undefined;
+  if (!row || row.used || new Date(row.expires_at).getTime() < Date.now()) return null;
+  setUserPassword(row.user_id, newPassword);
+  db.prepare('UPDATE password_resets SET used = 1 WHERE token_hash = ?').run(hash);
+  // Force re-login everywhere after a reset.
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.user_id);
+  return row.user_id;
 }
 
 // ── TOTP (RFC 6238, HMAC-SHA1) ───────────────────────────────────────────────

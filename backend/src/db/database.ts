@@ -244,6 +244,17 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+    -- Single-use password-reset tokens (emailed link). Only the SHA-256 of the
+    -- token is stored; short-lived and consumed on use.
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      used       INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
     -- ── Workspaces (a user's 'client base'; the tenant boundary) ─────────
     CREATE TABLE IF NOT EXISTS workspaces (
       id             TEXT PRIMARY KEY,

@@ -206,7 +206,11 @@ export const api = {
   getStatus: () => apiFetch<AppStatus>('/api/status'),
 
   // ── App authentication (users, sessions, 2FA) ──
-  bootstrapStatus: () => apiFetch<{ needsBootstrap: boolean }>('/api/auth/bootstrap-status'),
+  bootstrapStatus: () => apiFetch<{ needsBootstrap: boolean; emailEnabled: boolean }>('/api/auth/bootstrap-status'),
+  forgotPassword: (email: string) =>
+    apiFetch<{ ok: boolean; message: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (token: string, password: string) =>
+    apiFetch<{ ok: boolean }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }),
   me: () => apiFetch<CurrentUser>('/api/auth/me'),
   signup: (email: string, password: string, name?: string) =>
     apiFetch<CurrentUser>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, name }) }),

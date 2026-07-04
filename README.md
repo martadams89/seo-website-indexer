@@ -131,6 +131,21 @@ SSO_AUTO_PROVISION=true
 
 > The very first user to sign in via SSO on an empty install becomes the super-admin (bootstraps the instance), regardless of `SSO_AUTO_PROVISION`.
 
+### Email-based password reset (optional)
+
+Configure SMTP and a **"Forgot password?"** link appears on the sign-in page; users get a one-hour, single-use reset link by email. Without SMTP the link is hidden (use the recovery CLI below instead).
+
+```bash
+SMTP_HOST=smtp.example.com          # required to enable email
+SMTP_PORT=587                       # default 587 (use 465 with SMTP_SECURE=true)
+SMTP_SECURE=false                   # true for implicit TLS (port 465)
+SMTP_USER=apikey                    # optional auth
+SMTP_PASS=...                       # optional auth
+SMTP_FROM="SEO Indexer <no-reply@example.com>"   # optional; sensible default otherwise
+```
+
+Works with any SMTP provider (SendGrid, Mailgun, SES, Postmark, Gmail app-password, self-hosted…).
+
 ### Locked out? Recover from the command line
 
 There is no email-based reset yet, and the in-app *Change password* form needs your **current** password. If you're locked out, reset your account directly against the database with the bundled admin CLI (it respects `DATA_DIR`):
@@ -567,6 +582,7 @@ Everything below is **optional** — the core indexing loop needs none of it. Ke
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `300` / `1 minute` | Global per-IP API rate limit |
 | `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW` | `10` / `1 minute` | Tighter per-IP limit on credential endpoints (login, signup, passkey login) |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*`, `SSO_AUTO_PROVISION` | — | Optional SSO / OpenID Connect — see [Sign-in methods](#sso--oidc-environment-variables) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Optional email (enables password-reset links) — see [Email-based password reset](#email-based-password-reset-optional) |
 
 All other settings (cron schedule, API keys, etc.) are configured via the UI and stored in SQLite.
 
