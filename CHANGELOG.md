@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/martadams89/seo-website-indexer/compare/v1.13.1...v1.14.0) (2026-07-04)
+
+
+### ✨ Features
+
+* full per-workspace settings segregation (API keys + notifications) ([#87](https://github.com/martadams89/seo-website-indexer/issues/87)) ([385230e](https://github.com/martadams89/seo-website-indexer/commit/385230e2dcaf3bf98562f602ae1b3bd36c58539c))
+
 ## [1.13.1](https://github.com/martadams89/seo-website-indexer/compare/v1.13.0...v1.13.1) (2026-07-04)
 
 
