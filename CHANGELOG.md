@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/martadams89/seo-website-indexer/compare/v1.6.1...v1.7.0) (2026-07-04)
+
+
+### ✨ Features
+
+* Google account linking auto-configures APIs (+ fix cloud-platform scope) ([#65](https://github.com/martadams89/seo-website-indexer/issues/65)) ([c6b60b2](https://github.com/martadams89/seo-website-indexer/commit/c6b60b2e7dec1ba3fcd00897c82617f6f1061ddd))
+
 ## [1.6.1](https://github.com/martadams89/seo-website-indexer/compare/v1.6.0...v1.6.1) (2026-07-04)
 
 

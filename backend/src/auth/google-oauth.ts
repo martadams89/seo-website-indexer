@@ -30,6 +30,7 @@ import {
   deleteGoogleAccount,
   type GoogleAccount
 } from '../db/database.js';
+import { logSystem } from '../utils/logger.js';
 
 // ── OAuth Scopes ──────────────────────────────────────────────────────────────
 
@@ -164,11 +165,56 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
     workspace_id: workspaceId ?? null,
   });
 
+  // Best-effort: enable the Google APIs this tool needs (Web Search Indexing +
+  // Search Console) on the linked project, so the user doesn't have to do it by
+  // hand in the Cloud console. Needs the cloud-platform scope; if that wasn't
+  // granted the enable calls 403 and we skip silently (logged). Fire-and-forget
+  // so it never delays the OAuth response.
+  void enableRequiredApis(data.access_token, clientId, email);
+
   // Clear in-memory temp custom credentials
   _tempClientId = null;
   _tempClientSecret = null;
 
   return data.access_token;
+}
+
+// The project that owns the OAuth client is encoded in the numeric prefix of
+// the client id ("123456789-abc.apps.googleusercontent.com").
+function projectFromClientId(clientId: string): string | null {
+  const m = /^(\d{6,})-/.exec(clientId);
+  return m ? m[1] : null;
+}
+
+const AUTO_ENABLE_SERVICES = ['indexing.googleapis.com', 'searchconsole.googleapis.com'];
+
+/**
+ * Enable the APIs the tool depends on, on the project owning the OAuth client.
+ * Idempotent (Google no-ops an already-enabled service). Best-effort — any
+ * failure (no cloud-platform scope, no permission) is logged, not thrown.
+ */
+export async function enableRequiredApis(accessToken: string, clientId: string, label: string): Promise<{ enabled: string[]; skipped: string[] }> {
+  const project = projectFromClientId(clientId);
+  const enabled: string[] = [];
+  const skipped: string[] = [];
+  if (!project) return { enabled, skipped: [...AUTO_ENABLE_SERVICES] };
+  for (const svc of AUTO_ENABLE_SERVICES) {
+    try {
+      const res = await fetch(`https://serviceusage.googleapis.com/v1/projects/${project}/services/${svc}:enable`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) enabled.push(svc);
+      else skipped.push(svc);
+    } catch {
+      skipped.push(svc);
+    }
+  }
+  if (enabled.length) logSystem('ok', `Auto-enabled Google APIs for ${label}: ${enabled.map(s => s.replace('.googleapis.com', '')).join(', ')}`);
+  else logSystem('dim', `Could not auto-enable Google APIs for ${label} (grant Cloud access when connecting, or enable them manually) — indexing still works if already enabled on the project.`);
+  return { enabled, skipped };
 }
 
 // ── Token Refresh ─────────────────────────────────────────────────────────────
