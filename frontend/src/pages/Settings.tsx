@@ -118,7 +118,7 @@ function AccountTab() {
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
   // TOTP enrolment
-  const [totpSetup, setTotpSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; uri: string; qr: string } | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [totpMsg, setTotpMsg] = useState<string | null>(null);
   const [disablePw, setDisablePw] = useState('');
@@ -224,10 +224,13 @@ function AccountTab() {
         ) : totpSetup ? (
           <div className="site-form" style={{ maxWidth: 460 }}>
             <p className="text-dim" style={{ fontSize: 12 }}>
-              Add this account to your authenticator app — scan the URI as a QR in a scanner, or enter the key manually — then enter the 6-digit code to confirm.
+              Scan this QR code with your authenticator app (Google Authenticator, 1Password, Authy…), or enter the key manually — then type the 6-digit code to confirm.
             </p>
+            <div className="totp-qr">
+              <img src={totpSetup.qr} alt="TOTP QR code" width={200} height={200} />
+            </div>
             <div className="input-group mb-2">
-              <label className="input-label">Setup key</label>
+              <label className="input-label">Or enter this key manually</label>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <code style={{ flex: 1, fontSize: 12, wordBreak: 'break-all', background: 'var(--bg-input)', padding: '6px 10px', borderRadius: 6 }}>{totpSetup.secret}</code>
                 <button className="btn-icon btn-icon-ghost" onClick={() => { navigator.clipboard.writeText(totpSetup.uri); setCopied(true); setTimeout(() => setCopied(false), 1500); }} title="Copy otpauth URI">
