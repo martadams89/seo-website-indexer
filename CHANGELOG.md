@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/martadams89/seo-website-indexer/compare/v1.7.0...v1.8.0) (2026-07-04)
+
+
+### ✨ Features
+
+* multi-tenant workspaces — auth, users, multi-Bing, passkeys & SSO ([#67](https://github.com/martadams89/seo-website-indexer/issues/67)) ([b8927b4](https://github.com/martadams89/seo-website-indexer/commit/b8927b4e0ace2ac8e80502852a919ae957463cdd))
+
 ## [1.7.0](https://github.com/martadams89/seo-website-indexer/compare/v1.6.1...v1.7.0) (2026-07-04)
 
 
