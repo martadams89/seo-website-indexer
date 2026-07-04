@@ -94,6 +94,18 @@ export function listUsers(): PublicUser[] {
   return (getDb().prepare('SELECT * FROM users ORDER BY created_at').all() as User[]).map(toPublic);
 }
 
+export function countSuperAdmins(): number {
+  return (getDb().prepare('SELECT COUNT(*) AS c FROM users WHERE is_super_admin = 1').get() as { c: number }).c;
+}
+
+export function setUserSuperAdmin(id: string, on: boolean): void {
+  getDb().prepare('UPDATE users SET is_super_admin = ? WHERE id = ?').run(on ? 1 : 0, id);
+}
+
+export function deleteUser(id: string): void {
+  getDb().prepare('DELETE FROM users WHERE id = ?').run(id);
+}
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
 const SESSION_TTL_DAYS = 30;

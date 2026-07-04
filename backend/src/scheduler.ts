@@ -46,6 +46,7 @@ import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry
 import { notifyGoogle, submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
 import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexer/bing.js';
+import { bingKeyForSite } from './auth/workspaces.js';
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
@@ -683,10 +684,9 @@ async function _doRun(
   // ── Step 4b: Bing Webmaster URL Submission (direct; complements IndexNow) ──
 
   if (!options.skipBing) {
-    const bingApiKey = (getSetting('bing_api_key') ?? '').trim();
-    if (!bingApiKey) {
-      log(runId, 'dim', 'Bing Webmaster URL submission skipped — no API key set (Settings → Bing API key).');
-    } else {
+    // Bing keys are per-workspace now (resolved per site), so the step always
+    // runs; each site without a resolvable key is skipped individually below.
+    {
       log(runId, 'info', '── Step 4b: Bing Webmaster URL Submission ──');
       const BING_DAILY_LIMIT_FALLBACK = 100; // used only if the live quota lookup fails
 
@@ -694,6 +694,12 @@ async function _doRun(
         if (_stopRequested) break;
         const data = siteDataMap.get(site.id);
         if (!data || data.error) continue;
+
+        const bingApiKey = (bingKeyForSite(site.id) ?? '').trim();
+        if (!bingApiKey) {
+          log(runId, 'dim', `${site.domain} — Bing submission skipped (no API key for this workspace).`, site.id);
+          continue;
+        }
 
         // HTML pages only (new + changed). Non-HTML/llms.txt goes via IndexNow.
         const bingUrls = [...data.newUrls, ...data.changed].map(e => e.url);

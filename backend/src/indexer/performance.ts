@@ -10,7 +10,8 @@
  *    from the URL Inspection path the tool already runs.
  */
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
-import { getSetting, type Site } from '../db/database.js';
+import { type Site } from '../db/database.js';
+import { bingKeyForSite } from '../auth/workspaces.js';
 import { deriveBingSiteUrl } from './bing.js';
 
 const GSC_BASE = 'https://www.googleapis.com/webmasters/v3';
@@ -165,7 +166,7 @@ export async function getBingPerformance(site: Site, days: number): Promise<Engi
   const empty: EnginePerformance = {
     available: false, totals: { clicks: 0, impressions: 0, ctr: 0, position: 0 }, series: [], queries: [], pages: [],
   };
-  const apiKey = getSetting('bing_api_key');
+  const apiKey = bingKeyForSite(site.id);
   if (!apiKey) return { ...empty, reason: 'No Bing Webmaster API key configured (Settings).' };
   const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
   const cutoff = rangeDates(days).startDate;
@@ -205,7 +206,7 @@ export async function getBingPerformance(site: Site, days: number): Promise<Engi
 export interface CrawlIssue { url: string; issues: string[]; code?: number }
 
 export async function getBingCrawlIssues(site: Site): Promise<{ available: boolean; reason?: string; issues: CrawlIssue[] }> {
-  const apiKey = getSetting('bing_api_key');
+  const apiKey = bingKeyForSite(site.id);
   if (!apiKey) return { available: false, reason: 'No Bing Webmaster API key configured.', issues: [] };
   const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
   // Bit flags Bing uses in CrawlIssues.Issues.

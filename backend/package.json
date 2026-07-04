@@ -14,6 +14,7 @@
     "@fastify/cors": "^9.0.1",
     "@fastify/rate-limit": "^9.1.0",
     "@fastify/static": "^7.0.4",
+    "@simplewebauthn/server": "^13.3.2",
     "better-sqlite3": "^12.11.1",
     "fastify": "^4.29.1",
     "google-auth-library": "^9.15.1",

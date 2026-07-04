@@ -6,6 +6,7 @@ import {
 , BarChart3, Bot } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
+import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
 import { createLogStream } from './api';
 import { ToastHost } from './components/Toast';
 
@@ -90,6 +91,8 @@ export default function Layout() {
             <div className="sidebar-logo-sub">Self-hosted</div>
           </div>
         </div>
+
+        <WorkspaceSwitcher collapsed={collapsed} />
 
         <nav className="sidebar-nav">
           {NAV.map(({ to, icon: Icon, label }) => (

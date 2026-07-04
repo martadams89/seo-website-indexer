@@ -5,8 +5,9 @@
  * useAuth() so the rest of the app can render the current profile.
  */
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import { KeyRound, ShieldCheck, Loader2 } from 'lucide-react';
+import { KeyRound, ShieldCheck, Loader2, Fingerprint } from 'lucide-react';
 import { api, type CurrentUser, type ApiError } from '../api';
+import { loginWithPasskey } from './webauthn';
 
 interface AuthValue {
   user: CurrentUser;
@@ -62,6 +63,11 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
   const [totpStep, setTotpStep] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [ssoProviders, setSsoProviders] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    if (mode === 'login') api.ssoProviders().then(setSsoProviders).catch(() => setSsoProviders([]));
+  }, [mode]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -82,6 +88,18 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
       } else {
         setError(e2.message || 'Something went wrong');
       }
+    }
+    setBusy(false);
+  }
+
+  async function passkeySignIn() {
+    setBusy(true);
+    setError('');
+    try {
+      await loginWithPasskey(email.trim() || undefined);
+      onAuthed();
+    } catch (err) {
+      setError((err as ApiError).message || 'Passkey sign-in failed or was cancelled.');
     }
     setBusy(false);
   }
@@ -132,6 +150,26 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
           {busy ? <Loader2 className="spin" size={14} /> : <KeyRound size={14} />}
           {mode === 'signup' ? 'Create account' : totpStep ? 'Verify' : 'Sign in'}
         </button>
+
+        {mode === 'login' && !totpStep && (
+          <>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={passkeySignIn}
+              style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}>
+              <Fingerprint size={14} /> Sign in with a passkey
+            </button>
+            {ssoProviders.length > 0 && (
+              <div className="auth-sso">
+                <div className="auth-divider"><span>or</span></div>
+                {ssoProviders.map(p => (
+                  <a key={p.id} className="btn btn-secondary" href={`/api/auth/sso/${p.id}/start`}
+                    style={{ width: '100%', justifyContent: 'center' }}>
+                    Continue with {p.name}
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </form>
     </div>
   );

@@ -1682,3 +1682,49 @@ body {
 .user-chip-meta { flex: 1; min-width: 0; }
 .user-chip-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .user-chip-role { font-size: 10px; color: var(--text-dim); text-transform: capitalize; }
+
+/* ── Workspace switcher ── */
+.ws-switcher { position: relative; padding: 0 8px 8px; }
+.ws-switcher-trigger {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-md);
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; font-size: 12.5px; font-weight: 600; text-align: left;
+}
+.ws-switcher-trigger:hover { border-color: var(--accent, #7c6cf5); }
+.ws-switcher-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-collapsed .ws-switcher-trigger { justify-content: center; }
+.ws-switcher-menu {
+  position: absolute; left: 8px; right: 8px; top: calc(100% - 4px); z-index: 40;
+  background: var(--bg-card, var(--bg-input)); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+}
+.ws-switcher-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); padding: 4px 8px; }
+.ws-switcher-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 7px 8px; border-radius: var(--radius-sm, 6px);
+  background: transparent; border: none; color: var(--text); cursor: pointer;
+  font-size: 12.5px; text-align: left;
+}
+.ws-switcher-item:hover { background: var(--bg-input); }
+.ws-switcher-item.active { color: var(--accent, #7c6cf5); font-weight: 600; }
+.ws-switcher-new { color: var(--text-dim); justify-content: flex-start; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 9px; }
+.ws-switcher-create { display: flex; gap: 6px; padding: 6px 4px 2px; }
+.ws-switcher-create .input { flex: 1; min-width: 0; }
+.sidebar-collapsed .ws-switcher-name, .sidebar-collapsed .ws-switcher-trigger .nav-item-label { display: none; }
+
+/* ── Member / user / passkey lists (Settings) ── */
+.member-list { display: flex; flex-direction: column; gap: 6px; }
+.member-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.member-info { display: flex; flex-direction: column; min-width: 0; }
+.member-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-role { font-size: 11px; color: var(--text-dim); text-transform: capitalize; }
+
+/* ── Auth screen: SSO / divider ── */
+.auth-sso { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.auth-divider { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 11px; margin: 10px 0 2px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }

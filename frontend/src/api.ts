@@ -2,6 +2,22 @@
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
+// ── Active workspace (the tenant scope for every request) ────────────────────
+// The backend reads X-Workspace-Id to decide which workspace's data a request
+// sees. We persist the choice in localStorage so a reload keeps the same tenant.
+const WS_STORAGE_KEY = 'active-workspace-id';
+let activeWorkspaceId: string | null =
+  typeof localStorage !== 'undefined' ? localStorage.getItem(WS_STORAGE_KEY) : null;
+
+export function getActiveWorkspaceId(): string | null { return activeWorkspaceId; }
+export function setActiveWorkspaceId(id: string | null): void {
+  activeWorkspaceId = id;
+  try {
+    if (id) localStorage.setItem(WS_STORAGE_KEY, id);
+    else localStorage.removeItem(WS_STORAGE_KEY);
+  } catch { /* storage unavailable — header still set for this session */ }
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (options?.body) {
@@ -13,6 +29,8 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     headers.set('X-Requested-With', 'seo-indexer-ui');
   }
+  // Tenant scope — the backend validates access and ignores an inaccessible id.
+  if (activeWorkspaceId) headers.set('X-Workspace-Id', activeWorkspaceId);
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -347,7 +365,71 @@ export const api = {
     apiFetch<AiResult>(`/api/ai/prompts/${promptId}/reply`, { method: 'POST', body: JSON.stringify({ provider, message }) }),
   provisionGeminiKey: () =>
     apiFetch<{ ok: boolean; error?: string; needsRelink?: boolean }>('/api/ai/provision/gemini', { method: 'POST', body: JSON.stringify({}) }),
+
+  // ── Workspaces (tenant / client base) ──
+  getWorkspaces: () => apiFetch<Workspace[]>('/api/workspaces'),
+  createWorkspace: (name: string) =>
+    apiFetch<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameWorkspace: (id: string, name: string) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteWorkspace: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  getWorkspaceMembers: (id: string) =>
+    apiFetch<WorkspaceMember[]>(`/api/workspaces/${id}/members`),
+  addWorkspaceMember: (id: string, email: string, role?: 'member' | 'admin') =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify({ email, role }) }),
+  removeWorkspaceMember: (id: string, userId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
+
+  // ── User management (super-admin) ──
+  listUsers: () => apiFetch<CurrentUser[]>('/api/users'),
+  createUser: (data: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean }) =>
+    apiFetch<CurrentUser>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string, data: { password?: string; superAdmin?: boolean }) =>
+    apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteUser: (id: string) => apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'DELETE' }),
+
+  // ── Bing accounts (multiple per workspace) ──
+  getBingAccounts: () => apiFetch<BingAccount[]>('/api/bing/accounts'),
+  addBingAccount: (name: string, apiKey: string) =>
+    apiFetch<BingAccount>('/api/bing/accounts', { method: 'POST', body: JSON.stringify({ name, apiKey }) }),
+  removeBingAccount: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/bing/accounts/${id}`, { method: 'DELETE' }),
+
+  // ── Passkeys (WebAuthn) ──
+  passkeyRegisterStart: () => apiFetch<PublicKeyCredentialCreationOptionsJSON & { challengeId: string }>('/api/auth/passkeys/register/start', { method: 'POST' }),
+  passkeyRegisterFinish: (name: string, challengeId: string, credential: unknown) =>
+    apiFetch<{ ok: boolean }>('/api/auth/passkeys/register/finish', { method: 'POST', body: JSON.stringify({ name, challengeId, credential }) }),
+  passkeyLoginStart: (email?: string) =>
+    apiFetch<PublicKeyCredentialRequestOptionsJSON & { challengeId: string }>('/api/auth/passkeys/login/start', { method: 'POST', body: JSON.stringify({ email }) }),
+  passkeyLoginFinish: (challengeId: string, credential: unknown) =>
+    apiFetch<CurrentUser>('/api/auth/passkeys/login/finish', { method: 'POST', body: JSON.stringify({ challengeId, credential }) }),
+  listPasskeys: () => apiFetch<PasskeyInfo[]>('/api/auth/passkeys'),
+  deletePasskey: (id: string) => apiFetch<{ ok: boolean }>(`/api/auth/passkeys/${id}`, { method: 'DELETE' }),
+
+  // ── SSO / OIDC ──
+  ssoProviders: () => apiFetch<Array<{ id: string; name: string }>>('/api/auth/sso/providers'),
 };
+
+// ── Workspace / user / bing / passkey types ─────────────────────────────────
+
+export interface Workspace {
+  id: string;
+  name: string;
+  created_at?: string;
+  is_owner: boolean;
+  is_active?: boolean;
+}
+export interface WorkspaceMember {
+  user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
+}
+export interface BingAccount { id: string; name: string; created_at: string }
+export interface PasskeyInfo { id: string; name: string | null; created_at: string }
+
+// Minimal shapes of the WebAuthn JSON options the backend returns (subset used
+// by the browser's navigator.credentials calls after base64url→ArrayBuffer).
+export interface PublicKeyCredentialCreationOptionsJSON { [k: string]: unknown }
+export interface PublicKeyCredentialRequestOptionsJSON { [k: string]: unknown }
 
 // ── Analytics types ───────────────────────────────────────────────────────────
 

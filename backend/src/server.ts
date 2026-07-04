@@ -42,6 +42,7 @@ import { randomUUID } from 'crypto';
 
 import {
   getAllSites,
+  getSitesForWorkspace,
   getSiteById,
   upsertSite,
   deleteSite,
@@ -53,6 +54,8 @@ import {
   getRecentRuns,
   getIndexNowKey,
   getAllGoogleAccounts,
+  getGoogleAccountsForWorkspace,
+  getGoogleAccountById,
   getUrlsBySite,
   getAllQuotaUsageForDay,
   getAllUrlFailures,
@@ -83,7 +86,7 @@ import {
   forceStopRun,
 } from './scheduler.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
-import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, recordAlert } from './analytics/stats.js';
+import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
@@ -97,8 +100,20 @@ import {
   countUsers, getUserByEmail, createUser, verifyPassword, recordLogin,
   createSession, getSessionUser, destroySession, setUserPassword,
   generateTotpSecret, totpUri, verifyTotp, setTotpSecret, getTotpSecret, enableTotp, disableTotp,
-  toPublic, pruneExpiredSessions, type User,
+  toPublic, pruneExpiredSessions, listUsers, getUserById,
+  countSuperAdmins, setUserSuperAdmin, deleteUser, type User,
 } from './auth/users.js';
+import {
+  createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
+  canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
+  listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember,
+  addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
+} from './auth/workspaces.js';
+import {
+  beginRegistration, finishRegistration, beginAuthentication, finishAuthentication,
+  listPasskeys, deletePasskey,
+} from './auth/passkeys.js';
+import { ssoProviders, ssoAuthorizeUrl, ssoHandleCallback } from './auth/sso.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,7 +183,11 @@ app.addHook('preHandler', async (req, reply) => {
 const AUTH_OPEN_PATHS = new Set<string>([
   '/api/auth/login', '/api/auth/signup', '/api/auth/bootstrap-status', '/api/auth/logout',
   '/api/auth/google/callback', '/health', '/api/livez', '/api/healthz',
+  '/api/auth/passkeys/login/start', '/api/auth/passkeys/login/finish', '/api/auth/sso/providers',
 ]);
+// Pre-auth path prefixes (dynamic segments) — e.g. the SSO provider redirect
+// and callback which the identity provider hits with no session.
+const AUTH_OPEN_PREFIXES = ['/api/auth/sso/'];
 function sessionTokenFromReq(req: { headers: Record<string, unknown> }): string | undefined {
   const raw = req.headers['cookie'];
   if (typeof raw !== 'string') return undefined;
@@ -182,11 +201,52 @@ app.addHook('preHandler', async (req, reply) => {
   const pathOnly = req.url.split('?')[0];
   if (!pathOnly.startsWith('/api/')) return;            // static assets + key files
   if (AUTH_OPEN_PATHS.has(pathOnly)) return;
+  if (AUTH_OPEN_PREFIXES.some(p => pathOnly.startsWith(p))) return;
   const user = getSessionUser(sessionTokenFromReq(req));
   if (!user) {
     return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
   }
-  (req as unknown as { user: User }).user = user;
+  // Resolve the active workspace from the X-Workspace-Id header (the UI's
+  // workspace switcher sets it), validating access; fall back to the user's
+  // first accessible workspace. This is the tenant scope for the request.
+  const wsHeader = req.headers['x-workspace-id'];
+  const accessible = accessibleWorkspaces(user);
+  let activeWs: string | null = null;
+  if (typeof wsHeader === 'string' && accessible.some(w => w.id === wsHeader)) activeWs = wsHeader;
+  else if (accessible.length > 0) activeWs = accessible[0].id;
+  (req as unknown as RequestCtx).ctx = { user, workspaceId: activeWs };
+});
+
+interface RequestCtx { ctx: { user: User; workspaceId: string | null } }
+
+// Centralised tenant authorization: extract a site id from the known
+// site-scoped URL shapes and 404 if the caller can't access that site's
+// workspace. Covers /api/sites/:id(/*), /api/analytics/site/:id,
+// /api/performance/:siteId/*, /api/crux/:siteId/*, /api/bing/*/:siteId,
+// /api/submit/:siteId. (The literal-first-segment routes like
+// /api/performance/tracked-queries/:id are not site ids and are skipped.)
+function siteIdFromPath(path: string): string | null {
+  let m: RegExpMatchArray | null;
+  if ((m = path.match(/^\/api\/sites\/([^/]+)/))) return decodeURIComponent(m[1]);
+  if ((m = path.match(/^\/api\/analytics\/site\/([^/]+)/))) return decodeURIComponent(m[1]);
+  if ((m = path.match(/^\/api\/crux\/([^/]+)\//))) return decodeURIComponent(m[1]);
+  if ((m = path.match(/^\/api\/bing\/(?:quota|submit)\/([^/]+)/))) return decodeURIComponent(m[1]);
+  if ((m = path.match(/^\/api\/submit\/([^/]+)/))) return decodeURIComponent(m[1]);
+  if ((m = path.match(/^\/api\/performance\/([^/]+)/))) {
+    if (m[1] === 'tracked-queries') return null; // that segment is a row id, not a site
+    return decodeURIComponent(m[1]);
+  }
+  return null;
+}
+app.addHook('preHandler', async (req, reply) => {
+  const pathOnly = req.url.split('?')[0];
+  if (!pathOnly.startsWith('/api/') || AUTH_OPEN_PATHS.has(pathOnly)) return;
+  const ctx = (req as unknown as Partial<RequestCtx>).ctx;
+  if (!ctx) return; // unauthenticated request already rejected by the gate above
+  const siteId = siteIdFromPath(pathOnly);
+  if (siteId && !canAccessSite(ctx.user, siteId)) {
+    return reply.status(404).send({ error: 'Site not found' });
+  }
 });
 
 // Cookie helpers — HttpOnly session cookie, Secure behind https/proxy.
@@ -198,7 +258,27 @@ function setSessionCookie(req: { headers: Record<string, unknown> }, reply: { he
 function clearSessionCookie(reply: { header: (k: string, v: string) => void }) {
   reply.header('Set-Cookie', 'sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
 }
-function currentUser(req: unknown): User { return (req as { user: User }).user; }
+// WebAuthn relying-party id (the registrable domain, no port) + origin, derived
+// from the request so one build works on localhost and any deployed host.
+function rpInfo(req: { headers: Record<string, unknown> }): { rpID: string; origin: string } {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').includes('https') ? 'https' : 'http';
+  const host = String(req.headers['x-forwarded-host'] ?? req.headers['host'] ?? 'localhost');
+  const rpID = host.split(':')[0];
+  return { rpID, origin: `${proto}://${host}` };
+}
+function currentUser(req: unknown): User { return (req as RequestCtx).ctx.user; }
+function currentWorkspace(req: unknown): string | null { return (req as RequestCtx).ctx.workspaceId; }
+// Guards — throw a 403-shaped error the handlers turn into a reply.
+function requireWorkspace(req: unknown): string {
+  const ws = currentWorkspace(req);
+  if (!ws) throw Object.assign(new Error('No workspace selected. Create one first.'), { statusCode: 400 });
+  return ws;
+}
+function assertSiteAccess(req: unknown, siteId: string): void {
+  if (!canAccessSite(currentUser(req), siteId)) {
+    throw Object.assign(new Error('Site not found'), { statusCode: 404 });
+  }
+}
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
@@ -266,6 +346,7 @@ app.post('/api/auth/signup', async (req, reply) => {
     return reply.status(400).send({ error: 'A valid email and a password of at least 8 characters are required.' });
   }
   const user = createUser({ email, password, name, role: 'admin', superAdmin: true });
+  bootstrapUserWorkspace(user, true); // first user: also claims any pre-existing single-tenant data
   recordLogin(user.id);
   setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
   logSystem('ok', `First admin account created: ${user.email}`);
@@ -334,10 +415,216 @@ app.post('/api/auth/totp/disable', async (req, reply) => {
   return { ok: true };
 });
 
+// ── Passkeys (WebAuthn) ──────────────────────────────────────────────────────
+
+app.get('/api/auth/passkeys', async (req) => listPasskeys(currentUser(req).id));
+
+app.delete('/api/auth/passkeys/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!deletePasskey(currentUser(req).id, id)) return reply.status(404).send({ error: 'Passkey not found' });
+  return { ok: true };
+});
+
+app.post('/api/auth/passkeys/register/start', async (req) => {
+  const { rpID } = rpInfo(req);
+  return beginRegistration(currentUser(req), rpID);
+});
+
+app.post('/api/auth/passkeys/register/finish', async (req, reply) => {
+  const { rpID, origin } = rpInfo(req);
+  const { name, challengeId, credential } = (req.body ?? {}) as { name?: string; challengeId?: string; credential?: unknown };
+  // Backwards-compat: the browser may bundle challengeId into the credential wrapper.
+  const chId = challengeId ?? (credential as { challengeId?: string })?.challengeId;
+  if (!chId || !credential) return reply.status(400).send({ error: 'Missing registration data.' });
+  try {
+    const ok = await finishRegistration(currentUser(req), chId, name, credential as never, rpID, origin);
+    if (!ok) return reply.status(400).send({ error: 'Passkey could not be verified.' });
+    return { ok: true };
+  } catch (e) {
+    return reply.status(400).send({ error: e instanceof Error ? e.message : 'Registration failed.' });
+  }
+});
+
+// Login start/finish are OPEN (pre-authentication).
+app.post('/api/auth/passkeys/login/start', async (req) => {
+  const { rpID } = rpInfo(req);
+  const { email } = (req.body ?? {}) as { email?: string };
+  return beginAuthentication(rpID, email?.trim().toLowerCase() || undefined);
+});
+
+app.post('/api/auth/passkeys/login/finish', async (req, reply) => {
+  const { rpID, origin } = rpInfo(req);
+  const { challengeId, credential } = (req.body ?? {}) as { challengeId?: string; credential?: unknown };
+  if (!challengeId || !credential) return reply.status(400).send({ error: 'Missing login data.' });
+  try {
+    const user = await finishAuthentication(challengeId, credential as never, rpID, origin);
+    if (!user) return reply.status(401).send({ error: 'Passkey not recognised.' });
+    recordLogin(user.id);
+    setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
+    return toPublic(user);
+  } catch (e) {
+    return reply.status(401).send({ error: e instanceof Error ? e.message : 'Login failed.' });
+  }
+});
+
+// ── SSO / OIDC (optional, env-configured) ────────────────────────────────────
+
+app.get('/api/auth/sso/providers', async () => ssoProviders());
+
+// Redirects the browser to the identity provider.
+app.get('/api/auth/sso/:provider/start', async (req, reply) => {
+  const { provider } = req.params as { provider: string };
+  const { origin } = rpInfo(req);
+  const url = ssoAuthorizeUrl(provider, `${origin}/api/auth/sso/${provider}/callback`);
+  if (!url) return reply.status(404).send({ error: 'Unknown or unconfigured SSO provider.' });
+  return reply.redirect(url);
+});
+
+app.get('/api/auth/sso/:provider/callback', async (req, reply) => {
+  const { provider } = req.params as { provider: string };
+  const { code, state } = req.query as { code?: string; state?: string };
+  const { origin } = rpInfo(req);
+  if (!code) return reply.status(400).send({ error: 'Missing authorization code.' });
+  try {
+    const user = await ssoHandleCallback(provider, code, state, `${origin}/api/auth/sso/${provider}/callback`);
+    if (!user) return reply.redirect('/?sso_error=1');
+    recordLogin(user.id);
+    setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
+    return reply.redirect('/');
+  } catch {
+    return reply.redirect('/?sso_error=1');
+  }
+});
+
+// ── Workspaces (the tenant / "client base") ──────────────────────────────────
+
+// List workspaces the caller can access, flagging the active one and ownership.
+app.get('/api/workspaces', async (req) => {
+  const user = currentUser(req);
+  const active = currentWorkspace(req);
+  return accessibleWorkspaces(user).map(w => ({
+    id: w.id,
+    name: w.name,
+    created_at: w.created_at,
+    is_owner: w.owner_user_id === user.id,
+    is_active: w.id === active,
+  }));
+});
+
+app.post('/api/workspaces', async (req, reply) => {
+  const { name } = (req.body ?? {}) as { name?: string };
+  if (!name?.trim()) return reply.status(400).send({ error: 'name is required.' });
+  const ws = createWorkspace(name, currentUser(req).id);
+  return { id: ws.id, name: ws.name, created_at: ws.created_at, is_owner: true };
+});
+
+app.patch('/api/workspaces/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const { name } = (req.body ?? {}) as { name?: string };
+  if (!name?.trim()) return reply.status(400).send({ error: 'name is required.' });
+  renameWorkspace(id, name);
+  return { ok: true };
+});
+
+app.delete('/api/workspaces/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const user = currentUser(req);
+  if (!canManageWorkspace(user, id)) return reply.status(404).send({ error: 'Workspace not found' });
+  // Refuse to delete someone's last workspace — they'd be left with nowhere to work.
+  if (accessibleWorkspaces(user).length <= 1) {
+    return reply.status(400).send({ error: 'You cannot delete your only workspace.' });
+  }
+  deleteWorkspace(id);
+  return { ok: true };
+});
+
+// Members of a workspace (owner + explicit members).
+app.get('/api/workspaces/:id/members', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!canAccessWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  return listWorkspaceMembers(id);
+});
+
+app.post('/api/workspaces/:id/members', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const { email, role } = (req.body ?? {}) as { email?: string; role?: string };
+  if (!email?.trim()) return reply.status(400).send({ error: 'email is required.' });
+  const target = getUserByEmail(email.trim().toLowerCase());
+  if (!target) return reply.status(404).send({ error: 'No user with that email. Create the user first.' });
+  addWorkspaceMember(id, target.id, role === 'admin' ? 'admin' : 'member');
+  return { ok: true };
+});
+
+app.delete('/api/workspaces/:id/members/:userId', async (req, reply) => {
+  const { id, userId } = req.params as { id: string; userId: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const ws = getWorkspace(id);
+  if (ws && ws.owner_user_id === userId) return reply.status(400).send({ error: 'The owner cannot be removed.' });
+  removeWorkspaceMember(id, userId);
+  return { ok: true };
+});
+
+// ── User management (super-admin) ────────────────────────────────────────────
+
+function requireSuperAdmin(req: unknown, reply: { status: (c: number) => { send: (b: unknown) => unknown } }): boolean {
+  if (!currentUser(req).is_super_admin) { reply.status(403).send({ error: 'Super-admin only.' }); return false; }
+  return true;
+}
+
+app.get('/api/users', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  return listUsers();
+});
+
+app.post('/api/users', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { email, password, name, role, superAdmin } = (req.body ?? {}) as
+    { email?: string; password?: string; name?: string; role?: string; superAdmin?: boolean };
+  if (!email?.trim() || !password) return reply.status(400).send({ error: 'email and password are required.' });
+  if (getUserByEmail(email.trim().toLowerCase())) return reply.status(409).send({ error: 'A user with that email already exists.' });
+  const user = createUser({ email: email.trim().toLowerCase(), password, name, role: role ?? 'user', superAdmin: !!superAdmin });
+  // New users get their own default workspace so they can start immediately.
+  bootstrapUserWorkspace(user, false);
+  return toPublic(user);
+});
+
+app.patch('/api/users/:id', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  const { password, superAdmin } = (req.body ?? {}) as { password?: string; superAdmin?: boolean };
+  if (typeof password === 'string' && password) setUserPassword(id, password);
+  if (typeof superAdmin === 'boolean') {
+    // Never let the last super-admin drop their own privilege and lock everyone out.
+    if (!superAdmin && target.is_super_admin && countSuperAdmins() <= 1) {
+      return reply.status(400).send({ error: 'At least one super-admin must remain.' });
+    }
+    setUserSuperAdmin(id, superAdmin);
+  }
+  return { ok: true };
+});
+
+app.delete('/api/users/:id', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  if (id === currentUser(req).id) return reply.status(400).send({ error: 'You cannot delete yourself.' });
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  if (target.is_super_admin && countSuperAdmins() <= 1) {
+    return reply.status(400).send({ error: 'At least one super-admin must remain.' });
+  }
+  deleteUser(id);
+  return { ok: true };
+});
+
 // ── Google Search Console auth ────────────────────────────────────────────────
 
-app.get('/api/auth/accounts', async () => {
-  const accounts = getAllGoogleAccounts();
+app.get('/api/auth/accounts', async (req) => {
+  const ws = currentWorkspace(req);
+  const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
   return accounts.map(acc => ({
     id: acc.id,
     email: acc.email,
@@ -348,6 +635,12 @@ app.get('/api/auth/accounts', async () => {
 
 app.delete('/api/auth/accounts/:id', async (req, reply) => {
   const { id } = req.params as { id: string };
+  // Only disconnect an account that lives in a workspace the caller can access.
+  const acc = getGoogleAccountById(id);
+  if (!acc) return reply.code(404).send({ error: 'Account not found' });
+  const ws = acc.workspace_id ?? null;
+  const allowed = ws ? canAccessWorkspace(currentUser(req), ws) : currentUser(req).is_super_admin;
+  if (!allowed) return reply.code(404).send({ error: 'Account not found' });
   disconnectGoogleAccount(id);
   return { ok: true };
 });
@@ -371,7 +664,7 @@ app.post('/api/auth/save-credentials', async (req, reply) => {
 });
 
 app.get('/api/auth/google/callback', async (req, reply) => {
-  const { code, error } = req.query as { code?: string; error?: string };
+  const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
   if (error) {
     return reply.type('text/html').send(`
       <!DOCTYPE html>
@@ -399,8 +692,21 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
   const redirectUri = `${proto}://${host}/api/auth/google/callback`;
 
+  // The popup carries the active workspace in `state` (the tenant to attach this
+  // Google account to). This route is open (Google redirects here with no
+  // header), so resolve the caller from the session cookie and only honour a
+  // `state` the user may actually access; otherwise fall back to their first
+  // workspace. Prevents a crafted state from parking an account in a foreign tenant.
+  const sessionUser = getSessionUser(sessionTokenFromReq(req));
+  let workspaceId: string | null = null;
+  if (sessionUser) {
+    const accessible = accessibleWorkspaces(sessionUser);
+    if (state && accessible.some(w => w.id === state)) workspaceId = state;
+    else if (accessible.length > 0) workspaceId = accessible[0].id;
+  }
+
   try {
-    await exchangeCodeForTokens(code, redirectUri);
+    await exchangeCodeForTokens(code, redirectUri, workspaceId);
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html lang="en">
@@ -444,12 +750,18 @@ app.get('/api/auth/google/callback', async (req, reply) => {
 // List GSC properties (for onboarding site-picker)
 app.get('/api/auth/gsc-sites', async (req, reply) => {
   const { accountId } = req.query as { accountId?: string };
+  const ws = currentWorkspace(req);
   try {
     if (accountId) {
+      // Authorize: the account must belong to the active workspace.
+      const acc = getGoogleAccountById(accountId);
+      if (!acc || (acc.workspace_id ?? null) !== ws) {
+        return reply.status(404).send({ error: 'Account not found' });
+      }
       const sites = await listGSCSites(accountId);
       return sites.map(s => ({ ...s, googleAccountId: accountId }));
     }
-    const accounts = getAllGoogleAccounts();
+    const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
     const allSites: Array<{ siteUrl: string; permissionLevel: string; googleAccountId: string }> = [];
     const seen = new Set<string>();
     for (const acc of accounts) {
@@ -473,8 +785,9 @@ app.get('/api/auth/gsc-sites', async (req, reply) => {
 
 // ── Sites ─────────────────────────────────────────────────────────────────────
 
-app.get('/api/sites', async () => {
-  const sites = getAllSites();
+app.get('/api/sites', async (req) => {
+  const ws = currentWorkspace(req);
+  const sites = ws ? getSitesForWorkspace(ws) : [];
   return sites.map(site => ({
     ...site,
     indexNowKey: getIndexNowKey(site.id)?.key_value ?? getOrCreateIndexNowKey(site.id),
@@ -511,6 +824,14 @@ app.post('/api/sites', async (req, reply) => {
   if (!name || !domain || !sitemapUrl || !gscUrl) {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
   }
+  const workspaceId = requireWorkspace(req);
+  // A site may only be linked to a Google account in its own workspace.
+  if (googleAccountId) {
+    const acc = getGoogleAccountById(googleAccountId);
+    if (!acc || (acc.workspace_id ?? null) !== workspaceId) {
+      return reply.status(400).send({ error: 'That Google account is not in this workspace.' });
+    }
+  }
   const id = randomUUID();
   upsertSite({
     id,
@@ -519,6 +840,7 @@ app.post('/api/sites', async (req, reply) => {
     sitemap_url: sitemapUrl,
     gsc_url: gscUrl,
     enabled: 1,
+    workspace_id: workspaceId,
     google_account_id: googleAccountId || null,
     deploy_webhook_url: deploy_webhook_url || null,
     ftp_host: ftp_host || null,
@@ -546,6 +868,8 @@ app.put('/api/sites/:id', async (req, reply) => {
     enabled: number;
     googleAccountId: string | null;
     google_account_id: string | null;
+    bingAccountId: string | null;
+    bing_account_id: string | null;
     deploy_webhook_url: string | null;
     ftp_host: string | null;
     ftp_port: number | null;
@@ -562,13 +886,25 @@ app.put('/api/sites/:id', async (req, reply) => {
     updates.google_account_id !== undefined ? updates.google_account_id :
     undefined;
 
-  // Validate the FK target exists, otherwise the upsert would throw silently.
+  // Validate the FK target exists AND lives in this site's workspace, otherwise
+  // the upsert would either throw or link across a tenant boundary.
   if (incomingAccountId) {
-    const accountOk = getAllGoogleAccounts().some(a => a.id === incomingAccountId);
-    if (!accountOk) {
+    const acc = getGoogleAccountById(incomingAccountId);
+    if (!acc || (acc.workspace_id ?? null) !== (existing.workspace_id ?? null)) {
       return reply.status(400).send({
-        error: `Google account "${incomingAccountId}" does not exist. Reconnect the account on the Accounts page.`,
+        error: `Google account "${incomingAccountId}" is not available in this workspace.`,
       });
+    }
+  }
+
+  // Bing account link — must belong to the same workspace (or be cleared).
+  const incomingBingId =
+    updates.bingAccountId !== undefined ? updates.bingAccountId :
+    updates.bing_account_id !== undefined ? updates.bing_account_id :
+    undefined;
+  if (incomingBingId) {
+    if (bingAccountWorkspace(incomingBingId) !== (existing.workspace_id ?? null)) {
+      return reply.status(400).send({ error: 'That Bing account is not in this workspace.' });
     }
   }
 
@@ -581,6 +917,7 @@ app.put('/api/sites/:id', async (req, reply) => {
       gsc_url: updates.gsc_url ?? updates.gscUrl ?? existing.gsc_url,
       enabled: updates.enabled ?? existing.enabled,
       google_account_id: incomingAccountId !== undefined ? incomingAccountId : existing.google_account_id,
+      bing_account_id: incomingBingId !== undefined ? incomingBingId : existing.bing_account_id,
       deploy_webhook_url: updates.deploy_webhook_url !== undefined ? updates.deploy_webhook_url : existing.deploy_webhook_url,
       ftp_host: updates.ftp_host !== undefined ? updates.ftp_host : existing.ftp_host,
       ftp_port: updates.ftp_port !== undefined && updates.ftp_port !== null ? Number(updates.ftp_port) : existing.ftp_port,
@@ -588,6 +925,8 @@ app.put('/api/sites/:id', async (req, reply) => {
       ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
       ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
       geo_manage: updates.geo_manage !== undefined ? Number(updates.geo_manage) : existing.geo_manage,
+      // workspace_id intentionally omitted — upsertSite COALESCEs it, so an edit
+      // never moves a site between tenants.
     });
   } catch (e) {
     console.error(`[PUT /api/sites/${id}] upsertSite failed:`, e);
@@ -898,7 +1237,7 @@ try {
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 
-app.get('/api/analytics/overview', async () => getOverview());
+app.get('/api/analytics/overview', async (req) => getOverview(currentWorkspace(req)));
 
 app.get('/api/analytics/site/:id', async (req, reply) => {
   const detail = getSiteDetail((req.params as { id: string }).id);
@@ -908,12 +1247,14 @@ app.get('/api/analytics/site/:id', async (req, reply) => {
 
 app.post('/api/analytics/snapshot', async () => ({ snapshots: snapshotAllSites().length }));
 
-app.get('/api/analytics/alerts', async () => getAlerts());
+app.get('/api/analytics/alerts', async (req) => getAlerts(currentWorkspace(req)));
 
 // Portfolio-wide Google search movers (WoW) for the Analytics landing page.
-app.get('/api/analytics/movers', async () => getPortfolioMovers());
-app.post('/api/analytics/alerts/:id/ack', async (req) => {
-  ackAlert(Number((req.params as { id: string }).id));
+app.get('/api/analytics/movers', async (req) => getPortfolioMovers(currentWorkspace(req)));
+app.post('/api/analytics/alerts/:id/ack', async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  if (!alertInWorkspace(id, currentWorkspace(req))) return reply.code(404).send({ error: 'Alert not found' });
+  ackAlert(id);
   return { ok: true };
 });
 
@@ -1021,7 +1362,7 @@ app.post('/api/submit/:siteId', async (req, reply) => {
     }
   }
   if (targets.includes('bing')) {
-    const apiKey = getSetting('bing_api_key');
+    const apiKey = bingKeyForSite(site.id);
     if (!apiKey) {
       result.bing = { error: 'No Bing Webmaster API key configured.' };
     } else {
@@ -1056,7 +1397,7 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
 app.get('/api/bing/quota/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  const apiKey = getSetting('bing_api_key');
+  const apiKey = bingKeyForSite(site.id);
   if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
   const quota = await getBingQuota(apiKey, deriveBingSiteUrl(site.gsc_url, site.domain));
   if (!quota) return reply.code(502).send({ error: 'Bing quota unavailable — check the API key and that the site is verified in Bing Webmaster Tools' });
@@ -1067,7 +1408,7 @@ app.get('/api/bing/quota/:siteId', async (req, reply) => {
 app.post('/api/bing/submit/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  const apiKey = getSetting('bing_api_key');
+  const apiKey = bingKeyForSite(site.id);
   if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
   const { urls } = (req.body ?? {}) as { urls?: string[] };
   const list = urls?.length ? urls : getUrlsBySite(site.id).slice(0, 100).map((u: { url: string }) => u.url);
@@ -1081,6 +1422,34 @@ app.post('/api/bing/submit/:siteId', async (req, reply) => {
   }
   logSystem('ok', `Bing: submitted ${submitted} URLs for ${site.domain}`);
   return { submitted };
+});
+
+// ── Bing accounts (multiple per workspace) ───────────────────────────────────
+// Each workspace can hold several Bing Webmaster API keys; a site either picks
+// one (site.bing_account_id) or falls back to the workspace's first.
+
+app.get('/api/bing/accounts', async (req) => {
+  const ws = currentWorkspace(req);
+  return ws ? listBingAccounts(ws) : [];
+});
+
+app.post('/api/bing/accounts', async (req, reply) => {
+  const ws = requireWorkspace(req);
+  const { name, apiKey } = (req.body ?? {}) as { name?: string; apiKey?: string };
+  if (!apiKey?.trim()) return reply.code(400).send({ error: 'apiKey is required.' });
+  const acc = addBingAccount(ws, name ?? 'Bing account', apiKey);
+  return { id: acc.id, name: acc.name, created_at: acc.created_at };
+});
+
+app.delete('/api/bing/accounts/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  // Only remove a Bing account inside a workspace the caller can access.
+  const ws = bingAccountWorkspace(id);
+  if (!ws || !canAccessWorkspace(currentUser(req), ws)) {
+    return reply.code(404).send({ error: 'Bing account not found' });
+  }
+  removeBingAccount(id);
+  return { ok: true };
 });
 
 // ── Site hygiene ─────────────────────────────────────────────────────────────

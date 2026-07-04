@@ -236,12 +236,52 @@ function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS sessions (
       token       TEXT PRIMARY KEY,          -- opaque random token; the cookie holds it
       user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      active_workspace_id TEXT,              -- currently-selected workspace for this session
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at  TEXT NOT NULL,
       user_agent  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+    -- ── Workspaces (a user's 'client base'; the tenant boundary) ─────────
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id             TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      owner_user_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_user_id);
+
+    -- Shared access to a workspace (owner is implicit; this is for extra members).
+    CREATE TABLE IF NOT EXISTS workspace_members (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role         TEXT NOT NULL DEFAULT 'member',
+      PRIMARY KEY (workspace_id, user_id)
+    );
+
+    -- Passkeys (WebAuthn credentials) per user.
+    CREATE TABLE IF NOT EXISTS passkeys (
+      id            TEXT PRIMARY KEY,         -- credential id (base64url)
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      public_key    TEXT NOT NULL,           -- base64url COSE public key
+      counter       INTEGER NOT NULL DEFAULT 0,
+      transports    TEXT,                    -- JSON array
+      name          TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+
+    -- Multiple Bing Webmaster accounts (each a verified-property API key).
+    CREATE TABLE IF NOT EXISTS bing_accounts (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      api_key       TEXT NOT NULL,           -- encrypted at rest
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_bing_accounts_ws ON bing_accounts(workspace_id);
   `);
 
   // Backwards compatibility migrations
@@ -278,6 +318,17 @@ function initSchema(db: Database.Database): void {
   // 1 = managed (the tool generates and deploys the files).
   if (!siteCols.some(c => c.name === 'geo_manage')) {
     db.exec("ALTER TABLE sites ADD COLUMN geo_manage INTEGER DEFAULT 0;");
+  }
+  // Multi-tenant: which workspace a site belongs to, and which Bing account it submits through.
+  if (!siteCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE sites ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
+  }
+  if (!siteCols.some(c => c.name === 'bing_account_id')) {
+    db.exec("ALTER TABLE sites ADD COLUMN bing_account_id TEXT REFERENCES bing_accounts(id) ON DELETE SET NULL;");
+  }
+  const gaCols = db.prepare("PRAGMA table_info(google_accounts)").all() as { name: string }[];
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
   }
 
   const urlCols = db.prepare("PRAGMA table_info(url_state)").all() as { name: string }[];
@@ -435,10 +486,20 @@ export interface Site {
   ftp_pass?: string | null;
   ftp_path?: string | null;
   geo_manage?: number | null;
+  workspace_id?: string | null;
+  bing_account_id?: string | null;
 }
 
+// All enabled sites across every workspace — used by the background scheduler,
+// which indexes the whole install regardless of who's logged in.
 export function getAllSites(): Site[] {
   return (getDb().prepare('SELECT * FROM sites WHERE enabled = 1 ORDER BY created_at').all() as Site[])
+    .map(decryptSiteSecrets);
+}
+
+// Sites within one workspace — used by the tenant-scoped API surface.
+export function getSitesForWorkspace(workspaceId: string): Site[] {
+  return (getDb().prepare('SELECT * FROM sites WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as Site[])
     .map(decryptSiteSecrets);
 }
 
@@ -463,13 +524,15 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
     ftp_user: null as string | null,
     ftp_path: null as string | null,
     geo_manage: 0 as number | null,
+    workspace_id: null as string | null,
+    bing_account_id: null as string | null,
     ...site,
     // Always encrypt FTP password before writing
     ftp_pass: encrypt(site.ftp_pass ?? null),
   };
   getDb().prepare(`
-    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path)
-    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path)
+    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path, workspace_id, bing_account_id)
+    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path, @workspace_id, @bing_account_id)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       domain = excluded.domain,
@@ -484,7 +547,11 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
       ftp_port = excluded.ftp_port,
       ftp_user = excluded.ftp_user,
       ftp_pass = excluded.ftp_pass,
-      ftp_path = excluded.ftp_path
+      ftp_path = excluded.ftp_path,
+      -- workspace never moves on a plain edit (COALESCE preserves it); bing
+      -- account is set/cleared explicitly by the caller.
+      workspace_id = COALESCE(excluded.workspace_id, sites.workspace_id),
+      bing_account_id = excluded.bing_account_id
   `).run(merged);
 }
 
@@ -647,11 +714,17 @@ export interface GoogleAccount {
   access_token: string | null;
   refresh_token: string;
   token_expiry: string | null;
+  workspace_id?: string | null;
   created_at?: string;
 }
 
 export function getAllGoogleAccounts(): GoogleAccount[] {
   return getDb().prepare('SELECT * FROM google_accounts ORDER BY created_at').all() as GoogleAccount[];
+}
+
+/** Google accounts belonging to one workspace (the tenant boundary). */
+export function getGoogleAccountsForWorkspace(workspaceId: string): GoogleAccount[] {
+  return getDb().prepare('SELECT * FROM google_accounts WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as GoogleAccount[];
 }
 
 export function getGoogleAccountById(id: string): GoogleAccount | null {
@@ -662,6 +735,11 @@ export function getGoogleAccountByEmail(email: string): GoogleAccount | null {
   return (getDb().prepare('SELECT * FROM google_accounts WHERE email = ?').get(email) as GoogleAccount | undefined) ?? null;
 }
 
+/** Assign (or move) a Google account to a workspace. */
+export function setGoogleAccountWorkspace(id: string, workspaceId: string): void {
+  getDb().prepare('UPDATE google_accounts SET workspace_id = ? WHERE id = ?').run(workspaceId, id);
+}
+
 export function upsertGoogleAccount(acc: GoogleAccount): void {
   // IMPORTANT: use a real UPSERT, not INSERT OR REPLACE.
   // INSERT OR REPLACE deletes the existing row and inserts a new one, which —
@@ -670,17 +748,23 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
   // token refresh upserts the account roughly hourly, that silently nulled out
   // site→account links a few hours after connecting. ON CONFLICT...DO UPDATE
   // mutates the row in place, so the foreign key (and the site links) survive.
+  //
+  // workspace_id is set on first insert and preserved across refreshes: the
+  // COALESCE keeps the existing workspace if the caller omits it (token
+  // refreshes don't carry a workspace), while still allowing a first
+  // assignment when the row had none.
   getDb().prepare(`
-    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry)
-    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry)
+    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry, workspace_id)
+    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry, @workspace_id)
     ON CONFLICT(id) DO UPDATE SET
       email         = excluded.email,
       client_id     = excluded.client_id,
       client_secret = excluded.client_secret,
       access_token  = excluded.access_token,
       refresh_token = excluded.refresh_token,
-      token_expiry  = excluded.token_expiry
-  `).run(acc);
+      token_expiry  = excluded.token_expiry,
+      workspace_id  = COALESCE(google_accounts.workspace_id, excluded.workspace_id)
+  `).run({ workspace_id: null, ...acc });
 }
 
 export function deleteGoogleAccount(id: string): void {
