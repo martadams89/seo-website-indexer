@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/martadams89/seo-website-indexer/compare/v1.9.0...v1.10.0) (2026-07-04)
+
+
+### ✨ Features
+
+* scannable TOTP QR code + offline account-recovery CLI ([#77](https://github.com/martadams89/seo-website-indexer/issues/77)) ([c570bfa](https://github.com/martadams89/seo-website-indexer/commit/c570bfad2358f126a2cdc27d4ffd5bac32ca9793))
+
 ## [1.9.0](https://github.com/martadams89/seo-website-indexer/compare/v1.8.2...v1.9.0) (2026-07-04)
 
 
