@@ -52,6 +52,7 @@ Search engines only recrawl what they're told about, and AI answer engines only 
 - **Notifications** — run summaries and alerts to Slack, Discord, ntfy, Telegram, email or any generic webhook; each is a first-class channel and fires in parallel
 - **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
 - **Modern auth** — email + password with **TOTP 2FA**, passwordless **passkeys (WebAuthn)**, and optional **SSO / OpenID Connect** (Google or any OIDC provider); DB-backed sessions, scrypt hashing, per-route brute-force limits
+- **Layered per-workspace settings** — every API key (AI providers, CrUX, Bing) and notification channel can be set **per workspace**, overriding an optional **platform default** a super-admin sets for the whole install (or allocates to specific workspaces). True segregation with the flexibility for shared or per-client billing
 - **Single container** — no external database, no Redis, no separate workers
 
 ---
@@ -96,6 +97,15 @@ Users ─┬─ own / belong to ─▶ Workspaces ─┬─▶ Google accounts
 - Manage a workspace under **Settings → Workspace** (rename, add/remove members, add Bing keys). Add teammates (who must already have an account) as members so they can collaborate on that client.
 - **Upgrading from a single-tenant install is automatic**: the first user to sign in claims all pre-existing sites/accounts (and the legacy global Bing key) into their *Default* workspace — nothing is lost.
 - Deleting a user **reassigns their owned workspaces to you** (the acting admin) rather than orphaning that client's data.
+
+### Per-workspace settings (API keys & notifications)
+
+Settings are **layered** so one install can serve many clients with full flexibility:
+
+- Each **workspace** can set its own AI-provider keys (OpenAI/Anthropic/Gemini/xAI/Perplexity), CrUX key, Bing key and notification channels under **Settings → API Keys / Notifications**. These apply only to that workspace.
+- A **super-admin** can set a **platform default** for any key (Settings → API Keys, "Platform default" field) that every workspace inherits unless it overrides — or "allocate" a key to a specific client by editing that workspace's override.
+- Resolution is always *workspace override → platform default*. So you can run entirely on shared platform keys, entirely on per-client keys, or any mix — the foundation for reselling, add-on services or per-client billback.
+- Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; notifications and per-workspace keys are managed by each **workspace owner**.
 
 ### Sign-in methods
 

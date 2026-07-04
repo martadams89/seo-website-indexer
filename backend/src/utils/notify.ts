@@ -12,51 +12,58 @@
  *   webhook   notify_webhook_url                        (generic JSON {title, body})
  *   email     notify_email_to                           (comma-separated; needs SMTP)
  */
-import { getSetting } from '../db/database.js';
+import { getWorkspaceSetting } from '../db/database.js';
 import { sendEmail, emailConfigured } from './email.js';
 
 export type Channel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
 export const CHANNELS: Channel[] = ['slack', 'discord', 'ntfy', 'telegram', 'webhook', 'email'];
+// The settings keys each channel uses (per-workspace).
+export const NOTIFY_KEYS = [
+  'notify_slack_webhook', 'notify_discord_webhook',
+  'notify_ntfy_server', 'notify_ntfy_topic', 'notify_ntfy_token',
+  'notify_telegram_token', 'notify_telegram_chat', 'notify_webhook_url', 'notify_email_to',
+] as const;
 
 export interface ChannelResult { channel: Channel; configured: boolean; ok: boolean; error?: string }
+
+const ws = (workspaceId: string, key: string) => getWorkspaceSetting(workspaceId, key);
 
 async function post(url: string, init: RequestInit): Promise<void> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 }
 
-// ── Per-channel senders (throw on failure) ───────────────────────────────────
+// ── Per-channel senders (throw on failure) — all scoped to one workspace ──────
 
-async function sendSlack(title: string, body: string): Promise<void> {
-  const url = getSetting('notify_slack_webhook');
+async function sendSlack(w: string, title: string, body: string): Promise<void> {
+  const url = ws(w, 'notify_slack_webhook');
   if (!url) throw new Error('not configured');
   await post(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `*${title}*\n${body}` }) });
 }
 
-async function sendDiscord(title: string, body: string): Promise<void> {
-  const url = getSetting('notify_discord_webhook');
+async function sendDiscord(w: string, title: string, body: string): Promise<void> {
+  const url = ws(w, 'notify_discord_webhook');
   if (!url) throw new Error('not configured');
   await post(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: `**${title}**\n${body}`.slice(0, 1900) }) });
 }
 
-async function sendNtfy(title: string, body: string): Promise<void> {
-  const topic = getSetting('notify_ntfy_topic');
+async function sendNtfy(w: string, title: string, body: string): Promise<void> {
+  const topic = ws(w, 'notify_ntfy_topic');
   if (!topic) throw new Error('not configured');
-  const server = (getSetting('notify_ntfy_server') || 'https://ntfy.sh').replace(/\/$/, '');
-  const token = getSetting('notify_ntfy_token');
+  const server = (ws(w, 'notify_ntfy_server') || 'https://ntfy.sh').replace(/\/$/, '');
+  const token = ws(w, 'notify_ntfy_token');
   const headers: Record<string, string> = {
     'Content-Type': 'text/plain',
     Title: title.replace(/[^\x20-\x7E]/g, ''), // ntfy header must be ASCII
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  // If the topic value is itself a full URL, use it directly; else server/topic.
   const url = /^https?:\/\//.test(topic) ? topic : `${server}/${topic}`;
   await post(url, { method: 'POST', headers, body });
 }
 
-async function sendTelegram(title: string, body: string): Promise<void> {
-  const token = getSetting('notify_telegram_token');
-  const chat = getSetting('notify_telegram_chat');
+async function sendTelegram(w: string, title: string, body: string): Promise<void> {
+  const token = ws(w, 'notify_telegram_token');
+  const chat = ws(w, 'notify_telegram_chat');
   if (!token || !chat) throw new Error('not configured');
   await post(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -64,10 +71,10 @@ async function sendTelegram(title: string, body: string): Promise<void> {
   });
 }
 
-// Generic webhook. Retains light auto-detection so an existing install that put
-// a Slack/Discord/ntfy URL in this single field keeps working after the upgrade.
-async function sendWebhook(title: string, body: string): Promise<void> {
-  const url = getSetting('notify_webhook_url');
+// Generic webhook. Retains light auto-detection so a value migrated from the old
+// single global field keeps working when it points at Slack/Discord/ntfy.
+async function sendWebhook(w: string, title: string, body: string): Promise<void> {
+  const url = ws(w, 'notify_webhook_url');
   if (!url) throw new Error('not configured');
   let headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let payload: string;
@@ -84,38 +91,38 @@ async function sendWebhook(title: string, body: string): Promise<void> {
   await post(url, { method: 'POST', headers, body: payload });
 }
 
-async function sendEmailChannel(title: string, body: string): Promise<void> {
-  const to = getSetting('notify_email_to');
+async function sendEmailChannel(w: string, title: string, body: string): Promise<void> {
+  const to = ws(w, 'notify_email_to');
   if (!to) throw new Error('not configured');
   if (!emailConfigured()) throw new Error('SMTP is not configured (set SMTP_HOST)');
   const ok = await sendEmail({ to, subject: title, text: body });
   if (!ok) throw new Error('mail server did not accept the message');
 }
 
-const SENDERS: Record<Channel, (t: string, b: string) => Promise<void>> = {
+const SENDERS: Record<Channel, (w: string, t: string, b: string) => Promise<void>> = {
   slack: sendSlack, discord: sendDiscord, ntfy: sendNtfy,
   telegram: sendTelegram, webhook: sendWebhook, email: sendEmailChannel,
 };
 
-/** Which channels have config present (for the UI + test). */
-export function configuredChannels(): Channel[] {
+/** Which channels a workspace has configured (for the UI + test). */
+export function configuredChannels(workspaceId: string): Channel[] {
   return CHANNELS.filter(c => {
     switch (c) {
-      case 'slack': return !!getSetting('notify_slack_webhook');
-      case 'discord': return !!getSetting('notify_discord_webhook');
-      case 'ntfy': return !!getSetting('notify_ntfy_topic');
-      case 'telegram': return !!(getSetting('notify_telegram_token') && getSetting('notify_telegram_chat'));
-      case 'webhook': return !!getSetting('notify_webhook_url');
-      case 'email': return !!getSetting('notify_email_to') && emailConfigured();
+      case 'slack': return !!ws(workspaceId, 'notify_slack_webhook');
+      case 'discord': return !!ws(workspaceId, 'notify_discord_webhook');
+      case 'ntfy': return !!ws(workspaceId, 'notify_ntfy_topic');
+      case 'telegram': return !!(ws(workspaceId, 'notify_telegram_token') && ws(workspaceId, 'notify_telegram_chat'));
+      case 'webhook': return !!ws(workspaceId, 'notify_webhook_url');
+      case 'email': return !!ws(workspaceId, 'notify_email_to') && emailConfigured();
     }
   });
 }
 
-async function dispatch(title: string, body: string, only?: Channel[]): Promise<ChannelResult[]> {
-  const targets = only ?? configuredChannels();
+async function dispatch(workspaceId: string, title: string, body: string, only?: Channel[]): Promise<ChannelResult[]> {
+  const targets = only ?? configuredChannels(workspaceId);
   return Promise.all(targets.map(async (channel): Promise<ChannelResult> => {
     try {
-      await SENDERS[channel](title, body);
+      await SENDERS[channel](workspaceId, title, body);
       return { channel, configured: true, ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -124,17 +131,18 @@ async function dispatch(title: string, body: string, only?: Channel[]): Promise<
   }));
 }
 
-/** Fan a notification out to every configured channel. True if any succeeded. */
-export async function sendNotification(title: string, body: string): Promise<boolean> {
-  const results = await dispatch(title, body);
+/** Fan a notification out to every channel configured for a workspace. True if any succeeded. */
+export async function sendWorkspaceNotification(workspaceId: string, title: string, body: string): Promise<boolean> {
+  const results = await dispatch(workspaceId, title, body);
   return results.some(r => r.ok);
 }
 
-/** Send a test message to every configured channel and report per-channel results. */
-export async function sendTestNotification(): Promise<ChannelResult[]> {
-  const configured = configuredChannels();
+/** Send a test message to every configured channel for a workspace, with per-channel results. */
+export async function sendTestNotification(workspaceId: string): Promise<ChannelResult[]> {
+  const configured = configuredChannels(workspaceId);
   if (configured.length === 0) return [];
   return dispatch(
+    workspaceId,
     'SEO Website Indexer — test notification',
     'If you can read this, notifications are working. 🎉',
     configured,

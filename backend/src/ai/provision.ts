@@ -7,7 +7,7 @@
  * Requires the cloud-platform OAuth scope: accounts linked before that scope
  * was added must be re-linked once (surfaced as a friendly error).
  */
-import { getSetting, setSetting } from '../db/database.js';
+import { effectiveSetting, setSetting, setWorkspaceSetting } from '../db/database.js';
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 import { logSystem } from '../utils/logger.js';
 
@@ -42,8 +42,8 @@ function deriveProjectNumber(clientId: string | null | undefined): string | null
   return m ? m[1] : null;
 }
 
-export async function provisionGeminiKey(accountId: string, clientId?: string | null): Promise<{ ok: true; project: string } | { ok: false; error: string; needsRelink?: boolean }> {
-  const project = getSetting('google_project_id') || deriveProjectNumber(clientId);
+export async function provisionGeminiKey(accountId: string, clientId?: string | null, workspaceId: string | null = null): Promise<{ ok: true; project: string } | { ok: false; error: string; needsRelink?: boolean }> {
+  const project = effectiveSetting(workspaceId, 'google_project_id') || deriveProjectNumber(clientId);
   if (!project) {
     return { ok: false, error: 'Could not determine your Google Cloud project — set "Google Cloud project ID" in Settings (the project that owns your OAuth client).' };
   }
@@ -75,7 +75,10 @@ export async function provisionGeminiKey(accountId: string, clientId?: string | 
     }
     if (!keyString) return { ok: false, error: 'Key creation did not complete in time — check the Google Cloud console and retry.' };
 
-    setSetting('gemini_api_key', keyString);
+    // Save into the workspace's override when provisioned from a workspace, else
+    // as the platform default.
+    if (workspaceId) setWorkspaceSetting(workspaceId, 'gemini_api_key', keyString);
+    else setSetting('gemini_api_key', keyString);
     logSystem('ok', `Gemini API key provisioned on project ${project} and saved.`);
     return { ok: true, project };
   } catch (e) {

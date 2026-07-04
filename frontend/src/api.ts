@@ -293,10 +293,18 @@ export const api = {
       method: 'PUT', body: JSON.stringify(data),
     }),
 
-  // Notifications
+  // Notifications (per-workspace)
   notificationsStatus: () => apiFetch<{ configured: NotifyChannel[] }>('/api/notifications/status'),
+  getNotifyConfig: () => apiFetch<Record<string, string>>('/api/notifications/config'),
+  saveNotifyConfig: (data: Record<string, string>) =>
+    apiFetch<{ ok: boolean }>('/api/notifications/config', { method: 'PUT', body: JSON.stringify(data) }),
   testNotifications: () =>
     apiFetch<{ results: NotifyChannelResult[] }>('/api/notifications/test', { method: 'POST' }),
+
+  // Per-workspace API-key overrides (layered over platform defaults)
+  getWorkspaceKeys: () => apiFetch<{ keys: Record<string, { override: boolean; platform: boolean }> }>('/api/workspace/keys'),
+  saveWorkspaceKeys: (data: Record<string, string>) =>
+    apiFetch<{ ok: boolean }>('/api/workspace/keys', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Quota & failures
   getQuotaToday: () => apiFetch<QuotaSummary>('/api/quota/today'),

@@ -8,7 +8,7 @@
  * configured provider best-suited to writing. No web-search tools — this is a
  * pure generation call driven entirely by the context we supply.
  */
-import { getSetting, getUrlsBySite, type Site } from '../db/database.js';
+import { effectiveSetting, getUrlsBySite, type Site } from '../db/database.js';
 import { isNonHtmlUrl } from './../indexer/sitemap.js';
 
 // ── Provider text completion (no web search) ─────────────────────────────────
@@ -21,8 +21,8 @@ const GEN_KEY: Record<GenProvider, string> = {
   xai: 'xai_api_key', perplexity: 'perplexity_api_key',
 };
 
-export function llmsGenerationProvider(): GenProvider | null {
-  return GEN_ORDER.find(p => !!getSetting(GEN_KEY[p])) ?? null;
+export function llmsGenerationProvider(workspaceId: string | null = null): GenProvider | null {
+  return GEN_ORDER.find(p => !!effectiveSetting(workspaceId, GEN_KEY[p])) ?? null;
 }
 
 const TIMEOUT = 90_000;
@@ -182,10 +182,11 @@ export function buildUserPrompt(ctx: SiteContext): string {
 export interface GeneratedLlms { content: string; provider: GenProvider; model: string; pagesScanned: number }
 
 export async function generateLlmsTxt(site: Site): Promise<GeneratedLlms> {
-  const provider = llmsGenerationProvider();
+  const ws = site.workspace_id ?? null;
+  const provider = llmsGenerationProvider(ws);
   if (!provider) throw Object.assign(new Error('No AI provider configured. Add an OpenAI, Anthropic, Gemini, xAI or Perplexity key in Settings → API Keys.'), { statusCode: 400 });
   const ctx = await gatherSiteContext(site);
-  const key = getSetting(GEN_KEY[provider])!;
+  const key = effectiveSetting(ws, GEN_KEY[provider])!;
   const { text, model } = await complete(provider, key, SYSTEM_PROMPT, buildUserPrompt(ctx));
   // Strip any accidental code fences the model may add.
   const content = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```\s*$/i, '').trim() + '\n';

@@ -51,6 +51,8 @@ import {
   getAllSettings,
   getSetting,
   setSetting,
+  getWorkspaceSettings,
+  setWorkspaceSetting,
   getRecentLogs,
   getLogsForRun,
   getRecentRuns,
@@ -108,7 +110,7 @@ import {
   createPasswordReset, consumePasswordReset, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
-import { sendTestNotification, configuredChannels } from './utils/notify.js';
+import { sendTestNotification, configuredChannels, NOTIFY_KEYS } from './utils/notify.js';
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
@@ -1118,18 +1120,12 @@ app.get('/api/logs/stream', async (req, reply) => {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-// Keys that are safe to expose to the frontend (exclude sensitive auth tokens)
-const PUBLIC_SETTINGS = [
-  'cron_schedule', 'google_project_id',
-  // Notification channels (each provider is independently configurable).
-  'notify_webhook_url',
-  'notify_slack_webhook', 'notify_discord_webhook',
-  'notify_ntfy_server', 'notify_ntfy_topic', 'notify_ntfy_token',
-  'notify_telegram_token', 'notify_telegram_chat',
-  'notify_email_to',
-];
+// Platform-level (instance) settings the frontend may read plainly. Notification
+// channels are NOT here — they're per-workspace now (see /api/notifications/*).
+const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id'];
 // Write-only secrets: settable via PUT, never echoed back — GET returns
-// `<key>_configured` booleans instead.
+// `<key>_configured` booleans instead. These are the PLATFORM DEFAULTS; each
+// workspace can override any of them (see /api/workspace/keys).
 const SECRET_SETTINGS = [
   'bing_api_key', 'crux_api_key',
   'openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'perplexity_api_key', 'xai_api_key',
@@ -1149,12 +1145,12 @@ app.get('/api/settings', async () => {
   return pub;
 });
 
-app.put('/api/settings', async (req) => {
+// Platform defaults are instance-wide → super-admin only.
+app.put('/api/settings', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
   const body = req.body as Record<string, string>;
-  for (const key of [...PUBLIC_SETTINGS, ...SECRET_SETTINGS]) {
-    if (body[key] !== undefined) {
-      setSetting(key, String(body[key]));
-    }
+  for (const key of PUBLIC_SETTINGS) {
+    if (body[key] !== undefined) setSetting(key, String(body[key]));
   }
   for (const key of SECRET_SETTINGS) {
     if (body[key] !== undefined) {
@@ -1163,19 +1159,71 @@ app.put('/api/settings', async (req) => {
       setSetting(key, value);              // empty string clears the secret
     }
   }
-  // If cron changed, restart scheduler
-  if (body.cron_schedule !== undefined) {
-    restartScheduler();
+  if (body.cron_schedule !== undefined) restartScheduler();
+  return { ok: true };
+});
+
+// ── Per-workspace API-key overrides (layered over the platform defaults) ──────
+// Each workspace can supply its own AI/CrUX/Bing keys; absent → inherit the
+// platform default. Workspace owners manage their own; a super-admin any.
+const WORKSPACE_KEYS = SECRET_SETTINGS; // same catalogue, resolved per-workspace
+
+app.get('/api/workspace/keys', async (req) => {
+  const wsId = currentWorkspace(req);
+  const overrides = wsId ? getWorkspaceSettings(wsId) : {};
+  const platform = getAllSettings();
+  // Never echo secrets — report, per key, whether the workspace overrides it and
+  // whether a platform default exists to fall back on.
+  return {
+    keys: Object.fromEntries(WORKSPACE_KEYS.map(k => [k, {
+      override: !!overrides[k],
+      platform: !!platform[k],
+    }])),
+  };
+});
+
+app.put('/api/workspace/keys', async (req, reply) => {
+  const wsId = requireWorkspace(req);
+  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change its keys.' });
+  const body = (req.body ?? {}) as Record<string, string>;
+  for (const key of WORKSPACE_KEYS) {
+    if (body[key] === undefined) continue;
+    const value = String(body[key]).trim();
+    if (value === SECRET_MASK) continue;          // unchanged placeholder
+    setWorkspaceSetting(wsId, key, value);        // empty string clears the override → inherit platform
   }
   return { ok: true };
 });
 
-// Which notification channels are currently configured (for the Settings UI).
-app.get('/api/notifications/status', async () => ({ configured: configuredChannels() }));
+// ── Notifications (per-workspace) ────────────────────────────────────────────
+// Which channels the active workspace has configured (for the Settings UI).
+app.get('/api/notifications/status', async (req) => {
+  const wsId = currentWorkspace(req);
+  return { configured: wsId ? configuredChannels(wsId) : [] };
+});
 
-// Fire a test message at every configured channel; report per-channel results.
-app.post('/api/notifications/test', async () => {
-  const results = await sendTestNotification();
+// The active workspace's channel config values (URLs/topics are shown so the
+// owner can edit them; there are no separate platform notification defaults).
+app.get('/api/notifications/config', async (req) => {
+  const wsId = currentWorkspace(req);
+  const vals = wsId ? getWorkspaceSettings(wsId) : {};
+  return Object.fromEntries(NOTIFY_KEYS.map(k => [k, vals[k] ?? '']));
+});
+
+app.put('/api/notifications/config', async (req, reply) => {
+  const wsId = requireWorkspace(req);
+  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change notifications.' });
+  const body = (req.body ?? {}) as Record<string, string>;
+  for (const key of NOTIFY_KEYS) {
+    if (body[key] !== undefined) setWorkspaceSetting(wsId, key, String(body[key]));
+  }
+  return { ok: true };
+});
+
+// Fire a test at the active workspace's channels; report per-channel results.
+app.post('/api/notifications/test', async (req) => {
+  const wsId = currentWorkspace(req);
+  const results = wsId ? await sendTestNotification(wsId) : [];
   return { results };
 });
 
@@ -1598,7 +1646,7 @@ app.get('/api/sites/:id/hygiene', async (req, reply) => {
 app.post('/api/crux/:siteId/refresh', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  if (!cruxConfigured()) return reply.code(400).send({ error: 'CrUX API key not configured' });
+  if (!cruxConfigured(site.workspace_id ?? null)) return reply.code(400).send({ error: 'CrUX API key not configured' });
   const result = await fetchCrux(site);
   return result ?? { error: 'Origin not in the CrUX dataset (insufficient traffic)' };
 });
@@ -1623,9 +1671,9 @@ app.delete('/api/ai/prompts/:id', async (req) => {
 
 app.get('/api/ai/results', async () => getResults());
 app.post('/api/ai/run/:promptId', async (req) => ({
-  results: await runPrompt(Number((req.params as { promptId: string }).promptId)),
+  results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)),
 }));
-app.post('/api/ai/run-all', async () => ({ ran: await runAllPrompts() }));
+app.post('/api/ai/run-all', async (req) => ({ ran: await runAllPrompts(currentWorkspace(req)) }));
 
 // Conversation thread for one prompt × provider (root run + follow-ups).
 app.get('/api/ai/prompts/:id/thread/:provider', async (req) => {
@@ -1639,7 +1687,7 @@ app.post('/api/ai/prompts/:id/reply', async (req, reply) => {
   const { provider, message } = (req.body ?? {}) as { provider?: string; message?: string };
   if (!provider || !message?.trim()) return reply.code(400).send({ error: 'provider and message required' });
   try {
-    return await replyInThread(Number(id), provider as Provider, message.trim());
+    return await replyInThread(Number(id), provider as Provider, message.trim(), currentWorkspace(req));
   } catch (e) {
     return reply.code(422).send({ error: e instanceof Error ? e.message : 'reply failed' });
   }
@@ -1654,7 +1702,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
   const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
   const account = account_id ? accounts.find(a => a.id === account_id) : accounts[0];
   if (!account) return reply.code(400).send({ error: 'No Google account linked yet (Accounts page).' });
-  const result = await provisionGeminiKey(account.id, account.client_id);
+  const result = await provisionGeminiKey(account.id, account.client_id, ws);
   if (!result.ok) return reply.code(422).send(result);
   return result;
 });
