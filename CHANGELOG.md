@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/martadams89/seo-website-indexer/compare/v1.2.2...v1.2.3) (2026-07-04)
+
+
+### 🧹 Maintenance
+
+* **renovate:** auto-merge majors too — trust CI, not semver ([#47](https://github.com/martadams89/seo-website-indexer/issues/47)) ([5c2ec83](https://github.com/martadams89/seo-website-indexer/commit/5c2ec83a2a312de4a6979b3e377fa5c9a5b7106a))
+
 ## [1.2.2](https://github.com/martadams89/seo-website-indexer/compare/v1.2.1...v1.2.2) (2026-07-04)
 
 
