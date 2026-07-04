@@ -330,6 +330,11 @@ function initSchema(db: Database.Database): void {
   if (!siteCols.some(c => c.name === 'geo_manage')) {
     db.exec("ALTER TABLE sites ADD COLUMN geo_manage INTEGER DEFAULT 0;");
   }
+  // AI-generated (or hand-edited) llms.txt body; when set, it's what gets
+  // deployed instead of the minimal built-in template.
+  if (!siteCols.some(c => c.name === 'llms_txt_content')) {
+    db.exec("ALTER TABLE sites ADD COLUMN llms_txt_content TEXT;");
+  }
   // Multi-tenant: which workspace a site belongs to, and which Bing account it submits through.
   if (!siteCols.some(c => c.name === 'workspace_id')) {
     db.exec("ALTER TABLE sites ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
@@ -497,6 +502,7 @@ export interface Site {
   ftp_pass?: string | null;
   ftp_path?: string | null;
   geo_manage?: number | null;
+  llms_txt_content?: string | null;
   workspace_id?: string | null;
   bing_account_id?: string | null;
 }
@@ -568,6 +574,12 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
 
 export function deleteSite(id: string): void {
   getDb().prepare('DELETE FROM sites WHERE id = ?').run(id);
+}
+
+/** Persist a custom (AI-generated or hand-edited) llms.txt body for a site.
+ *  Pass null/empty to clear it and fall back to the built-in template. */
+export function setSiteLlmsContent(id: string, content: string | null): void {
+  getDb().prepare('UPDATE sites SET llms_txt_content = ? WHERE id = ?').run(content && content.trim() ? content : null, id);
 }
 
 // ── URL state helpers ─────────────────────────────────────────────────────────

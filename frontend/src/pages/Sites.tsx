@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Plus, Trash2, ShieldCheck, ExternalLink, Copy, Check, Play, Zap,
   Globe2, KeyRound, Settings2, UploadCloud, AlertTriangle, ChevronRight,
+  Sparkles, Loader2, Save,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../AppContext';
@@ -552,6 +553,80 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
 
 // ── Delivery & GEO tab: FTP/webhook + managed vs monitor-only ─────────────────
 
+// AI-generated llms.txt: gather the site's real pages and have a configured LLM
+// write a comprehensive, spec-compliant manifest. Editable + saved per site.
+function AiLlmsSection({ site, onSaved }: { site: Site; onSaved: () => void }) {
+  const [content, setContent] = useState(site.llms_txt_content || '');
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [meta, setMeta] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    api.getLlmsAudit(site.id).then(a => { setAiProvider(a.aiProvider); if (a.custom) setContent(a.custom); }).catch(() => null);
+  }, [site.id]);
+
+  async function generate() {
+    setGenerating(true); setMsg(null); setMeta(null);
+    try {
+      const r = await api.generateLlms(site.id);
+      setContent(r.content);
+      setMeta(`Generated with ${r.provider} (${r.model}) from ${r.pagesScanned} pages. Review, edit, then Save.`);
+    } catch (e) {
+      setMsg({ ok: false, text: String(e).replace('Error: ', '') });
+    }
+    setGenerating(false);
+  }
+  async function save() {
+    setSaving(true); setMsg(null);
+    try { await api.saveLlms(site.id, content); setMsg({ ok: true, text: 'Saved. This llms.txt will be deployed (managed mode).' }); onSaved(); }
+    catch (e) { setMsg({ ok: false, text: String(e).replace('Error: ', '') }); }
+    setSaving(false);
+  }
+
+  return (
+    <div className="ai-llms">
+      <h4 className="panel-title" style={{ marginTop: 20 }}><Sparkles size={13} /> llms.txt content</h4>
+      <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+        {aiProvider
+          ? <>Generate a rich, spec-compliant <code>llms.txt</code> from your site's real pages using your <strong>{aiProvider}</strong> key, or write your own below. When set, this is what gets deployed (an <code>llms-sitemap.xml</code> is deployed alongside).</>
+          : <>Write your <code>llms.txt</code> below, or add an AI provider key (Settings → API Keys) to generate one automatically from your site's pages.</>}
+      </p>
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <button className="btn btn-primary btn-sm" disabled={generating || !aiProvider} onClick={generate} title={aiProvider ? undefined : 'Add an OpenAI/Anthropic/Gemini/xAI/Perplexity key first'}>
+          {generating ? <><Loader2 className="spin" size={13} /> Generating…</> : <><Sparkles size={13} /> Generate with AI</>}
+        </button>
+        {content && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+            {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+          </button>
+        )}
+      </div>
+      {meta && <div className="text-dim" style={{ fontSize: 11, marginBottom: 6 }}>{meta}</div>}
+      <textarea
+        className="input"
+        style={{ minHeight: 240, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }}
+        placeholder={'# Your Site\n\n> One-line summary of what your site is.\n\n## Docs\n- [Page title](https://example.com/page): what it covers.'}
+        value={content}
+        onChange={e => setContent(e.target.value)}
+      />
+      <div className="flex items-center gap-3 mt-2">
+        <button className="btn btn-primary btn-sm" disabled={saving} onClick={save}>
+          {saving ? <><Loader2 className="spin" size={13} /> Saving…</> : <><Save size={13} /> Save llms.txt</>}
+        </button>
+        {content && (
+          <button className="btn btn-secondary btn-sm" disabled={saving} onClick={() => { setContent(''); api.saveLlms(site.id, '').then(() => { setMsg({ ok: true, text: 'Cleared — will fall back to the built-in template.' }); onSaved(); }); }}>
+            Clear
+          </button>
+        )}
+        {msg && <span style={{ fontSize: 12, color: msg.ok ? 'var(--ok)' : 'var(--error)' }}>{msg.text}</span>}
+      </div>
+    </div>
+  );
+}
+
 function DeliveryTab({ site, onSaved }: { site: Site; onSaved: () => void }) {
   const [deployWebhookUrl, setDeployWebhookUrl] = useState(site.deploy_webhook_url || '');
   const [ftpHost, setFtpHost] = useState(site.ftp_host || '');
@@ -607,6 +682,8 @@ function DeliveryTab({ site, onSaved }: { site: Site; onSaved: () => void }) {
           </div>
         </div>
       </label>
+
+      <AiLlmsSection site={site} onSaved={onSaved} />
 
       <h4 className="panel-title" style={{ marginTop: 16 }}>
         <UploadCloud size={13} /> Delivery method
