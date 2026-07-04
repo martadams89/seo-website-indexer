@@ -1,24 +1,47 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, Bell, BellOff, ChevronRight, TrendingUp } from 'lucide-react';
-import { api, type AnalyticsOverview, type AlertRow } from '../api';
+import { RefreshCw, Bell, BellOff, ChevronRight, TrendingUp, TrendingDown, Minus, Activity, ArrowDownRight } from 'lucide-react';
+import { api, type AnalyticsOverview, type AlertRow, type SiteMover, type SiteMoverMetric } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { useApp } from '../AppContext';
 
 const SEVERITY_COLOR: Record<string, string> = { info: 'var(--info)', warn: 'var(--warn)', error: 'var(--error)' };
 
+const fmtInt = (n: number) => Math.round(n).toLocaleString();
+
+// Metric-aware WoW delta cell. `lowerIsBetter` flips colour for position.
+function MoverDelta({ m, lowerIsBetter = false, label }: { m: SiteMoverMetric; lowerIsBetter?: boolean; label: string }) {
+  const flat = Math.abs(m.changePct) < 0.5 || (m.current === 0 && m.previous === 0);
+  const improved = lowerIsBetter ? m.changePct < 0 : m.changePct > 0;
+  const color = flat ? 'var(--text-dim)' : improved ? 'var(--ok)' : 'var(--error)';
+  const Icon = flat ? Minus : m.changePct > 0 ? TrendingUp : TrendingDown;
+  return (
+    <div className="mover-metric">
+      <span className="mover-metric-label">{label}</span>
+      <span className="mover-metric-val">{lowerIsBetter ? m.current.toFixed(1) : fmtInt(m.current)}</span>
+      <span className="mover-metric-delta" style={{ color }}><Icon size={10} /> {flat ? '—' : `${Math.abs(m.changePct).toFixed(0)}%`}</span>
+    </div>
+  );
+}
+
 export default function AnalyticsPage() {
   const { toast } = useApp();
   const [data, setData] = useState<AnalyticsOverview | null>(null);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [movers, setMovers] = useState<SiteMover[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAcked, setShowAcked] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [overview, alertRows] = await Promise.all([api.getAnalyticsOverview(), api.getAlerts()]);
+      const [overview, alertRows, moverRows] = await Promise.all([
+        api.getAnalyticsOverview(),
+        api.getAlerts(),
+        api.getMovers().catch(() => [] as SiteMover[]),
+      ]);
       setData(overview);
       setAlerts(alertRows);
+      setMovers(moverRows);
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Failed to load analytics');
     }
@@ -108,6 +131,29 @@ export default function AnalyticsPage() {
         })}
       </div>
 
+      {/* Search movers (WoW) */}
+      {movers.length > 0 && (
+        <>
+          <h2 className="section-title" style={{ marginTop: 28 }}><Activity size={14} /> Search movers <span className="text-dim" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· Google, last 7d vs prior 7d</span></h2>
+          <div className="movers-list">
+            {movers.slice(0, 12).map(m => (
+              <Link key={m.site_id} to={`/analytics/${m.site_id}`} className="mover-row">
+                <div className="mover-site">
+                  <div className="mover-site-name">{m.name}</div>
+                  <div className="mover-site-domain">{m.domain}</div>
+                </div>
+                <div className="mover-metrics">
+                  <MoverDelta m={m.clicks} label="Clicks" />
+                  <MoverDelta m={m.impressions} label="Impr." />
+                  <MoverDelta m={m.position} label="Pos." lowerIsBetter />
+                </div>
+                <ChevronRight size={15} className="text-dim mover-chevron" />
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* Alerts feed */}
       <div className="flex items-center gap-2" style={{ marginTop: 28, marginBottom: 10, justifyContent: 'space-between' }}>
         <h2 className="section-title" style={{ margin: 0 }}><Bell size={14} /> Alerts</h2>
@@ -123,8 +169,11 @@ export default function AnalyticsPage() {
             <div key={a.id} className={`alert-row${a.acked ? ' acked' : ''}`}>
               <span className="alert-dot" style={{ background: SEVERITY_COLOR[a.severity] ?? 'var(--warn)' }} />
               <div className="alert-body">
-                <div className="alert-msg">{a.message}</div>
-                <div className="alert-meta">{a.kind} · {a.domain ?? 'all sites'} · {new Date(a.created_at + 'Z').toLocaleString()}</div>
+                <div className="alert-msg">
+                  {a.kind === 'query_drop' && <ArrowDownRight size={12} style={{ color: 'var(--error)', verticalAlign: 'middle', marginRight: 4 }} />}
+                  {a.message}
+                </div>
+                <div className="alert-meta">{a.kind === 'query_drop' ? 'ranking drop' : a.kind} · {a.domain ?? 'all sites'} · {new Date(a.created_at + 'Z').toLocaleString()}</div>
               </div>
               {!a.acked && (
                 <button className="btn btn-ghost btn-sm" onClick={() => ack(a.id)}>Ack</button>

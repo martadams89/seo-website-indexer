@@ -1614,3 +1614,27 @@ body {
   display: inline-flex; padding: 2px; border-radius: 50%;
 }
 .tracked-chip-x:hover { color: var(--error); background: var(--bg-overlay); }
+
+/* ── Portfolio search movers ──────────────────────────────────────────────── */
+.movers-list { display: grid; gap: 6px; }
+.mover-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px; text-decoration: none; color: inherit;
+  background: var(--bg-overlay); border: 1px solid var(--border); border-radius: var(--radius-md);
+  transition: border-color .15s;
+}
+.mover-row:hover { border-color: var(--accent, #7c6cf5); }
+.mover-site { flex: 1; min-width: 0; }
+.mover-site-name { font-weight: 700; font-size: 13px; }
+.mover-site-domain { font-size: 11px; color: var(--text-dim); }
+.mover-metrics { display: flex; gap: 18px; flex-wrap: wrap; }
+.mover-metric { display: flex; flex-direction: column; align-items: flex-end; min-width: 58px; }
+.mover-metric-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
+.mover-metric-val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.mover-metric-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 700; }
+.mover-chevron { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .mover-row { flex-wrap: wrap; }
+  .mover-metrics { gap: 14px; width: 100%; justify-content: space-between; }
+  .mover-chevron { display: none; }
+}

@@ -87,7 +87,7 @@ import { getOverview, getSiteDetail, getAlerts, ackAlert, snapshotAllSites, reco
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
-import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery } from './analytics/perf-store.js';
+import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
 import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, getThread, replyInThread, type Provider } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
@@ -775,6 +775,9 @@ app.get('/api/analytics/site/:id', async (req, reply) => {
 app.post('/api/analytics/snapshot', async () => ({ snapshots: snapshotAllSites().length }));
 
 app.get('/api/analytics/alerts', async () => getAlerts());
+
+// Portfolio-wide Google search movers (WoW) for the Analytics landing page.
+app.get('/api/analytics/movers', async () => getPortfolioMovers());
 app.post('/api/analytics/alerts/:id/ack', async (req) => {
   ackAlert(Number((req.params as { id: string }).id));
   return { ok: true };

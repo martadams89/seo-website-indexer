@@ -258,6 +258,7 @@ export const api = {
   snapshotStats: () => apiFetch<{ snapshots: number }>('/api/analytics/snapshot', { method: 'POST' }),
   getAlerts: () => apiFetch<AlertRow[]>('/api/analytics/alerts'),
   ackAlert: (id: number) => apiFetch<{ ok: boolean }>(`/api/analytics/alerts/${id}/ack`, { method: 'POST' }),
+  getMovers: () => apiFetch<SiteMover[]>('/api/analytics/movers'),
 
   // ── llms.txt lifecycle ──
   getLlmsAudit: (siteId: string) => apiFetch<LlmsAudit>(`/api/sites/${siteId}/llms-audit`),
@@ -345,6 +346,11 @@ export interface AlertRow {
   id: number; site_id: string | null; domain?: string | null;
   kind: string; severity: 'info' | 'warn' | 'error'; message: string; detail?: string | null;
   acked: number; created_at: string;
+}
+export interface SiteMoverMetric { current: number; previous: number; changePct: number }
+export interface SiteMover {
+  site_id: string; name: string; domain: string;
+  clicks: SiteMoverMetric; impressions: SiteMoverMetric; position: SiteMoverMetric;
 }
 export interface LlmsAudit {
   live: { status: number; text: string };
