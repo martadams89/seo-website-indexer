@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/martadams89/seo-website-indexer/compare/v1.2.0...v1.2.1) (2026-07-04)
+
+
+### 🧹 Maintenance
+
+* **deps:** update node.js to v20.20.2 ([#39](https://github.com/martadams89/seo-website-indexer/issues/39)) ([1f02534](https://github.com/martadams89/seo-website-indexer/commit/1f025342386ff4117a339c0efac7bb392739dd89))
+
 ## [1.2.0](https://github.com/martadams89/seo-website-indexer/compare/v1.1.1...v1.2.0) (2026-07-04)
 
 
