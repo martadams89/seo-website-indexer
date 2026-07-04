@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/martadams89/seo-website-indexer/compare/v1.13.0...v1.13.1) (2026-07-04)
+
+
+### 🐛 Bug Fixes
+
+* clear loading state while AI citation checks run ([#85](https://github.com/martadams89/seo-website-indexer/issues/85)) ([9b3f08e](https://github.com/martadams89/seo-website-indexer/commit/9b3f08ea0d7307750e701e3cfaa592766286ddb5))
+
 ## [1.13.0](https://github.com/martadams89/seo-website-indexer/compare/v1.12.0...v1.13.0) (2026-07-04)
 
 
