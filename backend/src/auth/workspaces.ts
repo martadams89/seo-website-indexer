@@ -129,6 +129,17 @@ export function bootstrapUserWorkspace(user: User, isFirstUser: boolean): Worksp
     if (legacyBing?.value) {
       addBingAccount(ws.id, 'Bing (migrated)', legacyBing.value);
     }
+    // Legacy GLOBAL notification channels move into this workspace (notifications
+    // are per-workspace now). We copy them, leaving the global rows harmless.
+    const NOTIFY_KEYS = [
+      'notify_slack_webhook', 'notify_discord_webhook', 'notify_ntfy_server',
+      'notify_ntfy_topic', 'notify_ntfy_token', 'notify_telegram_token',
+      'notify_telegram_chat', 'notify_webhook_url', 'notify_email_to',
+    ];
+    for (const key of NOTIFY_KEYS) {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+      if (row?.value) db.prepare('INSERT OR REPLACE INTO workspace_settings(workspace_id, key, value) VALUES(?,?,?)').run(ws.id, key, row.value);
+    }
   }
   return ws;
 }
@@ -175,6 +186,9 @@ export function bingKeyForSite(siteId: string): string | null {
   if (site?.workspace_id) {
     const first = db.prepare('SELECT id FROM bing_accounts WHERE workspace_id = ? ORDER BY created_at LIMIT 1').get(site.workspace_id) as { id: string } | undefined;
     if (first) { const k = getBingAccountKey(first.id); if (k) return k; }
+    // Per-workspace single Bing key override (set in the API Keys tab).
+    const wsKey = db.prepare("SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = 'bing_api_key'").get(site.workspace_id) as { value: string } | undefined;
+    if (wsKey?.value) return wsKey.value;
   }
   const legacy = db.prepare("SELECT value FROM settings WHERE key = 'bing_api_key'").get() as { value: string } | undefined;
   return legacy?.value ?? null;

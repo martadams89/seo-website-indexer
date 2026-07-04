@@ -51,7 +51,7 @@ import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
 import { snapshotAllPerformance } from './analytics/perf-store.js';
-import { sendNotification } from './utils/notify.js';
+import { sendWorkspaceNotification, configuredChannels } from './utils/notify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -894,10 +894,28 @@ async function _doRun(
   } catch (e) {
     log(runId, 'warn', `Perf snapshot failed: ${e instanceof Error ? e.message : e}`);
   }
-  sendNotification(
-    isStopped ? 'Indexing run stopped' : 'Indexing run complete',
-    `${run.total_submitted} submitted, ${run.total_skipped} skipped, ${run.total_failed} failed.`
-  ).catch(() => null);
+  // Notifications are per-workspace: each workspace with configured channels
+  // gets a summary of ITS OWN sites from this run (never other tenants' data).
+  try {
+    const byWs = new Map<string, { sites: number; urls: number; errors: number }>();
+    for (const data of siteDataMap.values()) {
+      const wsId = data.site.workspace_id;
+      if (!wsId) continue; // unassigned sites have no workspace to notify
+      const agg = byWs.get(wsId) ?? { sites: 0, urls: 0, errors: 0 };
+      agg.sites += 1;
+      agg.urls += data.newUrls.length + data.changed.length + data.extraNewUrls.length + data.extraChanged.length;
+      if (data.error) agg.errors += 1;
+      byWs.set(wsId, agg);
+    }
+    const title = isStopped ? 'Indexing run stopped' : 'Indexing run complete';
+    for (const [wsId, agg] of byWs) {
+      if (configuredChannels(wsId).length === 0) continue;
+      const body = `${agg.sites} site${agg.sites === 1 ? '' : 's'} processed — ${agg.urls} new/changed URL${agg.urls === 1 ? '' : 's'}${agg.errors ? `, ${agg.errors} with errors` : ''}.`;
+      sendWorkspaceNotification(wsId, title, body).catch(() => null);
+    }
+  } catch (e) {
+    log(runId, 'warn', `Notification dispatch failed: ${e instanceof Error ? e.message : e}`);
+  }
 
   updateRun(runId, {
     status,

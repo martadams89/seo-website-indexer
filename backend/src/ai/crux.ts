@@ -2,10 +2,10 @@
  * Core Web Vitals via the (free, official) Chrome UX Report API.
  * Origin-level p75 for LCP / INP / CLS, snapshotted daily per site.
  */
-import { getDb, getSetting, type Site } from '../db/database.js';
+import { getDb, effectiveSetting, type Site } from '../db/database.js';
 
-export function cruxConfigured(): boolean {
-  return !!getSetting('crux_api_key');
+export function cruxConfigured(workspaceId: string | null = null): boolean {
+  return !!effectiveSetting(workspaceId, 'crux_api_key');
 }
 
 export interface CruxResult {
@@ -15,7 +15,7 @@ export interface CruxResult {
 }
 
 export async function fetchCrux(site: Site): Promise<CruxResult | null> {
-  const key = getSetting('crux_api_key');
+  const key = effectiveSetting(site.workspace_id ?? null, 'crux_api_key');
   if (!key) return null;
   const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
   const res = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${key}`, {

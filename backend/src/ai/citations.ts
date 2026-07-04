@@ -6,7 +6,7 @@
  * Every provider is optional: configure its API key in Settings and it joins
  * the panel; unconfigured providers are skipped silently.
  */
-import { getDb, getSetting, getAllSites } from '../db/database.js';
+import { getDb, effectiveSetting, getAllSites } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
@@ -21,8 +21,8 @@ const KEY_SETTING: Record<Provider, string> = {
   brave: 'brave_api_key',
 };
 
-export function configuredProviders(): Provider[] {
-  return PROVIDERS.filter(p => !!getSetting(KEY_SETTING[p]));
+export function configuredProviders(workspaceId: string | null = null): Provider[] {
+  return PROVIDERS.filter(p => !!effectiveSetting(workspaceId, KEY_SETTING[p]));
 }
 
 interface ProviderAnswer {
@@ -230,12 +230,12 @@ export function getResults(limit = 200): Array<Record<string, unknown>> {
 }
 
 /** Run one prompt against every configured provider; persist + return results. */
-export async function runPrompt(promptId: number): Promise<Array<Record<string, unknown>>> {
+export async function runPrompt(promptId: number, workspaceId: string | null = null): Promise<Array<Record<string, unknown>>> {
   const db = getDb();
   const row = db.prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
   if (!row) throw new Error('Prompt not found');
   const domains = trackedDomains();
-  const providers = configuredProviders();
+  const providers = configuredProviders(workspaceId);
   if (providers.length === 0) throw new Error('No AI provider API keys configured (Settings)');
 
   const insert = db.prepare(`
@@ -244,7 +244,7 @@ export async function runPrompt(promptId: number): Promise<Array<Record<string, 
   `);
 
   const results = await Promise.all(providers.map(async provider => {
-    const key = getSetting(KEY_SETTING[provider])!;
+    const key = effectiveSetting(workspaceId, KEY_SETTING[provider])!;
     try {
       const answer = await ASK[provider]([{ role: 'user', content: row.prompt }], key);
       const found = findDomains(answer, domains);
@@ -266,11 +266,11 @@ export async function runPrompt(promptId: number): Promise<Array<Record<string, 
 }
 
 /** Run all enabled prompts (used by the scheduler's citation sweep). */
-export async function runAllPrompts(): Promise<number> {
+export async function runAllPrompts(workspaceId: string | null = null): Promise<number> {
   const prompts = listPrompts().filter(p => p.enabled);
   let n = 0;
   for (const p of prompts) {
-    try { await runPrompt(p.id); n++; } catch { /* logged in runPrompt */ }
+    try { await runPrompt(p.id, workspaceId); n++; } catch { /* logged in runPrompt */ }
   }
   return n;
 }
@@ -294,12 +294,12 @@ export function getThread(promptId: number, provider: string): AiResultRow[] {
  * Continue the conversation with one provider: rebuild the turn history from
  * the stored thread, append the user's follow-up, ask, persist.
  */
-export async function replyInThread(promptId: number, provider: Provider, followUp: string): Promise<AiResultRow> {
+export async function replyInThread(promptId: number, provider: Provider, followUp: string, workspaceId: string | null = null): Promise<AiResultRow> {
   const db = getDb();
   const promptRow = db.prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
   if (!promptRow) throw new Error('Prompt not found');
   if (provider === 'brave') throw new Error('Brave Search is a retrieval check — it has no conversation to continue.');
-  const key = getSetting(KEY_SETTING[provider]);
+  const key = effectiveSetting(workspaceId, KEY_SETTING[provider]);
   if (!key) throw new Error(`${provider} API key not configured`);
 
   const turns: ChatTurn[] = [];

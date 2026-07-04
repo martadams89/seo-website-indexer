@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus, Send, Loader2, CheckCircle2, XCircle, MessageSquare, AtSign, Webhook } from 'lucide-react';
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
@@ -104,11 +104,11 @@ const CRON_PRESETS = [
 const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boolean }> = [
   { id: 'account',   label: 'Account & Security', icon: ShieldCheck },
   { id: 'workspace', label: 'Workspace', icon: Building2 },
-  { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
-  { id: 'schedule',  label: 'Scheduling', icon: Clock },
-  { id: 'google',    label: 'Google',     icon: User },
   { id: 'keys',      label: 'API Keys',   icon: KeyRound },
   { id: 'notify',    label: 'Notifications', icon: Bell },
+  { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
+  { id: 'schedule',  label: 'Scheduling', icon: Clock, superAdmin: true },
+  { id: 'google',    label: 'Google',     icon: User, superAdmin: true },
 ];
 
 function AccountTab() {
@@ -552,6 +552,8 @@ const NOTIFY_PROVIDERS: NotifyProvider[] = [
 ];
 
 function NotificationsTab() {
+  const { active } = useWorkspace();
+  const canManage = !!active?.is_owner;
   const [vals, setVals] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -560,20 +562,19 @@ function NotificationsTab() {
   const [results, setResults] = useState<NotifyChannelResult[] | null>(null);
 
   useEffect(() => {
-    api.getSettings().then(s => {
-      const rec = s as Record<string, string>;
+    api.getNotifyConfig().then(rec => {
       const keys = NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key));
       const next: Record<string, string> = {};
       for (const k of keys) next[k] = rec[k] ?? '';
       setVals(next);
     }).finally(() => setLoaded(true));
-  }, []);
+  }, [active?.id]);
 
   function set(key: string, v: string) { setVals(prev => ({ ...prev, [key]: v })); setSaved(false); }
 
   async function save() {
     setSaving(true);
-    try { await api.updateSettings(vals); setSaved(true); setTimeout(() => setSaved(false), 3000); }
+    try { await api.saveNotifyConfig(vals); setSaved(true); setTimeout(() => setSaved(false), 3000); }
     finally { setSaving(false); }
   }
   async function sendTest() {
@@ -592,10 +593,11 @@ function NotificationsTab() {
   return (
     <>
       <div className="card mb-4">
-        <div className="card-title"><Bell size={13} /> Notifications</div>
+        <div className="card-title"><Bell size={13} /> Notifications{active ? ` — ${active.name}` : ''}</div>
         <p className="text-dim" style={{ fontSize: 12 }}>
-          Run summaries and alerts (index drops, schema regressions, quota exhaustion, hygiene issues) are pushed after every run.
-          Configure any number of channels below — each notification is sent to <strong>all</strong> of them.
+          These channels belong to the <strong>{active?.name ?? 'current'}</strong> workspace — each workspace notifies its own places.
+          Run summaries and alerts for this workspace's sites are pushed after every run; a notification is sent to <strong>all</strong> configured channels.
+          {!canManage && <> <em>You can view these, but only the workspace owner can change them.</em></>}
         </p>
       </div>
 
@@ -633,10 +635,10 @@ function NotificationsTab() {
       ))}
 
       <div className="flex items-center gap-3" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" disabled={saving} onClick={save}>
+        <button className="btn btn-primary" disabled={saving || !canManage} onClick={save}>
           {saving ? <><Loader2 className="spin" size={13} /> Saving…</> : saved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save channels</>}
         </button>
-        <button className="btn btn-secondary" disabled={testing} onClick={sendTest}>
+        <button className="btn btn-secondary" disabled={testing || !canManage} onClick={sendTest}>
           {testing ? <><Loader2 className="spin" size={13} /> Sending…</> : <><Send size={13} /> Save & send test</>}
         </button>
       </div>
@@ -667,19 +669,131 @@ function NotificationsTab() {
   );
 }
 
+// ── API Keys tab: per-workspace overrides, layered over super-admin platform defaults ──
+function KeysTab() {
+  const { user } = useAuth();
+  const { active } = useWorkspace();
+  const canManage = !!active?.is_owner;
+  const isAdmin = user.is_super_admin;
+  const [keyStatus, setKeyStatus] = useState<Record<string, { override: boolean; platform: boolean }>>({});
+  const [wsVals, setWsVals] = useState<Record<string, string>>({});      // workspace override inputs
+  const [platVals, setPlatVals] = useState<Record<string, string>>({});  // platform default inputs (super-admin)
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const r = await api.getWorkspaceKeys().catch(() => ({ keys: {} as Record<string, { override: boolean; platform: boolean }> }));
+    setKeyStatus(r.keys);
+  }, []);
+  useEffect(() => { load(); }, [load, active?.id]);
+
+  async function save() {
+    setSaving(true); setSaved(false);
+    try {
+      const wsPayload: Record<string, string> = {};
+      for (const [k, v] of Object.entries(wsVals)) if (v !== undefined) wsPayload[k] = v.trim();
+      if (Object.keys(wsPayload).length) await api.saveWorkspaceKeys(wsPayload);
+      if (isAdmin) {
+        const platPayload: Record<string, string> = {};
+        for (const [k, v] of Object.entries(platVals)) if (v.trim()) platPayload[k] = v.trim();
+        if (Object.keys(platPayload).length) await api.updateSettings(platPayload);
+      }
+      setWsVals({}); setPlatVals({});
+      await load();
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
+    } finally { setSaving(false); }
+  }
+
+  function statusBadge(key: string) {
+    const s = keyStatus[key];
+    if (s?.override) return <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>this workspace</span>;
+    if (s?.platform) return <span className="badge" style={{ marginLeft: 'auto', color: 'var(--accent)' }}>platform default</span>;
+    return <span className="badge" style={{ marginLeft: 'auto' }}>not set</span>;
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title"><KeyRound size={13} /> API keys{active ? ` — ${active.name}` : ''}</div>
+      <p className="text-dim" style={{ fontSize: 12, marginBottom: 6 }}>
+        Everything here is optional. Keys you set apply to <strong>this workspace</strong> and override any platform default.
+        Leave a key blank to inherit the platform default{isAdmin ? ' (which you, as a super-admin, can set below each key for all workspaces)' : ' set by an administrator'}.
+        Keys are write-only — stored server-side, never echoed back.
+      </p>
+      <p className="text-dim" style={{ fontSize: 11.5, marginBottom: 14 }}>
+        <strong>Bing Webmaster:</strong> set a single key here, or manage multiple Bing accounts (one per client property) under the <strong>Workspace</strong> tab.
+      </p>
+      {KEY_GUIDES.map(g => (
+        <details key={g.key} className="key-guide" open={!!wsVals[g.key]}>
+          <summary>
+            <span className="key-guide-label">{g.label}</span>
+            {g.free && <span className="badge badge-ok">{g.free}</span>}
+            {statusBadge(g.key)}
+          </summary>
+          <div className="key-guide-body">
+            <p className="text-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>{g.hint}</p>
+            <ol className="key-guide-steps">
+              {g.steps.map((s, i) => (
+                <li key={i}>{s.text}{s.href && <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>}</li>
+              ))}
+            </ol>
+            <label className="input-label" style={{ fontSize: 11 }}>For this workspace ({active?.name})</label>
+            <input
+              className="input"
+              type="password"
+              disabled={!canManage}
+              placeholder={keyStatus[g.key]?.override ? '•••••••• (override set — paste to replace, empty to clear → inherit)' : 'paste key for this workspace…'}
+              value={wsVals[g.key] ?? ''}
+              onChange={e => setWsVals(prev => ({ ...prev, [g.key]: e.target.value }))}
+              autoComplete="off"
+            />
+            {isAdmin && (
+              <div style={{ marginTop: 8 }}>
+                <label className="input-label" style={{ fontSize: 11, color: 'var(--accent)' }}>Platform default (all workspaces)</label>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder={keyStatus[g.key]?.platform ? '•••••••• (set — paste to replace)' : 'paste platform-wide key…'}
+                  value={platVals[g.key] ?? ''}
+                  onChange={e => setPlatVals(prev => ({ ...prev, [g.key]: e.target.value }))}
+                  autoComplete="off"
+                />
+              </div>
+            )}
+            {g.key === 'gemini_api_key' && canManage && (
+              <div style={{ marginTop: 8 }}>
+                <button className="btn btn-secondary btn-sm" disabled={provisioning} onClick={async () => {
+                  setProvisioning(true); setProvisionMsg(null);
+                  try { await api.provisionGeminiKey(); setProvisionMsg('Gemini key created on your Google project and saved to this workspace.'); await load(); }
+                  catch (e) { setProvisionMsg(e instanceof Error ? e.message : 'Provisioning failed'); }
+                  setProvisioning(false);
+                }}>
+                  {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
+                </button>
+                {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
+              </div>
+            )}
+          </div>
+        </details>
+      ))}
+      <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={saving || !canManage} onClick={save}>
+        <Save size={13} /> {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save keys'}
+      </button>
+      {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>Only the workspace owner can set keys for {active?.name}.</p>}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const { status, refresh } = useApp();
-  const [tab, setTab] = useState<Tab>('schedule');
+  const [tab, setTab] = useState<Tab>(user.is_super_admin ? 'schedule' : 'account');
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [keys, setKeys] = useState<Record<string, string>>({});
-  const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<Tab | null>(null);
   const [saved, setSaved] = useState<Tab | null>(null);
   const [clearLoading, setClearLoading] = useState(false);
-  const [provisioning, setProvisioning] = useState(false);
-  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
   async function loadSettings() {
     const s = await api.getSettings().catch(() => null);
@@ -687,11 +801,6 @@ export default function SettingsPage() {
     const rec = s as Record<string, string | boolean>;
     setCronSchedule((rec.cron_schedule as string) ?? '0 3 * * *');
     setProjectId((rec.google_project_id as string) ?? '');
-    const conf: Record<string, boolean> = {};
-    for (const [k, v] of Object.entries(rec)) {
-      if (k.endsWith('_configured')) conf[k.replace(/_configured$/, '')] = !!v;
-    }
-    setConfigured(conf);
   }
 
   useEffect(() => { loadSettings(); }, []);
@@ -701,7 +810,6 @@ export default function SettingsPage() {
     setSaved(null);
     try {
       await api.updateSettings(payload);
-      setKeys({});
       await loadSettings();
       await refresh();
       setSaved(which);
@@ -731,9 +839,6 @@ export default function SettingsPage() {
         {TABS.filter(t => !t.superAdmin || user.is_super_admin).map(t => (
           <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
             <t.icon size={13} /> {t.label}
-            {t.id === 'keys' && (
-              <span className="settings-tab-count">{KEY_GUIDES.filter(g => configured[g.key]).length}/{KEY_GUIDES.length}</span>
-            )}
           </button>
         ))}
       </div>
@@ -839,82 +944,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── API Keys ── */}
-      {tab === 'keys' && (
-        <div className="card">
-          <div className="card-title">API keys</div>
-          <p className="text-dim" style={{ fontSize: 12, marginBottom: 14 }}>
-            Everything here is optional — the indexing loop needs none of it. Keys are write-only: stored server-side,
-            never echoed back. Expand a key for the exact steps to get one.
-          </p>
-          {KEY_GUIDES.map(g => (
-            <details key={g.key} className="key-guide">
-              <summary>
-                <span className="key-guide-label">{g.label}</span>
-                {g.free && <span className="badge badge-ok">{g.free}</span>}
-                {configured[g.key]
-                  ? <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>configured</span>
-                  : <span className="badge" style={{ marginLeft: 'auto' }}>not set</span>}
-              </summary>
-              <div className="key-guide-body">
-                <p className="text-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>{g.hint}</p>
-                <ol className="key-guide-steps">
-                  {g.steps.map((s, i) => (
-                    <li key={i}>
-                      {s.text}
-                      {s.href && (
-                        <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder={configured[g.key] ? '•••••••• (set — paste a new value to replace, save empty to keep)' : 'paste key…'}
-                  value={keys[g.key] ?? ''}
-                  onChange={e => setKeys(prev => ({ ...prev, [g.key]: e.target.value }))}
-                  autoComplete="off"
-                />
-                {g.key === 'gemini_api_key' && (
-                  <div style={{ marginTop: 8 }}>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={provisioning}
-                      onClick={async () => {
-                        setProvisioning(true);
-                        setProvisionMsg(null);
-                        try {
-                          await api.provisionGeminiKey();
-                          setProvisionMsg('Gemini key created on your Google project and saved — no copy-paste needed.');
-                          setConfigured(prev => ({ ...prev, gemini_api_key: true }));
-                        } catch (e) {
-                          setProvisionMsg(e instanceof Error ? e.message : 'Provisioning failed');
-                        }
-                        setProvisioning(false);
-                      }}
-                    >
-                      {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
-                    </button>
-                    {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
-                  </div>
-                )}
-              </div>
-            </details>
-          ))}
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: 12 }}
-            disabled={saving === 'keys'}
-            onClick={() => {
-              const payload: Record<string, string> = {};
-              for (const [k, v] of Object.entries(keys)) if (v.trim()) payload[k] = v.trim();
-              save('keys', payload);
-            }}
-          >
-            <Save size={13} /> {saving === 'keys' ? 'Saving…' : saved === 'keys' ? 'Saved ✓' : 'Save keys'}
-          </button>
-        </div>
-      )}
+      {tab === 'keys' && <KeysTab />}
 
       {/* ── Notifications ── */}
       {tab === 'notify' && <NotificationsTab />}

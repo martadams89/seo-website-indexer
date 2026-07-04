@@ -272,6 +272,16 @@ function initSchema(db: Database.Database): void {
       PRIMARY KEY (workspace_id, user_id)
     );
 
+    -- Per-workspace setting overrides (API keys, notification channels, ...).
+    -- A workspace value takes precedence over the platform default in the
+    -- global settings table; absence means inherit the platform default.
+    CREATE TABLE IF NOT EXISTS workspace_settings (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      key          TEXT NOT NULL,
+      value        TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, key)
+    );
+
     -- Passkeys (WebAuthn credentials) per user.
     CREATE TABLE IF NOT EXISTS passkeys (
       id            TEXT PRIMARY KEY,         -- credential id (base64url)
@@ -480,6 +490,42 @@ export function setSetting(key: string, value: string): void {
 export function getAllSettings(): Record<string, string> {
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+
+// ── Per-workspace setting overrides (layered on top of the platform defaults) ──
+
+export function getWorkspaceSetting(workspaceId: string, key: string): string | null {
+  const row = getDb().prepare('SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ?')
+    .get(workspaceId, key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/** Set (non-empty) or clear (empty → inherit platform default) a workspace override. */
+export function setWorkspaceSetting(workspaceId: string, key: string, value: string): void {
+  const db = getDb();
+  if (value && value.trim()) {
+    db.prepare('INSERT OR REPLACE INTO workspace_settings(workspace_id, key, value) VALUES(?,?,?)').run(workspaceId, key, value);
+  } else {
+    db.prepare('DELETE FROM workspace_settings WHERE workspace_id = ? AND key = ?').run(workspaceId, key);
+  }
+}
+
+export function getWorkspaceSettings(workspaceId: string): Record<string, string> {
+  const rows = getDb().prepare('SELECT key, value FROM workspace_settings WHERE workspace_id = ?').all(workspaceId) as { key: string; value: string }[];
+  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+}
+
+/**
+ * The effective value of a setting for a workspace: the workspace's own
+ * override if present, otherwise the platform default (global `settings`).
+ * Pass a null workspace to get the platform default only.
+ */
+export function effectiveSetting(workspaceId: string | null, key: string): string | null {
+  if (workspaceId) {
+    const override = getWorkspaceSetting(workspaceId, key);
+    if (override) return override;
+  }
+  return getSetting(key);
 }
 
 // ── Site helpers ─────────────────────────────────────────────────────────────
