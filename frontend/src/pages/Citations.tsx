@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare } from 'lucide-react';
 import { api, type AiPrompt, type AiResult } from '../api';
+import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -108,7 +109,7 @@ function Thread({ promptId, promptText, provider, configured, onCitedChange }: {
                     {r.cited ? <span className="badge badge-ok">cited: {parseJson<string[]>(r.domains, []).join(', ')}</span>
                              : <span className="badge">not cited</span>}
                   </div>
-                  <div className="ai-bubble-text">{r.excerpt}</div>
+                  <div className="ai-bubble-text"><Markdown text={r.excerpt ?? ''} /></div>
                   <CitationChips result={r} />
                 </div>
               )}
