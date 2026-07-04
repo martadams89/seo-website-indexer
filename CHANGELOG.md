@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/martadams89/seo-website-indexer/compare/v1.11.0...v1.12.0) (2026-07-04)
+
+
+### ✨ Features
+
+* first-class notification providers (Slack/Discord/ntfy/Telegram/webhook/email) + test ([#81](https://github.com/martadams89/seo-website-indexer/issues/81)) ([f7d4288](https://github.com/martadams89/seo-website-indexer/commit/f7d42881e47c75dad9cb0a29b7bd0e5b1b034974))
+
 ## [1.11.0](https://github.com/martadams89/seo-website-indexer/compare/v1.10.0...v1.11.0) (2026-07-04)
 
 
