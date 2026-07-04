@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.2](https://github.com/martadams89/seo-website-indexer/compare/v1.8.1...v1.8.2) (2026-07-04)
+
+
+### 🧹 Maintenance
+
+* **deps:** update docker/metadata-action action to v6 ([#71](https://github.com/martadams89/seo-website-indexer/issues/71)) ([de294d6](https://github.com/martadams89/seo-website-indexer/commit/de294d62c4703cb4542ca3150ea94f191c1705c1))
+* **deps:** update docker/setup-buildx-action action to v4 ([#72](https://github.com/martadams89/seo-website-indexer/issues/72)) ([4091c0e](https://github.com/martadams89/seo-website-indexer/commit/4091c0e74386f96126c597aa13778ab696424f05))
+* **deps:** update googleapis/release-please-action action to v5 ([#73](https://github.com/martadams89/seo-website-indexer/issues/73)) ([5c50b7e](https://github.com/martadams89/seo-website-indexer/commit/5c50b7ebc61b6bdfc181b51aa746aac178ca00e9))
+
 ## [1.8.1](https://github.com/martadams89/seo-website-indexer/compare/v1.8.0...v1.8.1) (2026-07-04)
 
 
