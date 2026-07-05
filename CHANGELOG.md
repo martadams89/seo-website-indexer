@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.1](https://github.com/martadams89/seo-website-indexer/compare/v1.14.0...v1.14.1) (2026-07-05)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/nodemailer to v8 ([#89](https://github.com/martadams89/seo-website-indexer/issues/89)) ([add08d7](https://github.com/martadams89/seo-website-indexer/commit/add08d78fcb717d83c31854cc06411dddf433118))
+* **deps:** update renovatebot/github-action action to v46 ([#90](https://github.com/martadams89/seo-website-indexer/issues/90)) ([1c2ba39](https://github.com/martadams89/seo-website-indexer/commit/1c2ba393da11fc8367e6ca699028cabb07dc77f8))
+
 ## [1.14.0](https://github.com/martadams89/seo-website-indexer/compare/v1.13.1...v1.14.0) (2026-07-04)
 
 
