@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/martadams89/seo-website-indexer/compare/v1.16.1...v1.17.0) (2026-07-05)
+
+
+### ✨ Features
+
+* agent-readiness metric (isitagentready-style) per site ([#107](https://github.com/martadams89/seo-website-indexer/issues/107)) ([40ad436](https://github.com/martadams89/seo-website-indexer/commit/40ad43620ecdb0eb3cef4be95d23248ee1886bf7))
+
 ## [1.16.1](https://github.com/martadams89/seo-website-indexer/compare/v1.16.0...v1.16.1) (2026-07-05)
 
 
