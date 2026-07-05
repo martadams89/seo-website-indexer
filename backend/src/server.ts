@@ -147,6 +147,24 @@ const app = Fastify({
       },
 });
 
+// Fastify 5 rejects an empty body sent with `Content-Type: application/json`
+// (FST_ERR_CTP_EMPTY_JSON_BODY -> 400); Fastify 4 tolerated it. Clients (and our
+// UI's fetch wrapper) send that header even on bodyless requests like DELETE, so
+// restore the old behaviour: treat an empty JSON body as `undefined`.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  const text = body as string;
+  if (text == null || text.trim() === '') {
+    done(null, undefined);
+    return;
+  }
+  try {
+    done(null, JSON.parse(text));
+  } catch (err) {
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    done(err as Error, undefined);
+  }
+});
+
 await app.register(fastifyCors, {
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
