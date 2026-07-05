@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/martadams89/seo-website-indexer/compare/v1.14.3...v1.15.0) (2026-07-05)
+
+
+### ✨ Features
+
+* AI provider model probing + per-workspace model selection ([#99](https://github.com/martadams89/seo-website-indexer/issues/99)) ([1f77593](https://github.com/martadams89/seo-website-indexer/commit/1f77593c2644e683cb187145e1a682b3dc660ae5))
+
 ## [1.14.3](https://github.com/martadams89/seo-website-indexer/compare/v1.14.2...v1.14.3) (2026-07-05)
 
 
