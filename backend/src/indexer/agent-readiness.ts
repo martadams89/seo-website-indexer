@@ -1,84 +1,154 @@
 /**
- * Agent-readiness scoring — a native, self-hosted equivalent of the checks run
- * by isitagentready.com, so each tracked site gets an "how discoverable/usable
- * am I to AI agents?" score as a first-class metric alongside indexing and
- * search performance.
+ * Agent-readiness scoring. The authoritative source is the public
+ * isitagentready.com scan API (POST /api/scan) — we surface THEIR result
+ * (level 0-5 + per-check breakdown) so our numbers never diverge from the tool
+ * people actually test against.
  *
- * We run the checks ourselves (no third-party dependency): fetch the site's
- * homepage + well-known endpoints, probe content negotiation and the MCP
- * surface, and look up the DNS-AID record. Everything is weighted into a single
- * 0-100 score plus a per-check breakdown with a remediation hint.
- *
- * `scoreChecks` and the pure `detect*` helpers are exported for unit testing so
- * the network layer never has to run in CI.
+ * If that API is unreachable we fall back to a local approximation of the same
+ * checks, clearly labelled `source: 'local'`, so the dashboard degrades
+ * gracefully offline instead of going blank. Pure helpers (`summarize`, the
+ * `detect*` functions, `mapScan`) are exported for offline unit testing.
  */
 import { resolveTxt } from 'node:dns/promises';
 import type { Site } from '../db/database.js';
 
-export type AgentCheckCategory = 'discovery' | 'content' | 'protocol' | 'identity' | 'dns';
+export type AgentCheckStatus = 'pass' | 'fail' | 'neutral';
 
 export interface AgentCheck {
   id: string;
   label: string;
-  category: AgentCheckCategory;
-  pass: boolean;
-  weight: number;
-  detail: string;
-  /** One-line remediation shown when the check fails. */
-  fix?: string;
+  category: string;   // isitagentready category key, or a local category
+  status: AgentCheckStatus;
+  detail: string;     // human-readable message
+  fix?: string;       // remediation hint when failing
 }
 
 export interface AgentReadinessResult {
-  score: number;      // 0..100, weighted
-  passed: number;     // checks passed
-  total: number;      // checks run
+  source: 'isitagentready.com' | 'local';
+  level: number | null;      // 0-5 (isitagentready); null for the local fallback
+  levelName: string | null;  // e.g. "Agent-Native"
+  score: number;             // 0-100 pass ratio (drives the trend line)
+  passed: number;
+  total: number;             // non-neutral checks
   checks: AgentCheck[];
+  scannedAt: string;
 }
+
+const SCAN_API = 'https://isitagentready.com/api/scan';
+
+// Prettier names for isitagentready's camelCase check ids.
+const CHECK_LABELS: Record<string, string> = {
+  robotsTxt: 'robots.txt', robotsTxtAiRules: 'AI crawler rules', sitemap: 'sitemap.xml',
+  linkHeaders: 'Link relations (RFC 8288)', dnsAid: 'DNS-AID record',
+  markdownNegotiation: 'Markdown negotiation', contentSignals: 'Content-Signal policy',
+  webBotAuth: 'Web Bot Auth', apiCatalog: 'api-catalog (RFC 9727)',
+  oauthDiscovery: 'OIDC discovery', oauthProtectedResource: 'OAuth Protected Resource',
+  authMd: 'auth.md', mcpServerCard: 'MCP Server Card', a2aAgentCard: 'A2A agent card',
+  agentSkills: 'Agent Skills index', webMcp: 'WebMCP',
+  x402: 'x402 payments', mpp: 'MPP', ucp: 'UCP', acp: 'ACP', ap2: 'AP2',
+};
+
+export const CATEGORY_LABELS: Record<string, string> = {
+  discoverability: 'Discoverability', discovery: 'Agent discovery',
+  botAccessControl: 'Bot access control', contentAccessibility: 'Content accessibility',
+  commerce: 'Commerce (agentic payments)', identity: 'Identity & auth', content: 'Structured content',
+  protocol: 'Agent protocol', dns: 'DNS',
+};
+
+function prettify(id: string): string {
+  return id.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+}
+
+function normStatus(s: unknown): AgentCheckStatus {
+  return s === 'pass' ? 'pass' : s === 'neutral' ? 'neutral' : 'fail';
+}
+
+/** Pass ratio over non-neutral checks. */
+export function summarize(checks: AgentCheck[]): { score: number; passed: number; total: number } {
+  const scored = checks.filter(c => c.status !== 'neutral');
+  const passed = scored.filter(c => c.status === 'pass').length;
+  const total = scored.length;
+  return { score: total ? Math.round((passed / total) * 100) : 0, passed, total };
+}
+
+interface RawScan {
+  level?: number; levelName?: string; scannedAt?: string;
+  checks?: Record<string, Record<string, { status?: string; message?: string }>>;
+}
+
+/** Flatten an isitagentready scan payload into our result shape. Pure. */
+export function mapScan(data: RawScan): AgentReadinessResult {
+  const checks: AgentCheck[] = [];
+  for (const [category, group] of Object.entries(data.checks || {})) {
+    for (const [id, c] of Object.entries(group || {})) {
+      const status = normStatus(c?.status);
+      checks.push({
+        id, label: CHECK_LABELS[id] || prettify(id), category, status,
+        detail: c?.message || '',
+        ...(status === 'fail' ? { fix: c?.message || '' } : {}),
+      });
+    }
+  }
+  return {
+    source: 'isitagentready.com',
+    level: typeof data.level === 'number' ? data.level : null,
+    levelName: data.levelName || null,
+    ...summarize(checks),
+    checks,
+    scannedAt: data.scannedAt || new Date().toISOString(),
+  };
+}
+
+function originOf(site: Site): string {
+  const d = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
+  return d.replace(/\/+$/, '');
+}
+
+/** Authoritative: run the real isitagentready.com scan. Throws on API failure. */
+export async function scanAgentReadiness(url: string): Promise<AgentReadinessResult> {
+  const res = await fetch(SCAN_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'SEOWebsiteIndexer/1.0 (agent-readiness)' },
+    body: JSON.stringify({ url }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`isitagentready scan failed: HTTP ${res.status}`);
+  return mapScan(await res.json() as RawScan);
+}
+
+/**
+ * Primary entry point. Prefer the real isitagentready.com result; on any error
+ * (network/timeout/5xx) fall back to the local approximation so the metric
+ * still renders — clearly flagged so nobody mistakes it for the real score.
+ */
+export async function checkAgentReadiness(site: Site): Promise<AgentReadinessResult> {
+  try {
+    return await scanAgentReadiness(originOf(site));
+  } catch {
+    return await localAgentReadiness(site);
+  }
+}
+
+// ── Local fallback (offline approximation) ────────────────────────────────────
 
 const UA = 'SEOWebsiteIndexer/1.0 (agent-readiness)';
 const TIMEOUT = 12_000;
-
-interface Fetched { status: number; ok: boolean; ct: string; headers: Headers; text: string }
+interface Fetched { ok: boolean; ct: string; headers: Headers; text: string }
 
 async function grab(url: string, accept?: string): Promise<Fetched> {
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': UA, ...(accept ? { Accept: accept } : {}) },
-      signal: AbortSignal.timeout(TIMEOUT),
-      redirect: 'follow',
+      signal: AbortSignal.timeout(TIMEOUT), redirect: 'follow',
     });
-    const ct = res.headers.get('content-type') || '';
-    // Cap body reads so a giant page can't blow memory.
-    const text = res.ok ? (await res.text()).slice(0, 400_000) : '';
-    return { status: res.status, ok: res.ok, ct, headers: res.headers, text };
-  } catch {
-    return { status: 0, ok: false, ct: '', headers: new Headers(), text: '' };
-  }
+    return { ok: res.ok, ct: res.headers.get('content-type') || '', headers: res.headers, text: res.ok ? (await res.text()).slice(0, 400_000) : '' };
+  } catch { return { ok: false, ct: '', headers: new Headers(), text: '' }; }
 }
-
-async function grabMcp(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'User-Agent': UA, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: UA, version: '1.0' } } }),
-      signal: AbortSignal.timeout(TIMEOUT),
-      redirect: 'follow',
-    });
-    if (!res.ok) return false;
-    const j = await res.json().catch(() => null) as { result?: { protocolVersion?: string; serverInfo?: unknown } } | null;
-    return !!(j && j.result && (j.result.protocolVersion || j.result.serverInfo));
-  } catch { return false; }
-}
-
-// ── Pure detectors (unit-tested offline) ──────────────────────────────────────
 
 const AI_BOTS = ['GPTBot', 'ClaudeBot', 'Claude-Web', 'PerplexityBot', 'Google-Extended', 'CCBot', 'anthropic-ai'];
 
-/** True unless robots.txt blocks the AI crawlers with a global Disallow: /. */
 export function robotsAllowsAi(robots: string): boolean {
   if (!robots.trim()) return false;
-  // Split into per-user-agent groups.
   const lines = robots.split('\n').map(l => l.replace(/#.*$/, '').trim());
   let agents: string[] = [];
   const blocked = new Set<string>();
@@ -86,171 +156,67 @@ export function robotsAllowsAi(robots: string): boolean {
     const ua = l.match(/^user-agent:\s*(.+)$/i);
     if (ua) { agents.push(ua[1].trim()); continue; }
     const dis = l.match(/^disallow:\s*(.*)$/i);
-    if (dis && agents.length) {
-      if (dis[1].trim() === '/') for (const a of agents) blocked.add(a.toLowerCase());
-    }
+    if (dis && agents.length && dis[1].trim() === '/') for (const a of agents) blocked.add(a.toLowerCase());
     if (l === '') agents = [];
   }
   if (blocked.has('*')) return false;
   return !AI_BOTS.some(b => blocked.has(b.toLowerCase()));
 }
 
-/** contentsignals.org Content-Signal directives present (robots.txt or header). */
 export function hasContentSignal(robots: string, header: string | null): boolean {
   return /content-signal:/i.test(robots) || /content-signal/i.test(header || '');
 }
-
 export function hasJsonLd(html: string): boolean {
   return /<script[^>]+type=["']application\/ld\+json["'][^>]*>/i.test(html);
 }
-
-export function hasMetaDescription(html: string): boolean {
-  return /<meta[^>]+name=["']description["'][^>]+content=["'][^"']+["']/i.test(html)
-    || /<meta[^>]+property=["']og:description["']/i.test(html);
-}
-
-/** WebMCP: page wires navigator.modelContext.provideContext(). */
 export function hasWebMcp(html: string): boolean {
   return /navigator\.modelContext/.test(html) || /modelContext\.provideContext/.test(html);
 }
-
-/** Homepage advertises llms.txt / api-catalog / MCP via an RFC 8288 Link. */
-export function hasAgentLink(html: string, linkHeader: string | null): boolean {
-  const hay = `${linkHeader || ''}\n${html}`;
-  return /rel=["']?(llms|api-catalog|service-desc|self)["']?/i.test(hay)
-    && /(llms\.txt|api-catalog|mcp)/i.test(hay);
-}
-
-/** Response actually came back as markdown for an Accept: text/markdown request. */
 export function isMarkdownResponse(f: { ct: string; text: string }): boolean {
   if (/text\/markdown/i.test(f.ct)) return true;
-  // Some servers return markdown with a generic content-type; sniff the body.
   return !/<html[\s>]/i.test(f.text) && /^#{1,3}\s|\]\(https?:/m.test(f.text);
 }
-
 export function isValidJwks(text: string): boolean {
-  try {
-    const j = JSON.parse(text) as { keys?: Array<{ kty?: string }> };
-    return Array.isArray(j.keys) && j.keys.length > 0 && !!j.keys[0].kty;
-  } catch { return false; }
-}
-
-/** Weighted 0-100 score from a set of checks. */
-export function scoreChecks(checks: AgentCheck[]): { score: number; passed: number; total: number } {
-  const totalWeight = checks.reduce((s, c) => s + c.weight, 0) || 1;
-  const gotWeight = checks.reduce((s, c) => s + (c.pass ? c.weight : 0), 0);
-  return {
-    score: Math.round((gotWeight / totalWeight) * 100),
-    passed: checks.filter(c => c.pass).length,
-    total: checks.length,
-  };
-}
-
-// ── Live check runner ─────────────────────────────────────────────────────────
-
-function originOf(site: Site): string {
-  const d = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
-  return d.replace(/\/+$/, '');
-}
-
-function hostOf(site: Site): string {
-  try { return new URL(originOf(site)).hostname; } catch { return site.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, ''); }
+  try { const j = JSON.parse(text) as { keys?: Array<{ kty?: string }> }; return Array.isArray(j.keys) && j.keys.length > 0 && !!j.keys[0].kty; }
+  catch { return false; }
 }
 
 async function dnsAidPresent(host: string): Promise<boolean> {
   try {
-    const records = await resolveTxt(`_index._agents.${host}`);
-    const flat = records.map(r => r.join('')).join(' ');
+    const flat = (await resolveTxt(`_index._agents.${host}`)).map(r => r.join('')).join(' ');
     return /aid1|endpoint=|mcp=/i.test(flat);
   } catch { return false; }
 }
 
-export async function checkAgentReadiness(site: Site): Promise<AgentReadinessResult> {
+async function localAgentReadiness(site: Site): Promise<AgentReadinessResult> {
   const origin = originOf(site);
-  const host = hostOf(site);
-
-  const [
-    home, robots, llms, llmsFull, sitemap, securityTxt, aiTxt,
-    mcpCard, apiCatalog, agentSkills, webBotAuth, authMd, oauthPr, oidc, mdNeg,
-    mcpOk, dnsAid,
-  ] = await Promise.all([
-    grab(`${origin}/`),
-    grab(`${origin}/robots.txt`),
-    grab(`${origin}/llms.txt`),
-    grab(`${origin}/llms-full.txt`),
-    grab(`${origin}/sitemap.xml`),
-    grab(`${origin}/.well-known/security.txt`),
-    grab(`${origin}/ai.txt`),
-    grab(`${origin}/.well-known/mcp.json`),
-    grab(`${origin}/.well-known/api-catalog`),
-    grab(`${origin}/.well-known/agent-skills/index.json`),
-    grab(`${origin}/.well-known/http-message-signatures-directory`),
-    grab(`${origin}/auth.md`),
-    grab(`${origin}/.well-known/oauth-protected-resource`),
-    grab(`${origin}/.well-known/openid-configuration`),
-    grab(`${origin}/`, 'text/markdown'),
-    grabMcp(`${origin}/mcp`),
-    dnsAidPresent(host),
+  const host = (() => { try { return new URL(origin).hostname; } catch { return site.domain; } })();
+  const [home, robots, llms, sitemap, securityTxt, aiTxt, mcpCard, apiCatalog, agentSkills, webBotAuth, authMd, mdNeg, dnsAid] = await Promise.all([
+    grab(`${origin}/`), grab(`${origin}/robots.txt`), grab(`${origin}/llms.txt`), grab(`${origin}/sitemap.xml`),
+    grab(`${origin}/.well-known/security.txt`), grab(`${origin}/ai.txt`), grab(`${origin}/.well-known/mcp.json`),
+    grab(`${origin}/.well-known/api-catalog`), grab(`${origin}/.well-known/agent-skills/index.json`),
+    grab(`${origin}/.well-known/http-message-signatures-directory`), grab(`${origin}/auth.md`),
+    grab(`${origin}/`, 'text/markdown'), dnsAidPresent(host),
   ]);
-
-  const mk = (id: string, label: string, category: AgentCheckCategory, pass: boolean, weight: number, detail: string, fix: string): AgentCheck =>
-    ({ id, label, category, pass, weight, detail, ...(pass ? {} : { fix }) });
-
+  const mk = (id: string, label: string, category: string, ok: boolean, okMsg: string, fix: string): AgentCheck =>
+    ({ id, label, category, status: ok ? 'pass' : 'fail', detail: ok ? okMsg : fix, ...(ok ? {} : { fix }) });
   const checks: AgentCheck[] = [
-    // Discovery
-    mk('robots', 'robots.txt', 'discovery', robots.ok, 2,
-      robots.ok ? 'Present' : 'Not found', 'Publish /robots.txt.'),
-    mk('robots_ai', 'AI crawlers allowed', 'discovery', robots.ok && robotsAllowsAi(robots.text), 2,
-      robots.ok ? (robotsAllowsAi(robots.text) ? 'GPTBot/ClaudeBot/etc not blocked' : 'AI bots are Disallowed') : 'No robots.txt', 'Remove blanket Disallow: / for AI user-agents.'),
-    mk('content_signal', 'Content-Signal policy', 'discovery', hasContentSignal(robots.text, robots.headers.get('content-signal')), 1,
-      hasContentSignal(robots.text, robots.headers.get('content-signal')) ? 'Declared' : 'Missing', 'Add contentsignals.org Content-Signal directives to robots.txt.'),
-    mk('llms', 'llms.txt', 'discovery', llms.ok && /^#\s/m.test(llms.text), 3,
-      llms.ok ? 'Present' : 'Not found', 'Publish /llms.txt with a top-level "# Title".'),
-    mk('llms_full', 'llms-full.txt', 'discovery', llmsFull.ok, 1,
-      llmsFull.ok ? 'Present' : 'Not found', 'Publish /llms-full.txt with full-text content.'),
-    mk('sitemap', 'sitemap.xml', 'discovery', sitemap.ok, 1,
-      sitemap.ok ? 'Present' : 'Not found', 'Publish /sitemap.xml.'),
-    mk('security_txt', 'security.txt (RFC 9116)', 'identity', securityTxt.ok, 1,
-      securityTxt.ok ? 'Present' : 'Not found', 'Publish /.well-known/security.txt.'),
-    mk('ai_txt', 'ai.txt', 'discovery', aiTxt.ok, 1,
-      aiTxt.ok ? 'Present' : 'Not found', 'Publish /ai.txt with your AI-usage policy.'),
-
-    // Structured content
-    mk('jsonld', 'JSON-LD structured data', 'content', hasJsonLd(home.text), 2,
-      hasJsonLd(home.text) ? 'Found on homepage' : 'None on homepage', 'Add schema.org JSON-LD to your pages.'),
-    mk('meta', 'Meta / OG description', 'content', hasMetaDescription(home.text), 1,
-      hasMetaDescription(home.text) ? 'Present' : 'Missing', 'Add a <meta name="description"> and OpenGraph tags.'),
-    mk('markdown', 'Markdown content negotiation', 'content', isMarkdownResponse(mdNeg), 2,
-      isMarkdownResponse(mdNeg) ? 'Serves text/markdown on request' : 'Only HTML', 'Serve text/markdown when Accept: text/markdown is sent.'),
-
-    // Agent protocol surface
-    mk('mcp_card', 'MCP Server Card', 'protocol', mcpCard.ok && /"endpoint"|"tools"/.test(mcpCard.text), 3,
-      mcpCard.ok ? 'Present' : 'Not found', 'Publish /.well-known/mcp.json describing your MCP server.'),
-    mk('mcp_endpoint', 'MCP endpoint (/mcp)', 'protocol', mcpOk, 3,
-      mcpOk ? 'Responds to initialize' : 'No JSON-RPC response', 'Expose an MCP endpoint at /mcp.'),
-    mk('api_catalog', 'api-catalog (RFC 9727)', 'protocol', apiCatalog.ok, 2,
-      apiCatalog.ok ? 'Present' : 'Not found', 'Publish /.well-known/api-catalog (application/linkset+json).'),
-    mk('link_header', 'Agent Link relations (RFC 8288)', 'protocol', hasAgentLink(home.text, home.headers.get('link')), 1,
-      hasAgentLink(home.text, home.headers.get('link')) ? 'Advertised' : 'Missing', 'Advertise llms.txt / api-catalog via Link headers or <link> tags.'),
-    mk('agent_skills', 'Agent Skills index', 'protocol', agentSkills.ok && /"skills"/.test(agentSkills.text), 2,
-      agentSkills.ok ? 'Present' : 'Not found', 'Publish /.well-known/agent-skills/index.json.'),
-    mk('webmcp', 'WebMCP (navigator.modelContext)', 'protocol', hasWebMcp(home.text), 1,
-      hasWebMcp(home.text) ? 'Wired on homepage' : 'Not detected', 'Call navigator.modelContext.provideContext() in-page.'),
-
-    // Identity / auth
-    mk('web_bot_auth', 'Web Bot Auth directory', 'identity', webBotAuth.ok && isValidJwks(webBotAuth.text), 2,
-      webBotAuth.ok && isValidJwks(webBotAuth.text) ? 'Valid JWKS' : 'Missing/invalid', 'Publish /.well-known/http-message-signatures-directory (JWKS).'),
-    mk('auth_md', 'auth.md', 'identity', authMd.ok, 1,
-      authMd.ok ? 'Present' : 'Not found', 'Publish /auth.md describing agent access.'),
-    mk('oauth_pr', 'OAuth Protected Resource', 'identity', oauthPr.ok, 1,
-      oauthPr.ok ? 'Present' : 'Not found', 'Publish /.well-known/oauth-protected-resource if tools need auth.'),
-    mk('oidc', 'OIDC discovery', 'identity', oidc.ok, 1,
-      oidc.ok ? 'Present' : 'Not found', 'Publish /.well-known/openid-configuration if you support OIDC.'),
-
-    // DNS
-    mk('dns_aid', 'DNS-AID record', 'dns', dnsAid, 2,
-      dnsAid ? 'Found (_index._agents)' : 'Not found', 'Add a _index._agents TXT record pointing to your agent endpoints.'),
+    mk('robotsTxt', 'robots.txt', 'discoverability', robots.ok, 'Present', 'Publish /robots.txt.'),
+    mk('robotsTxtAiRules', 'AI crawler rules', 'botAccessControl', robots.ok && robotsAllowsAi(robots.text), 'AI bots not blocked', 'Allow GPTBot/ClaudeBot/etc in robots.txt.'),
+    mk('contentSignals', 'Content-Signal policy', 'botAccessControl', hasContentSignal(robots.text, robots.headers.get('content-signal')), 'Declared', 'Add Content-Signal directives to robots.txt.'),
+    mk('sitemap', 'sitemap.xml', 'discoverability', sitemap.ok, 'Present', 'Publish /sitemap.xml.'),
+    mk('llms', 'llms.txt', 'discoverability', llms.ok && /^#\s/m.test(llms.text), 'Present', 'Publish /llms.txt with a "# Title".'),
+    mk('markdownNegotiation', 'Markdown negotiation', 'contentAccessibility', isMarkdownResponse(mdNeg), 'Serves text/markdown', 'Serve markdown on Accept: text/markdown.'),
+    mk('jsonLd', 'JSON-LD', 'contentAccessibility', hasJsonLd(home.text), 'Found on homepage', 'Add schema.org JSON-LD.'),
+    mk('securityTxt', 'security.txt', 'discovery', securityTxt.ok, 'Present', 'Publish /.well-known/security.txt.'),
+    mk('aiTxt', 'ai.txt', 'discovery', aiTxt.ok, 'Present', 'Publish /ai.txt.'),
+    mk('mcpServerCard', 'MCP Server Card', 'discovery', mcpCard.ok, 'Present', 'Publish /.well-known/mcp.json.'),
+    mk('apiCatalog', 'api-catalog', 'discovery', apiCatalog.ok, 'Present', 'Publish /.well-known/api-catalog.'),
+    mk('agentSkills', 'Agent Skills index', 'discovery', agentSkills.ok, 'Present', 'Publish /.well-known/agent-skills/index.json.'),
+    mk('webMcp', 'WebMCP', 'discovery', hasWebMcp(home.text), 'Wired on homepage', 'Call navigator.modelContext.provideContext().'),
+    mk('webBotAuth', 'Web Bot Auth', 'botAccessControl', webBotAuth.ok && isValidJwks(webBotAuth.text), 'Valid JWKS', 'Publish /.well-known/http-message-signatures-directory.'),
+    mk('authMd', 'auth.md', 'discovery', authMd.ok && /^#\s*[^\n]*auth\.md/im.test(authMd.text), 'Present', 'Serve /auth.md with an H1 containing "auth.md".'),
+    mk('dnsAid', 'DNS-AID record', 'discoverability', dnsAid, 'Found (_index._agents)', 'Add a _index._agents TXT/HTTPS record and sign the zone with DNSSEC.'),
   ];
-
-  return { ...scoreChecks(checks), checks };
+  return { source: 'local', level: null, levelName: null, ...summarize(checks), checks, scannedAt: new Date().toISOString() };
 }
