@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/martadams89/seo-website-indexer/compare/v1.17.0...v1.18.0) (2026-07-05)
+
+
+### ✨ Features
+
+* agent-readiness now uses the real isitagentready.com scan ([#109](https://github.com/martadams89/seo-website-indexer/issues/109)) ([1c97ab9](https://github.com/martadams89/seo-website-indexer/commit/1c97ab9c077d38c172a603376ea4b06439c88fab))
+
 ## [1.17.0](https://github.com/martadams89/seo-website-indexer/compare/v1.16.1...v1.17.0) (2026-07-05)
 
 
