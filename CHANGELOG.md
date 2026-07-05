@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/martadams89/seo-website-indexer/compare/v1.15.0...v1.15.1) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* make the AI model picker visible (was collapsed + hidden while probing) ([#101](https://github.com/martadams89/seo-website-indexer/issues/101)) ([4a0c6f3](https://github.com/martadams89/seo-website-indexer/commit/4a0c6f302bab16ac1c665179361bd61c49630865))
+
 ## [1.15.0](https://github.com/martadams89/seo-website-indexer/compare/v1.14.3...v1.15.0) (2026-07-05)
 
 
