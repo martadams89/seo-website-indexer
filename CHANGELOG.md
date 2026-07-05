@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/martadams89/seo-website-indexer/compare/v1.16.0...v1.16.1) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* compact AI model picker rows (drop 200px flex-basis boxes) ([#105](https://github.com/martadams89/seo-website-indexer/issues/105)) ([8de9882](https://github.com/martadams89/seo-website-indexer/commit/8de9882a3c77691c47b2733451baea7944c83590))
+
 ## [1.16.0](https://github.com/martadams89/seo-website-indexer/compare/v1.15.1...v1.16.0) (2026-07-05)
 
 
