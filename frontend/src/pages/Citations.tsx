@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2 } from 'lucide-react';
-import { api, type AiPrompt, type AiResult } from '../api';
+import { api, type AiPrompt, type AiResult, type ProviderModels } from '../api';
 import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
 
@@ -140,6 +140,66 @@ function Thread({ promptId, promptText, provider, configured, onCitedChange }: {
   );
 }
 
+// Per-provider model picker: probes each configured provider's live model list,
+// defaults to the auto-detected latest, and lets you override.
+function ModelPicker() {
+  const [providers, setProviders] = useState<ProviderModels[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [choices, setChoices] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.getAiModels().then(r => setProviders(r.providers.filter(p => p.configured))).catch(() => setProviders([])).finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const payload: Record<string, string> = {};
+      for (const [prov, model] of Object.entries(choices)) payload[`model_${prov}`] = model;
+      if (Object.keys(payload).length) await api.saveAiModels(payload);
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } finally { setSaving(false); }
+  }
+
+  if (loading || providers.length === 0) return null;
+
+  return (
+    <details className="key-guide" style={{ marginBottom: 16 }} open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>
+        <Bot size={14} />
+        <span className="key-guide-label">Models</span>
+        <span className="badge" style={{ marginLeft: 'auto' }}>{providers.length} provider{providers.length === 1 ? '' : 's'}</span>
+      </summary>
+      <div className="key-guide-body">
+        <p className="text-dim" style={{ fontSize: 12, margin: '0 0 10px' }}>
+          Probed live from each provider and defaulted to the newest available (highest version). Override per provider if you prefer a specific model.
+        </p>
+        {providers.map(p => {
+          const current = choices[p.provider] ?? p.selected;
+          const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
+          return (
+            <div className="input-group mb-2" key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <label className="input-label" style={{ minWidth: 90, margin: 0, textTransform: 'capitalize' }}>{PROVIDER_LABEL[p.provider] ?? p.provider}</label>
+              <select className="input" style={{ flex: 1 }} value={current} onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
+                {opts.map(m => (
+                  <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>
+                ))}
+              </select>
+              {!p.isOverride && current === p.recommended && <span className="badge badge-ok">auto</span>}
+            </div>
+          );
+        })}
+        <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={saving} onClick={save}>
+          {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save models'}
+        </button>
+      </div>
+    </details>
+  );
+}
+
 export default function CitationsPage() {
   const { toast, sites } = useApp();
   const [providers, setProviders] = useState<{ all: string[]; configured: string[] }>({ all: [], configured: [] });
@@ -233,6 +293,8 @@ export default function CitationsPage() {
           <KeyRound size={12} /> Add at least one provider API key in <strong>Settings → API Keys</strong> to start tracking. Tracked domains come from your configured sites ({sites.length}).
         </div>
       )}
+
+      {!noKeys && <ModelPicker />}
 
       <div className="flex gap-2" style={{ marginBottom: 18 }}>
         <input

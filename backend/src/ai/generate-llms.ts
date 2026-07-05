@@ -10,6 +10,7 @@
  */
 import { effectiveSetting, getUrlsBySite, type Site } from '../db/database.js';
 import { isNonHtmlUrl } from './../indexer/sitemap.js';
+import { resolveModel } from './models.js';
 
 // ── Provider text completion (no web search) ─────────────────────────────────
 
@@ -27,9 +28,9 @@ export function llmsGenerationProvider(workspaceId: string | null = null): GenPr
 
 const TIMEOUT = 90_000;
 
-async function complete(provider: GenProvider, key: string, system: string, user: string): Promise<{ text: string; model: string }> {
+async function complete(provider: GenProvider, key: string, system: string, user: string, modelId?: string): Promise<{ text: string; model: string }> {
   if (provider === 'anthropic') {
-    const model = 'claude-sonnet-5';
+    const model = modelId || 'claude-sonnet-5';
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
@@ -41,7 +42,7 @@ async function complete(provider: GenProvider, key: string, system: string, user
     return { text: (data.content ?? []).map(b => b.text ?? '').join(''), model };
   }
   if (provider === 'gemini') {
-    const model = 'gemini-flash-latest';
+    const model = modelId || 'gemini-flash-latest';
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -61,7 +62,8 @@ async function complete(provider: GenProvider, key: string, system: string, user
     xai: { url: 'https://api.x.ai/v1/chat/completions', model: 'grok-2-latest' },
     perplexity: { url: 'https://api.perplexity.ai/chat/completions', model: 'sonar' },
   };
-  const { url, model } = cfg[provider];
+  const { url } = cfg[provider];
+  const model = modelId || cfg[provider].model;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -187,7 +189,7 @@ export async function generateLlmsTxt(site: Site): Promise<GeneratedLlms> {
   if (!provider) throw Object.assign(new Error('No AI provider configured. Add an OpenAI, Anthropic, Gemini, xAI or Perplexity key in Settings → API Keys.'), { statusCode: 400 });
   const ctx = await gatherSiteContext(site);
   const key = effectiveSetting(ws, GEN_KEY[provider])!;
-  const { text, model } = await complete(provider, key, SYSTEM_PROMPT, buildUserPrompt(ctx));
+  const { text, model } = await complete(provider, key, SYSTEM_PROMPT, buildUserPrompt(ctx), resolveModel(ws, provider));
   // Strip any accidental code fences the model may add.
   const content = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```\s*$/i, '').trim() + '\n';
   if (content.length < 20) throw new Error('The model returned an empty result — try again or switch provider.');
