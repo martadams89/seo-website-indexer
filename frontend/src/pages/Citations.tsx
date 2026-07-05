@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2 } from 'lucide-react';
-import { api, type AiPrompt, type AiResult, type ProviderModels } from '../api';
+import { api, type AiPrompt, type AiResult } from '../api';
 import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
 
@@ -140,69 +140,6 @@ function Thread({ promptId, promptText, provider, configured, onCitedChange }: {
   );
 }
 
-// Per-provider model picker: probes each configured provider's live model list,
-// defaults to the auto-detected latest, and lets you override.
-function ModelPicker() {
-  const [providers, setProviders] = useState<ProviderModels[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [choices, setChoices] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    api.getAiModels().then(r => setProviders(r.providers.filter(p => p.configured))).catch(() => setProviders([])).finally(() => setLoading(false));
-  }, []);
-
-  async function save() {
-    setSaving(true);
-    try {
-      const payload: Record<string, string> = {};
-      for (const [prov, model] of Object.entries(choices)) payload[`model_${prov}`] = model;
-      if (Object.keys(payload).length) await api.saveAiModels(payload);
-      setSaved(true); setTimeout(() => setSaved(false), 2500);
-    } finally { setSaving(false); }
-  }
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-title">
-        <Bot size={13} /> AI models
-        {loading && <span className="text-dim" style={{ fontSize: 11, fontWeight: 400 }}> · probing providers…</span>}
-      </div>
-      <p className="text-dim" style={{ fontSize: 12, margin: '0 0 10px' }}>
-        Which model each provider uses for citation checks. Probed live from each provider and defaulted to the newest available
-        (highest version wins). Override any of them below.
-      </p>
-      {loading ? (
-        <div className="text-dim" style={{ fontSize: 12 }}>Querying each configured provider's model list…</div>
-      ) : providers.length === 0 ? (
-        <div className="empty-note">No models to configure yet — add a provider API key in <strong>Settings → API Keys</strong>, then reopen this page.</div>
-      ) : (
-        <>
-          {providers.map(p => {
-            const current = choices[p.provider] ?? p.selected;
-            const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
-            return (
-              <div className="input-group mb-2" key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <label className="input-label" style={{ minWidth: 90, margin: 0, textTransform: 'capitalize' }}>{PROVIDER_LABEL[p.provider] ?? p.provider}</label>
-                <select className="input" style={{ flex: 1 }} value={current} onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
-                  {opts.map(m => (
-                    <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>
-                  ))}
-                </select>
-                {!p.isOverride && current === p.recommended && <span className="badge badge-ok">auto</span>}
-              </div>
-            );
-          })}
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={saving} onClick={save}>
-            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save models'}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 export default function CitationsPage() {
   const { toast, sites } = useApp();
   const [providers, setProviders] = useState<{ all: string[]; configured: string[] }>({ all: [], configured: [] });
@@ -297,7 +234,6 @@ export default function CitationsPage() {
         </div>
       )}
 
-      {!noKeys && <ModelPicker />}
 
       <div className="flex gap-2" style={{ marginBottom: 18 }}>
         <input

@@ -38,12 +38,22 @@ function cmpVersion(a: string, b: string): number {
   return a < b ? 1 : -1;
 }
 
-/** The newest model, preferring ones in the same tier as the provider default. */
+// A dated snapshot (e.g. gpt-4o-mini-2024-07-18, gpt-4-0613) rather than the
+// rolling alias (gpt-4o-mini). We prefer the aliases so users track updates.
+function isDatedSnapshot(id: string): boolean {
+  return /\d{4}-\d{2}-\d{2}/.test(id) || /-\d{8}$/.test(id) || /-\d{4}$/.test(id) || /-\d{3,4}-preview/i.test(id);
+}
+
+/** The newest model, preferring the tier keyword + undated (rolling) aliases. */
 export function pickLatest(provider: ModelProvider, ids: string[]): string {
+  // Gemini's `-latest` alias always resolves to Google's newest flash model.
+  if (provider === 'gemini') return 'gemini-flash-latest';
   if (ids.length === 0) return DEFAULT[provider];
   const tier = TIER[provider];
   const tiered = ids.filter(id => id.toLowerCase().includes(tier));
-  const pool = tiered.length ? tiered : ids;
+  let pool = tiered.length ? tiered : ids;
+  const undated = pool.filter(id => !isDatedSnapshot(id));
+  if (undated.length) pool = undated; // favour rolling aliases over dated snapshots
   return [...pool].sort(cmpVersion)[0];
 }
 
