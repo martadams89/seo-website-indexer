@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
 import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { ModelPicker } from '../components/ModelPicker';
 import { registerPasskey } from '../auth/webauthn';
 
 type Tab = 'account' | 'workspace' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
@@ -714,6 +715,7 @@ function KeysTab() {
   }
 
   return (
+    <>
     <div className="card">
       <div className="card-title"><KeyRound size={13} /> API keys{active ? ` — ${active.name}` : ''}</div>
       <p className="text-dim" style={{ fontSize: 12, marginBottom: 6 }}>
@@ -782,6 +784,8 @@ function KeysTab() {
       </button>
       {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>Only the workspace owner can set keys for {active?.name}.</p>}
     </div>
+    <ModelPicker />
+    </>
   );
 }
 

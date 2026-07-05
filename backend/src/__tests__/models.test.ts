@@ -14,9 +14,18 @@ describe('pickLatest model version ranking', () => {
       .toBe('claude-sonnet-5');
   });
 
-  it('gemini: newest flash wins (2.5 > 2.0 > 1.5)', () => {
+  it('gemini: always uses the rolling gemini-flash-latest alias', () => {
     expect(pickLatest('gemini', ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro']))
-      .toBe('gemini-2.5-flash');
+      .toBe('gemini-flash-latest');
+    expect(pickLatest('gemini', [])).toBe('gemini-flash-latest');
+  });
+
+  it('openai: prefers the undated alias over dated snapshots', () => {
+    expect(pickLatest('openai', ['gpt-5-mini', 'gpt-5-mini-2025-01-01', 'gpt-4o-mini-2024-07-18']))
+      .toBe('gpt-5-mini');
+    // even a newer-dated snapshot loses to the clean higher-version alias
+    expect(pickLatest('openai', ['gpt-6-mini', 'gpt-5.5-mini', 'gpt-5.5-mini-2025-06-01']))
+      .toBe('gpt-6-mini');
   });
 
   it('falls back to any model when the tier keyword is absent', () => {
