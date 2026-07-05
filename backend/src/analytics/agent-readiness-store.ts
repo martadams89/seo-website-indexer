@@ -1,7 +1,9 @@
 /**
  * Agent-readiness store: persists one score row per site/day (upsert) so the
  * metric is trackable over time, raises an alert on meaningful regressions, and
- * serves the latest score + history to the dashboard. Mirrors perf-store.ts.
+ * serves the latest score + history to the dashboard. The score comes from the
+ * real isitagentready.com scan (level 0-5), with a local fallback. Mirrors
+ * perf-store.ts.
  */
 import { getDb, getAllSites, type Site } from '../db/database.js';
 import { checkAgentReadiness, type AgentReadinessResult, type AgentCheck } from '../indexer/agent-readiness.js';
@@ -19,22 +21,24 @@ function previousScore(siteId: string): number | null {
   return row ? row.score : null;
 }
 
-/** Run the live check for one site, upsert today's row, alert on regressions. */
+/** Run the scan for one site, upsert today's row, alert on regressions. */
 export async function snapshotSiteAgentReadiness(site: Site): Promise<AgentReadinessResult> {
   const result = await checkAgentReadiness(site);
   const prev = previousScore(site.id);
   getDb().prepare(`
-    INSERT INTO agent_readiness(site_id, day, score, passed, total, checks)
-    VALUES(?,?,?,?,?,?)
+    INSERT INTO agent_readiness(site_id, day, score, passed, total, checks, level, level_name, source)
+    VALUES(?,?,?,?,?,?,?,?,?)
     ON CONFLICT(site_id, day) DO UPDATE SET
       score=excluded.score, passed=excluded.passed, total=excluded.total,
-      checks=excluded.checks, created_at=datetime('now')
-  `).run(site.id, today(), result.score, result.passed, result.total, JSON.stringify(result.checks));
+      checks=excluded.checks, level=excluded.level, level_name=excluded.level_name,
+      source=excluded.source, created_at=datetime('now')
+  `).run(site.id, today(), result.score, result.passed, result.total,
+    JSON.stringify(result.checks), result.level, result.levelName, result.source);
 
   if (prev !== null && result.score <= prev - REGRESSION_DROP) {
     recordAlert(site.id, 'agent_readiness',
       `${site.domain}: agent-readiness dropped ${prev}% → ${result.score}%`, 'warn',
-      result.checks.filter(c => !c.pass).map(c => c.label).join(', '));
+      result.checks.filter(c => c.status === 'fail').map(c => c.label).join(', '));
   }
   return result;
 }
@@ -49,23 +53,24 @@ export async function snapshotAllAgentReadiness(): Promise<number> {
   return n;
 }
 
-export interface AgentReadinessHistoryPoint { day: string; score: number; passed: number; total: number }
+export interface AgentReadinessHistoryPoint { day: string; score: number; passed: number; total: number; level: number | null }
 
 export function getAgentReadinessHistory(siteId: string, days = 90): AgentReadinessHistoryPoint[] {
   return getDb().prepare(
-    `SELECT day, score, passed, total FROM agent_readiness
+    `SELECT day, score, passed, total, level FROM agent_readiness
      WHERE site_id = ? AND day >= date('now', ?) ORDER BY day ASC`
   ).all(siteId, `-${days} days`) as AgentReadinessHistoryPoint[];
 }
 
 export interface LatestAgentReadiness {
-  day: string; score: number; passed: number; total: number; checks: AgentCheck[];
+  day: string; score: number; passed: number; total: number;
+  level: number | null; level_name: string | null; source: string; checks: AgentCheck[];
 }
 
 export function getLatestAgentReadiness(siteId: string): LatestAgentReadiness | null {
   const row = getDb().prepare(
-    'SELECT day, score, passed, total, checks FROM agent_readiness WHERE site_id = ? ORDER BY day DESC LIMIT 1'
-  ).get(siteId) as { day: string; score: number; passed: number; total: number; checks: string } | undefined;
+    'SELECT day, score, passed, total, level, level_name, source, checks FROM agent_readiness WHERE site_id = ? ORDER BY day DESC LIMIT 1'
+  ).get(siteId) as (Omit<LatestAgentReadiness, 'checks'> & { checks: string }) | undefined;
   if (!row) return null;
   return { ...row, checks: safeParse(row.checks) };
 }
@@ -75,13 +80,13 @@ function safeParse(s: string): AgentCheck[] {
 }
 
 /** Portfolio roll-up: latest score per site, for the analytics overview. */
-export interface AgentReadinessSummary { siteId: string; score: number | null }
+export interface AgentReadinessSummary { siteId: string; score: number | null; level: number | null }
 
 export function getAgentReadinessSummary(siteIds: string[]): AgentReadinessSummary[] {
   return siteIds.map(siteId => {
     const row = getDb().prepare(
-      'SELECT score FROM agent_readiness WHERE site_id = ? ORDER BY day DESC LIMIT 1'
-    ).get(siteId) as { score: number } | undefined;
-    return { siteId, score: row ? row.score : null };
+      'SELECT score, level FROM agent_readiness WHERE site_id = ? ORDER BY day DESC LIMIT 1'
+    ).get(siteId) as { score: number; level: number | null } | undefined;
+    return { siteId, score: row ? row.score : null, level: row ? row.level : null };
   });
 }

@@ -518,14 +518,20 @@ export interface HygieneReport {
 }
 export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
 
-export type AgentCheckCategory = 'discovery' | 'content' | 'protocol' | 'identity' | 'dns';
+export type AgentCheckStatus = 'pass' | 'fail' | 'neutral';
 export interface AgentCheck {
-  id: string; label: string; category: AgentCheckCategory;
-  pass: boolean; weight: number; detail: string; fix?: string;
+  id: string; label: string; category: string;
+  status: AgentCheckStatus; detail: string; fix?: string;
+}
+export interface AgentReadinessResult {
+  source: 'isitagentready.com' | 'local';
+  level: number | null; levelName: string | null;
+  score: number; passed: number; total: number;
+  checks: AgentCheck[]; scannedAt: string;
 }
 export interface AgentReadiness {
-  current: { score: number; passed: number; total: number; checks: AgentCheck[] };
-  history: Array<{ day: string; score: number; passed: number; total: number }>;
+  current: AgentReadinessResult;
+  history: Array<{ day: string; score: number; passed: number; total: number; level: number | null }>;
 }
 
 export interface PerfSeriesPoint { date: string; clicks: number; impressions: number; ctr: number; position: number }

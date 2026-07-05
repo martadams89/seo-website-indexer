@@ -185,14 +185,17 @@ function initSchema(db: Database.Database): void {
       PRIMARY KEY (site_id, day)
     );
 
-    -- ── Agent-readiness scores (isitagentready-style, one row per site/day) ─
+    -- ── Agent-readiness scores (isitagentready.com scan, one row per site/day) ─
     CREATE TABLE IF NOT EXISTS agent_readiness (
       site_id    TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
       day        TEXT NOT NULL,             -- YYYY-MM-DD
-      score      INTEGER NOT NULL,          -- 0..100 weighted
+      score      INTEGER NOT NULL,          -- 0..100 pass ratio (drives the trend)
       passed     INTEGER NOT NULL,          -- checks passed
-      total      INTEGER NOT NULL,          -- checks run
-      checks     TEXT NOT NULL,             -- JSON array of {id,label,category,pass,weight,detail}
+      total      INTEGER NOT NULL,          -- non-neutral checks
+      checks     TEXT NOT NULL,             -- JSON array of {id,label,category,status,detail,fix?}
+      level      INTEGER,                   -- isitagentready 0-5 (NULL for local fallback)
+      level_name TEXT,                      -- e.g. "Agent-Native"
+      source     TEXT NOT NULL DEFAULT 'isitagentready.com',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (site_id, day)
     );
@@ -367,6 +370,13 @@ function initSchema(db: Database.Database): void {
   const gaCols = db.prepare("PRAGMA table_info(google_accounts)").all() as { name: string }[];
   if (gaCols.length > 0 && !gaCols.some(c => c.name === 'workspace_id')) {
     db.exec("ALTER TABLE google_accounts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
+  }
+  // agent_readiness gained isitagentready level/source columns.
+  const arCols = db.prepare("PRAGMA table_info(agent_readiness)").all() as { name: string }[];
+  if (arCols.length > 0) {
+    if (!arCols.some(c => c.name === 'level')) db.exec("ALTER TABLE agent_readiness ADD COLUMN level INTEGER;");
+    if (!arCols.some(c => c.name === 'level_name')) db.exec("ALTER TABLE agent_readiness ADD COLUMN level_name TEXT;");
+    if (!arCols.some(c => c.name === 'source')) db.exec("ALTER TABLE agent_readiness ADD COLUMN source TEXT NOT NULL DEFAULT 'isitagentready.com';");
   }
 
   const urlCols = db.prepare("PRAGMA table_info(url_state)").all() as { name: string }[];
