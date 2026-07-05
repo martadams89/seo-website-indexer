@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.3](https://github.com/martadams89/seo-website-indexer/compare/v1.14.2...v1.14.3) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** migrate backend to Fastify 5 ([#97](https://github.com/martadams89/seo-website-indexer/issues/97)) ([339c2a6](https://github.com/martadams89/seo-website-indexer/commit/339c2a6b6695881d8fff43009121ae9ef56c73ec))
+
 ## [1.14.2](https://github.com/martadams89/seo-website-indexer/compare/v1.14.1...v1.14.2) (2026-07-05)
 
 
