@@ -7,6 +7,7 @@
  * the panel; unconfigured providers are skipped silently.
  */
 import { getDb, effectiveSetting, getAllSites } from '../db/database.js';
+import { resolveModel, type ModelProvider } from './models.js';
 import { logSystem } from '../utils/logger.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
@@ -38,8 +39,8 @@ export interface ChatTurn {
 
 const TIMEOUT = 90_000;
 
-async function askOpenAI(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'gpt-4o-mini';
+async function askOpenAI(turns: ChatTurn[], key: string, modelId?: string): Promise<ProviderAnswer> {
+  const model = modelId || 'gpt-4o-mini';
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -59,8 +60,8 @@ async function askOpenAI(turns: ChatTurn[], key: string): Promise<ProviderAnswer
   return { text, model, citations };
 }
 
-async function askAnthropic(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'claude-sonnet-5';
+async function askAnthropic(turns: ChatTurn[], key: string, modelId?: string): Promise<ProviderAnswer> {
+  const model = modelId || 'claude-sonnet-5';
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
@@ -83,8 +84,8 @@ async function askAnthropic(turns: ChatTurn[], key: string): Promise<ProviderAns
   return { text, model, citations };
 }
 
-async function askGemini(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'gemini-flash-latest';
+async function askGemini(turns: ChatTurn[], key: string, modelId?: string): Promise<ProviderAnswer> {
+  const model = modelId || 'gemini-flash-latest';
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -125,8 +126,8 @@ async function askGemini(turns: ChatTurn[], key: string): Promise<ProviderAnswer
   return { text, model, citations };
 }
 
-async function askPerplexity(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'sonar';
+async function askPerplexity(turns: ChatTurn[], key: string, modelId?: string): Promise<ProviderAnswer> {
+  const model = modelId || 'sonar';
   const res = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -138,8 +139,8 @@ async function askPerplexity(turns: ChatTurn[], key: string): Promise<ProviderAn
   return { text: data.choices?.[0]?.message?.content ?? '', model, citations: data.citations ?? [] };
 }
 
-async function askXai(turns: ChatTurn[], key: string): Promise<ProviderAnswer> {
-  const model = 'grok-3-mini';
+async function askXai(turns: ChatTurn[], key: string, modelId?: string): Promise<ProviderAnswer> {
+  const model = modelId || 'grok-3-mini';
   const res = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -187,7 +188,7 @@ async function askBrave(turns: ChatTurn[], key: string): Promise<ProviderAnswer>
   return { text, model: 'brave-search', citations: results.map(r => r.url).filter((u): u is string => !!u) };
 }
 
-const ASK: Record<Provider, (turns: ChatTurn[], key: string) => Promise<ProviderAnswer>> = {
+const ASK: Record<Provider, (turns: ChatTurn[], key: string, modelId?: string) => Promise<ProviderAnswer>> = {
   openai: askOpenAI,
   anthropic: askAnthropic,
   gemini: askGemini,
@@ -246,7 +247,8 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
   const results = await Promise.all(providers.map(async provider => {
     const key = effectiveSetting(workspaceId, KEY_SETTING[provider])!;
     try {
-      const answer = await ASK[provider]([{ role: 'user', content: row.prompt }], key);
+      const modelId = provider === 'brave' ? undefined : resolveModel(workspaceId, provider as ModelProvider);
+      const answer = await ASK[provider]([{ role: 'user', content: row.prompt }], key, modelId);
       const found = findDomains(answer, domains);
       // Full response (bounded) — the dashboard renders it as a scrollable chat bubble.
       const text = answer.text.trim().slice(0, 12_000);
@@ -313,7 +315,8 @@ export async function replyInThread(promptId: number, provider: Provider, follow
 
   const domains = trackedDomains();
   const parent = getThread(promptId, provider).at(-1);
-  const answer = await ASK[provider](turns, key);
+  const modelId = resolveModel(workspaceId, provider as ModelProvider);
+  const answer = await ASK[provider](turns, key, modelId);
   const found = findDomains(answer, domains);
   const text = answer.text.trim().slice(0, 12_000);
   const res = db.prepare(`

@@ -389,6 +389,11 @@ export const api = {
   provisionGeminiKey: () =>
     apiFetch<{ ok: boolean; error?: string; needsRelink?: boolean }>('/api/ai/provision/gemini', { method: 'POST', body: JSON.stringify({}) }),
 
+  // AI model probing + selection (per workspace)
+  getAiModels: () => apiFetch<{ providers: ProviderModels[] }>('/api/ai/models'),
+  saveAiModels: (data: Record<string, string>) =>
+    apiFetch<{ ok: boolean }>('/api/ai/models', { method: 'PUT', body: JSON.stringify(data) }),
+
   // ── Workspaces (tenant / client base) ──
   getWorkspaces: () => apiFetch<Workspace[]>('/api/workspaces'),
   createWorkspace: (name: string) =>
@@ -530,6 +535,10 @@ export interface AiResult {
   parent_id?: number | null; citations?: string | null; user_prompt?: string | null;
 }
 export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; excerpt?: string; error?: string }
+export interface ProviderModels {
+  provider: string; configured: boolean; models: string[];
+  selected: string; recommended: string; isOverride: boolean;
+}
 
 // ── SSE Log Stream ────────────────────────────────────────────────────────────
 

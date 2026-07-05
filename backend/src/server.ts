@@ -93,6 +93,7 @@ import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { generateLlmsTxt, llmsGenerationProvider } from './ai/generate-llms.js';
+import { probeModels, MODEL_PROVIDERS } from './ai/models.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
@@ -1692,6 +1693,23 @@ app.post('/api/ai/run/:promptId', async (req) => ({
   results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)),
 }));
 app.post('/api/ai/run-all', async (req) => ({ ran: await runAllPrompts(currentWorkspace(req)) }));
+
+// Probe each configured provider's live model list (version-ranked) + the
+// workspace's current selection. Used by the model picker.
+app.get('/api/ai/models', async (req) => ({ providers: await probeModels(currentWorkspace(req)) }));
+
+// Save per-provider model choices for the active workspace (owner only).
+// Body: { model_openai?: string, model_anthropic?: string, ... }; empty clears.
+app.put('/api/ai/models', async (req, reply) => {
+  const wsId = requireWorkspace(req);
+  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change model selection.' });
+  const body = (req.body ?? {}) as Record<string, string>;
+  for (const p of MODEL_PROVIDERS) {
+    const k = `model_${p}`;
+    if (body[k] !== undefined) setWorkspaceSetting(wsId, k, String(body[k]));
+  }
+  return { ok: true };
+});
 
 // Conversation thread for one prompt × provider (root run + follow-ups).
 app.get('/api/ai/prompts/:id/thread/:provider', async (req) => {
