@@ -92,6 +92,7 @@ import {
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
+import { snapshotSiteAgentReadiness, getAgentReadinessHistory } from './analytics/agent-readiness-store.js';
 import { generateLlmsTxt, llmsGenerationProvider } from './ai/generate-llms.js';
 import { probeModels, MODEL_PROVIDERS } from './ai/models.js';
 import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexer/bing.js';
@@ -1564,6 +1565,16 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
   // Surface any saved custom (AI-generated / edited) llms.txt + whether an AI
   // provider is available to generate one.
   return { ...audit, custom: site.llms_txt_content ?? null, aiProvider: llmsGenerationProvider() };
+});
+
+// Agent-readiness (isitagentready-style): run the live battery of checks, store
+// today's score, and return the breakdown + score history for the trend line.
+app.get('/api/sites/:id/agent-readiness', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  assertSiteAccess(req, site.id);
+  const current = await snapshotSiteAgentReadiness(site);
+  return { current, history: getAgentReadinessHistory(site.id) };
 });
 
 // Generate a comprehensive llms.txt with a configured AI provider (does not

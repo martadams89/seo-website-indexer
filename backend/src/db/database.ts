@@ -185,6 +185,18 @@ function initSchema(db: Database.Database): void {
       PRIMARY KEY (site_id, day)
     );
 
+    -- ── Agent-readiness scores (isitagentready-style, one row per site/day) ─
+    CREATE TABLE IF NOT EXISTS agent_readiness (
+      site_id    TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      day        TEXT NOT NULL,             -- YYYY-MM-DD
+      score      INTEGER NOT NULL,          -- 0..100 weighted
+      passed     INTEGER NOT NULL,          -- checks passed
+      total      INTEGER NOT NULL,          -- checks run
+      checks     TEXT NOT NULL,             -- JSON array of {id,label,category,pass,weight,detail}
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (site_id, day)
+    );
+
     -- ── Search-performance rollups (GSC + Bing, cached daily) ─────────────
     CREATE TABLE IF NOT EXISTS perf_daily (
       site_id     TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,

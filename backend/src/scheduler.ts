@@ -51,6 +51,7 @@ import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
 import { snapshotAllPerformance } from './analytics/perf-store.js';
+import { snapshotAllAgentReadiness } from './analytics/agent-readiness-store.js';
 import { sendWorkspaceNotification, configuredChannels } from './utils/notify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -893,6 +894,14 @@ async function _doRun(
     if (n > 0) log(runId, 'dim', `Search-performance rollups refreshed for ${n} site(s)`);
   } catch (e) {
     log(runId, 'warn', `Perf snapshot failed: ${e instanceof Error ? e.message : e}`);
+  }
+  // Agent-readiness re-score (isitagentready-style): discovery/protocol/identity
+  // surfaces per site. Network-bound, best-effort, never fails the run.
+  try {
+    const n = await snapshotAllAgentReadiness();
+    if (n > 0) log(runId, 'dim', `Agent-readiness re-scored for ${n} site(s)`);
+  } catch (e) {
+    log(runId, 'warn', `Agent-readiness snapshot failed: ${e instanceof Error ? e.message : e}`);
   }
   // Notifications are per-workspace: each workspace with configured channels
   // gets a summary of ITS OWN sites from this run (never other tenants' data).

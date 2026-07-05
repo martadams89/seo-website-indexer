@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport } from '../api';
+import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadCloud, CheckCircle2, AlertTriangle, Bot, XCircle } from 'lucide-react';
+import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport, type AgentReadiness, type AgentCheckCategory } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
 import { useSort, SortTh } from '../components/SortableTable';
@@ -16,6 +16,8 @@ export default function SiteAnalyticsPage() {
   const [llmsTab, setLlmsTab] = useState<'live' | 'generated' | 'robots'>('live');
   const [hygiene, setHygiene] = useState<HygieneReport | null>(null);
   const [hygieneLoading, setHygieneLoading] = useState(false);
+  const [agent, setAgent] = useState<AgentReadiness | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
   const [crawl, setCrawl] = useState<{ available: boolean; reason?: string; issues: Array<{ url: string; code?: number; issues: string[] }> } | null>(null);
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [bingQuota, setBingQuota] = useState<{ DailyQuota: number; MonthlyQuota: number } | null>(null);
@@ -41,6 +43,13 @@ export default function SiteAnalyticsPage() {
     try { setHygiene(await api.runHygiene(siteId)); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Hygiene check failed'); }
     setHygieneLoading(false);
+  }
+
+  async function loadAgent() {
+    setAgentLoading(true);
+    try { setAgent(await api.getAgentReadiness(siteId)); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Agent-readiness check failed'); }
+    setAgentLoading(false);
   }
 
   async function loadCrawlIssues() {
@@ -281,6 +290,59 @@ export default function SiteAnalyticsPage() {
         ) : <div className="empty-note" style={{ marginTop: 10 }}>{crawl.reason}</div>)}
       </div>
 
+      {/* Agent readiness (isitagentready-style) */}
+      <div className="panel">
+        <div className="flex items-center gap-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <h3 className="panel-title" style={{ margin: 0 }}><Bot size={13} /> Agent readiness</h3>
+          <button className="btn btn-secondary btn-sm" onClick={loadAgent} disabled={agentLoading}>
+            {agentLoading ? 'Scoring…' : agent ? 'Re-check' : 'Run check'}
+          </button>
+        </div>
+        <div className="empty-note" style={{ marginTop: 10 }}>
+          How discoverable and usable this site is to AI agents — the same families of checks as isitagentready.com
+          (robots/llms.txt, MCP, api-catalog, Web Bot Auth, DNS-AID and more), scored and tracked over time.
+        </div>
+        {agent && (
+          <div style={{ marginTop: 14 }}>
+            <div className="agent-score-head">
+              <div className="agent-score-ring" style={{ ['--v' as string]: `${agent.current.score}%`, ['--c' as string]: scoreColor(agent.current.score) }}>
+                <span className="agent-score-num">{agent.current.score}<small>%</small></span>
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{agent.current.passed}/{agent.current.total} checks passing</div>
+                <div className="agent-bar"><div className="agent-bar-fill" style={{ width: `${agent.current.score}%`, background: scoreColor(agent.current.score) }} /></div>
+                {agent.history.length > 1 && (
+                  <div style={{ marginTop: 8 }}>
+                    <Sparkline points={agent.history.map(h => h.score)} width={280} height={40} stroke={scoreColor(agent.current.score)} />
+                    <span className="text-dim" style={{ fontSize: 11 }}>score over {agent.history.length} snapshot{agent.history.length === 1 ? '' : 's'}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            {AGENT_CATEGORIES.map(cat => {
+              const items = agent.current.checks.filter(c => c.category === cat);
+              if (!items.length) return null;
+              return (
+                <div key={cat} style={{ marginTop: 14 }}>
+                  <div className="agent-cat-label">{AGENT_CAT_LABEL[cat]}</div>
+                  <div className="agent-check-grid">
+                    {items.map(c => (
+                      <div key={c.id} className={`agent-check ${c.pass ? 'ok' : 'bad'}`}>
+                        {c.pass ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                        <div>
+                          <div className="agent-check-label">{c.label}</div>
+                          <div className="agent-check-detail">{c.pass ? c.detail : (c.fix || c.detail)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* llms.txt lifecycle */}
       <div className="panel">
         <div className="flex items-center gap-2" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -377,4 +439,15 @@ export default function SiteAnalyticsPage() {
       </div>
     </div>
   );
+}
+
+const AGENT_CATEGORIES: AgentCheckCategory[] = ['discovery', 'content', 'protocol', 'identity', 'dns'];
+const AGENT_CAT_LABEL: Record<AgentCheckCategory, string> = {
+  discovery: 'Discovery', content: 'Structured content', protocol: 'Agent protocol',
+  identity: 'Identity & auth', dns: 'DNS',
+};
+function scoreColor(score: number): string {
+  if (score >= 80) return 'var(--ok)';
+  if (score >= 50) return 'var(--warn)';
+  return 'var(--error)';
 }

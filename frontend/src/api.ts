@@ -369,6 +369,9 @@ export const api = {
   removeTrackedQuery: (id: number) =>
     apiFetch<{ ok: boolean }>(`/api/performance/tracked-queries/${id}`, { method: 'DELETE' }),
 
+  // ── Agent readiness (isitagentready-style) ──
+  getAgentReadiness: (siteId: string) => apiFetch<AgentReadiness>(`/api/sites/${siteId}/agent-readiness`),
+
   // ── Hygiene / CrUX ──
   runHygiene: (siteId: string) => apiFetch<HygieneReport>(`/api/sites/${siteId}/hygiene`),
   refreshCrux: (siteId: string) => apiFetch<CruxResult | { error: string }>(`/api/crux/${siteId}/refresh`, { method: 'POST' }),
@@ -514,6 +517,16 @@ export interface HygieneReport {
   issues: Array<{ url: string; kind: string; detail: string }>;
 }
 export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
+
+export type AgentCheckCategory = 'discovery' | 'content' | 'protocol' | 'identity' | 'dns';
+export interface AgentCheck {
+  id: string; label: string; category: AgentCheckCategory;
+  pass: boolean; weight: number; detail: string; fix?: string;
+}
+export interface AgentReadiness {
+  current: { score: number; passed: number; total: number; checks: AgentCheck[] };
+  history: Array<{ day: string; score: number; passed: number; total: number }>;
+}
 
 export interface PerfSeriesPoint { date: string; clicks: number; impressions: number; ctr: number; position: number }
 export interface PerfQueryRow { query: string; clicks: number; impressions: number; ctr: number; position: number }
