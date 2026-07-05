@@ -473,6 +473,19 @@ body {
 }
 .textarea { min-height: 120px; resize: vertical; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
+/* AI models picker — compact rows, normal-height selects */
+.model-rows { display: flex; flex-direction: column; gap: 8px; }
+.model-row { display: flex; align-items: center; gap: 10px; }
+.model-row-name { flex: 0 0 84px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.model-row-select { flex: 1 1 auto; min-width: 0; height: 36px; padding-top: 0; padding-bottom: 0; font-size: 12.5px; }
+.model-row-tag { flex: 0 0 auto; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; color: var(--text-dim); background: var(--bg-input); border: 1px solid var(--border); }
+.model-row-tag.is-auto { color: var(--ok); border-color: hsla(145, 65%, 50%, 0.35); background: var(--ok-dim); }
+@media (max-width: 560px) {
+  .model-row { flex-wrap: wrap; }
+  .model-row-name { flex: 0 0 100%; }
+  .model-row-select { flex: 1 1 auto; }
+}
+
 /* ── Badge / Pill ── */
 .badge {
   display: inline-flex; align-items: center; gap: 4px;

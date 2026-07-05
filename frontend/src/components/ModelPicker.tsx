@@ -50,21 +50,24 @@ export function ModelPicker() {
         <div className="empty-note">No AI providers configured yet — add a key above and reopen this tab.</div>
       ) : (
         <>
-          {providers.map(p => {
-            const current = choices[p.provider] ?? p.selected;
-            const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
-            return (
-              <div className="input-group mb-2" key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <label className="input-label" style={{ minWidth: 90, margin: 0 }}>{LABEL[p.provider] ?? p.provider}</label>
-                <select className="input" style={{ flex: '1 1 200px', minWidth: 0 }} value={current}
-                  onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
-                  {opts.map(m => <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>)}
-                </select>
-                {!p.isOverride && current === p.recommended && <span className="badge badge-ok">auto</span>}
-              </div>
-            );
-          })}
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={saving} onClick={save}>
+          <div className="model-rows">
+            {providers.map(p => {
+              const current = choices[p.provider] ?? p.selected;
+              const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
+              const isAuto = !p.isOverride && current === p.recommended;
+              return (
+                <div className="model-row" key={p.provider}>
+                  <span className="model-row-name">{LABEL[p.provider] ?? p.provider}</span>
+                  <select className="input model-row-select" value={current}
+                    onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
+                    {opts.map(m => <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>)}
+                  </select>
+                  <span className={`model-row-tag${isAuto ? ' is-auto' : ''}`}>{isAuto ? 'auto' : 'custom'}</span>
+                </div>
+              );
+            })}
+          </div>
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} disabled={saving} onClick={save}>
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save models'}
           </button>
         </>
