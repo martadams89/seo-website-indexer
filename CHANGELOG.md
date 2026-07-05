@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.18.2](https://github.com/martadams89/seo-website-indexer/compare/v1.18.1...v1.18.2) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to v10 ([#112](https://github.com/martadams89/seo-website-indexer/issues/112)) ([e4d1b1e](https://github.com/martadams89/seo-website-indexer/commit/e4d1b1e3f9278b2c8a39a68c0d972a7fcfc704d7))
+* **deps:** update dependency nodemailer to v9 ([#115](https://github.com/martadams89/seo-website-indexer/issues/115)) ([2186cc0](https://github.com/martadams89/seo-website-indexer/commit/2186cc0a0ee3074e7993e26568332034f0be86a2))
+
 ## [1.18.1](https://github.com/martadams89/seo-website-indexer/compare/v1.18.0...v1.18.1) (2026-07-05)
 
 
