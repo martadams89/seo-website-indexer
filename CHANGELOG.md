@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/martadams89/seo-website-indexer/compare/v1.15.1...v1.16.0) (2026-07-05)
+
+
+### ✨ Features
+
+* model picker in API Keys tab, smarter defaults, mobile field overflow fixes ([#103](https://github.com/martadams89/seo-website-indexer/issues/103)) ([31ba473](https://github.com/martadams89/seo-website-indexer/commit/31ba4739b2fa8946651b1bf47b931afb34b8cd7e))
+
 ## [1.15.1](https://github.com/martadams89/seo-website-indexer/compare/v1.15.0...v1.15.1) (2026-07-05)
 
 
