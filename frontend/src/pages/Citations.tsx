@@ -145,7 +145,6 @@ function Thread({ promptId, promptText, provider, configured, onCitedChange }: {
 function ModelPicker() {
   const [providers, setProviders] = useState<ProviderModels[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -164,39 +163,43 @@ function ModelPicker() {
     } finally { setSaving(false); }
   }
 
-  if (loading || providers.length === 0) return null;
-
   return (
-    <details className="key-guide" style={{ marginBottom: 16 }} open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary>
-        <Bot size={14} />
-        <span className="key-guide-label">Models</span>
-        <span className="badge" style={{ marginLeft: 'auto' }}>{providers.length} provider{providers.length === 1 ? '' : 's'}</span>
-      </summary>
-      <div className="key-guide-body">
-        <p className="text-dim" style={{ fontSize: 12, margin: '0 0 10px' }}>
-          Probed live from each provider and defaulted to the newest available (highest version). Override per provider if you prefer a specific model.
-        </p>
-        {providers.map(p => {
-          const current = choices[p.provider] ?? p.selected;
-          const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
-          return (
-            <div className="input-group mb-2" key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <label className="input-label" style={{ minWidth: 90, margin: 0, textTransform: 'capitalize' }}>{PROVIDER_LABEL[p.provider] ?? p.provider}</label>
-              <select className="input" style={{ flex: 1 }} value={current} onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
-                {opts.map(m => (
-                  <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>
-                ))}
-              </select>
-              {!p.isOverride && current === p.recommended && <span className="badge badge-ok">auto</span>}
-            </div>
-          );
-        })}
-        <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={saving} onClick={save}>
-          {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save models'}
-        </button>
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">
+        <Bot size={13} /> AI models
+        {loading && <span className="text-dim" style={{ fontSize: 11, fontWeight: 400 }}> · probing providers…</span>}
       </div>
-    </details>
+      <p className="text-dim" style={{ fontSize: 12, margin: '0 0 10px' }}>
+        Which model each provider uses for citation checks. Probed live from each provider and defaulted to the newest available
+        (highest version wins). Override any of them below.
+      </p>
+      {loading ? (
+        <div className="text-dim" style={{ fontSize: 12 }}>Querying each configured provider's model list…</div>
+      ) : providers.length === 0 ? (
+        <div className="empty-note">No models to configure yet — add a provider API key in <strong>Settings → API Keys</strong>, then reopen this page.</div>
+      ) : (
+        <>
+          {providers.map(p => {
+            const current = choices[p.provider] ?? p.selected;
+            const opts = Array.from(new Set([p.recommended, ...p.models, p.selected])).filter(Boolean);
+            return (
+              <div className="input-group mb-2" key={p.provider} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label className="input-label" style={{ minWidth: 90, margin: 0, textTransform: 'capitalize' }}>{PROVIDER_LABEL[p.provider] ?? p.provider}</label>
+                <select className="input" style={{ flex: 1 }} value={current} onChange={e => setChoices(prev => ({ ...prev, [p.provider]: e.target.value }))}>
+                  {opts.map(m => (
+                    <option key={m} value={m}>{m}{m === p.recommended ? '  — latest' : ''}</option>
+                  ))}
+                </select>
+                {!p.isOverride && current === p.recommended && <span className="badge badge-ok">auto</span>}
+              </div>
+            );
+          })}
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={saving} onClick={save}>
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save models'}
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
