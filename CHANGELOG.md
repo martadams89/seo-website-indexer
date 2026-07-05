@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/martadams89/seo-website-indexer/compare/v1.14.1...v1.14.2) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @types/react-window to v2 ([#95](https://github.com/martadams89/seo-website-indexer/issues/95)) ([71d5801](https://github.com/martadams89/seo-website-indexer/commit/71d580100e687a2756107dd17568a47820a2ee5f))
+
 ## [1.14.1](https://github.com/martadams89/seo-website-indexer/compare/v1.14.0...v1.14.1) (2026-07-05)
 
 
