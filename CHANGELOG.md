@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/martadams89/seo-website-indexer/compare/v1.18.0...v1.18.1) (2026-07-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency fastify to ^5.10.0 ([#111](https://github.com/martadams89/seo-website-indexer/issues/111)) ([d6509dc](https://github.com/martadams89/seo-website-indexer/commit/d6509dccc4650c44b112fd0fd2da00d868fffa27))
+
 ## [1.18.0](https://github.com/martadams89/seo-website-indexer/compare/v1.17.0...v1.18.0) (2026-07-05)
 
 
