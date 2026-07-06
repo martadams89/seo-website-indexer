@@ -83,7 +83,7 @@ export { subscribeToLogs };
 let _running = false;
 let _stopRequested = false;
 let _currentRunId: string | null = null;
-let _scheduledTask: cron.ScheduledTask | null = null;
+let _scheduledTask: ReturnType<typeof cron.schedule> | null = null;
 
 export function isRunning(): boolean { return _running; }
 export function getCurrentRunId(): string | null { return _currentRunId; }
