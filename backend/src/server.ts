@@ -334,12 +334,11 @@ app.get('/api/healthz', async (_req, reply) => {
     const db = getDb();
     const row = db.prepare('SELECT 1 AS ok').get() as { ok: number };
     if (row?.ok !== 1) throw new Error('DB sanity check failed');
-    const lock = getRunLock();
     return {
       ok: true,
       ts: new Date().toISOString(),
+      // Global liveness: is ANY workspace running? (locks are per-workspace now.)
       scheduler: { running: isRunning(), currentRunId: getCurrentRunId() },
-      lock: lock ? { runId: lock.runId, acquiredAt: lock.acquiredAt } : null,
       sites: getAllSites().length,
       accounts: getAllGoogleAccounts().length,
     };
@@ -353,15 +352,15 @@ app.get('/api/healthz', async (_req, reply) => {
 app.get('/api/status', async (req) => {
   const auth = await getAuthStatus();
   const cronSchedule = getSetting('cron_schedule') ?? '0 3 * * *';
-  const lock = getRunLock();
-  // Counts are tenant-scoped: a user sees their active workspace's totals, not
-  // the whole install's.
+  // Everything is tenant-scoped: a user sees THEIR active workspace's run state
+  // and totals, not the whole install's. A run in another workspace is invisible.
   const ws = currentWorkspace(req);
+  const lock = ws ? getRunLock(ws) : null;
   return {
     auth,
     scheduler: {
-      running: isRunning(),
-      currentRunId: getCurrentRunId(),
+      running: isRunning(ws),
+      currentRunId: getCurrentRunId(ws),
       cronSchedule,
       lock: lock ? { runId: lock.runId, acquiredAt: lock.acquiredAt } : null,
     },
@@ -1070,11 +1069,14 @@ app.post('/api/sites/:id/verify-indexnow', async (req, reply) => {
 
 // ── Runs ──────────────────────────────────────────────────────────────────────
 
-app.get('/api/runs', async () => getRecentRuns(50));
+app.get('/api/runs', async (req) => getRecentRuns(50, currentWorkspace(req)));
 
 app.post('/api/runs', async (req, reply) => {
-  if (isRunning()) {
-    return reply.status(409).send({ error: 'A run is already in progress.', runId: getCurrentRunId() });
+  const ws = currentWorkspace(req);
+  if (!ws) return reply.status(400).send({ error: 'No active workspace.' });
+  // Only THIS workspace's run state matters — another tenant running never blocks you.
+  if (isRunning(ws)) {
+    return reply.status(409).send({ error: 'A run is already in progress for this workspace.', runId: getCurrentRunId(ws) });
   }
   const opts = (req.body ?? {}) as {
     siteIds?: string[];
@@ -1086,7 +1088,7 @@ app.post('/api/runs', async (req, reply) => {
     googleLimit?: number;
   };
   try {
-    const runId = await runIndexing({ trigger: 'manual', ...opts });
+    const runId = await runIndexing({ trigger: 'manual', workspaceId: ws, ...opts });
     return { ok: true, runId };
   } catch (e) {
     return reply.status(500).send({ error: String(e) });
@@ -1094,10 +1096,11 @@ app.post('/api/runs', async (req, reply) => {
 });
 
 app.post('/api/runs/stop', async (req, reply) => {
-  if (!isRunning()) {
-    return reply.status(400).send({ error: 'No run is currently in progress.' });
+  const ws = currentWorkspace(req);
+  if (!ws || !isRunning(ws)) {
+    return reply.status(400).send({ error: 'No run is currently in progress for this workspace.' });
   }
-  forceStopRun();
+  forceStopRun(ws);
   return { ok: true, message: 'Stop request sent successfully.' };
 });
 
@@ -1332,12 +1335,13 @@ app.post('/api/backups', async () => {
 // ── Lock control (admin) ──────────────────────────────────────────────────────
 
 app.post('/api/scheduler/release-lock', async (_req, reply) => {
-  // Only allow if no run is in process memory (safety).
+  // Only allow if no run is in process memory anywhere (safety).
   if (isRunning()) {
     return reply.status(409).send({ error: 'A run is currently active in-process. Stop it first.' });
   }
   const db = getDb();
-  db.prepare(`DELETE FROM settings WHERE key = 'run_lock'`).run();
+  // Locks are per-workspace now (run_lock:<workspaceId>) — clear any stuck ones.
+  db.prepare(`DELETE FROM settings WHERE key = 'run_lock' OR key LIKE 'run_lock:%'`).run();
   return { ok: true };
 });
 
@@ -1531,11 +1535,11 @@ app.post('/api/submit/:siteId', async (req, reply) => {
   if (targets.includes('google')) {
     if (!site.google_account_id) {
       result.google = { error: 'No Google account linked to this site.' };
-    } else if (isRunning()) {
-      result.google = { error: 'A run is already in progress.' };
+    } else if (isRunning(site.workspace_id)) {
+      result.google = { error: 'A run is already in progress for this workspace.' };
     } else {
       try {
-        const runId = await runIndexing({ trigger: 'manual', siteIds: [site.id], skipIndexNow: true, skipBing: true });
+        const runId = await runIndexing({ trigger: 'manual', workspaceId: site.workspace_id ?? undefined, siteIds: [site.id], skipIndexNow: true, skipBing: true });
         result.google = { runId };
       } catch (e) {
         result.google = { error: e instanceof Error ? e.message : String(e) };
