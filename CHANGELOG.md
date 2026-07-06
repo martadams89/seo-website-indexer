@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.5](https://github.com/martadams89/seo-website-indexer/compare/v1.18.4...v1.18.5) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency node-cron to v4 ([#113](https://github.com/martadams89/seo-website-indexer/issues/113)) ([0e5814a](https://github.com/martadams89/seo-website-indexer/commit/0e5814a0636aa9215aebb215d05e782b23bb9855))
+
 ## [1.18.4](https://github.com/martadams89/seo-website-indexer/compare/v1.18.3...v1.18.4) (2026-07-06)
 
 
