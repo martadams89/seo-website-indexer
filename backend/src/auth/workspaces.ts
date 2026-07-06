@@ -123,7 +123,9 @@ export function bootstrapUserWorkspace(user: User, isFirstUser: boolean): Worksp
   if (isFirstUser) {
     const db = getDb();
     db.prepare('UPDATE sites SET workspace_id = ? WHERE workspace_id IS NULL').run(ws.id);
-    db.prepare('UPDATE google_accounts SET workspace_id = ? WHERE workspace_id IS NULL').run(ws.id);
+    // Claim legacy Google accounts: set both the home workspace AND the owner
+    // (accounts are owner-level — available across all of this owner's workspaces).
+    db.prepare('UPDATE google_accounts SET workspace_id = ?, owner_user_id = COALESCE(owner_user_id, ?) WHERE workspace_id IS NULL').run(ws.id, user.id);
     // A legacy single Bing key in settings becomes this workspace's first Bing account.
     const legacyBing = db.prepare("SELECT value FROM settings WHERE key = 'bing_api_key'").get() as { value: string } | undefined;
     if (legacyBing?.value) {
