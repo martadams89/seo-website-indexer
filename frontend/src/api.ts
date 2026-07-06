@@ -568,7 +568,10 @@ export function createLogStream(onMessage: (entry: LogEntry) => void, onAlive?: 
 
   function connect() {
     if (closed) return;
-    es = new EventSource(`${BASE}/api/logs/stream`);
+    // EventSource can't set headers, so pass the active workspace as a query
+    // param — the stream only sends this workspace's logs.
+    const ws = getActiveWorkspaceId();
+    es = new EventSource(`${BASE}/api/logs/stream${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as { type: string } & LogEntry;

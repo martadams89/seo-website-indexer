@@ -387,6 +387,26 @@ function initSchema(db: Database.Database): void {
     db.exec("ALTER TABLE run_history ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
     db.exec("CREATE INDEX IF NOT EXISTS idx_run_history_ws ON run_history(workspace_id);");
   }
+  // Live logs are per-workspace too (a run belongs to a tenant).
+  const rlCols = db.prepare("PRAGMA table_info(run_logs)").all() as { name: string }[];
+  if (rlCols.length > 0 && !rlCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE run_logs ADD COLUMN workspace_id TEXT;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_run_logs_ws ON run_logs(workspace_id);");
+    // Backfill existing logs from their run's workspace.
+    db.exec(`UPDATE run_logs SET workspace_id = (
+      SELECT rh.workspace_id FROM run_history rh WHERE rh.id = run_logs.run_id
+    ) WHERE workspace_id IS NULL;`);
+  }
+  // AI citations (prompts + their results) are per-workspace.
+  const apCols = db.prepare("PRAGMA table_info(ai_prompts)").all() as { name: string }[];
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ai_prompts_ws ON ai_prompts(workspace_id);");
+    // Backfill site-linked prompts from their site's workspace.
+    db.exec(`UPDATE ai_prompts SET workspace_id = (
+      SELECT s.workspace_id FROM sites s WHERE s.id = ai_prompts.site_id
+    ) WHERE workspace_id IS NULL AND site_id IS NOT NULL;`);
+  }
   // agent_readiness gained isitagentready level/source columns.
   const arCols = db.prepare("PRAGMA table_info(agent_readiness)").all() as { name: string }[];
   if (arCols.length > 0) {
@@ -733,6 +753,7 @@ export function getUrlsBySite(siteId: string): UrlState[] {
 export interface LogEntry {
   id?: number;
   run_id: string;
+  workspace_id?: string | null;   // tenant this log belongs to (null = system/global)
   level: 'info' | 'ok' | 'warn' | 'error' | 'dim';
   message: string;
   site_id?: string;
@@ -752,20 +773,29 @@ export function pruneOldLogs(days = 30): number {
 
 export function insertLog(entry: LogEntry): void {
   getDb().prepare(`
-    INSERT INTO run_logs(run_id, level, message, site_id, url)
-    VALUES(@run_id, @level, @message, @site_id, @url)
+    INSERT INTO run_logs(run_id, workspace_id, level, message, site_id, url)
+    VALUES(@run_id, @workspace_id, @level, @message, @site_id, @url)
   `).run({
+    workspace_id: null,
     site_id: null,
     url: null,
     ...entry
   });
 }
 
-export function getLogsForRun(runId: string): LogEntry[] {
+/** Logs for a run, scoped to the caller's workspace (no cross-tenant leak). */
+export function getLogsForRun(runId: string, workspaceId?: string | null): LogEntry[] {
+  if (workspaceId) {
+    return getDb().prepare('SELECT * FROM run_logs WHERE run_id = ? AND workspace_id = ? ORDER BY id').all(runId, workspaceId) as LogEntry[];
+  }
   return getDb().prepare('SELECT * FROM run_logs WHERE run_id = ? ORDER BY id').all(runId) as LogEntry[];
 }
 
-export function getRecentLogs(limit = 200): LogEntry[] {
+/** Recent logs, scoped to one workspace (the tenant boundary). */
+export function getRecentLogs(limit = 200, workspaceId?: string | null): LogEntry[] {
+  if (workspaceId) {
+    return getDb().prepare('SELECT * FROM run_logs WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').all(workspaceId, limit) as LogEntry[];
+  }
   return getDb().prepare('SELECT * FROM run_logs ORDER BY id DESC LIMIT ?').all(limit) as LogEntry[];
 }
 

@@ -21,12 +21,14 @@ let users: UsersMod;
 let ws: WsMod;
 let db: DbMod;
 let googleAuth: typeof import('../auth/google-oauth.js');
+let citations: typeof import('../ai/citations.js');
 
 beforeAll(async () => {
   users = await import('../auth/users.js');
   ws = await import('../auth/workspaces.js');
   db = await import('../db/database.js');
   googleAuth = await import('../auth/google-oauth.js');
+  citations = await import('../ai/citations.js');
 });
 
 function makeSite(id: string, workspaceId: string) {
@@ -125,6 +127,35 @@ describe('workspace tenant isolation', () => {
     const gRuns = db.getRecentRuns(50, wsG.id).map(r => r.id);
     expect(gRuns).toContain('hist-g');
     expect(gRuns).not.toContain('hist-h'); // no cross-tenant leak
+  });
+
+  it('live logs are scoped to the workspace of their run', () => {
+    const ida = users.createUser({ email: `ida-${randomUUID()}@x.com`, password: 'password123' });
+    const jack = users.createUser({ email: `jack-${randomUUID()}@x.com`, password: 'password123' });
+    const wsI = ws.bootstrapUserWorkspace(ida, false);
+    const wsJ = ws.bootstrapUserWorkspace(jack, false);
+    db.insertLog({ run_id: 'run-i', workspace_id: wsI.id, level: 'info', message: 'i-log' });
+    db.insertLog({ run_id: 'run-j', workspace_id: wsJ.id, level: 'info', message: 'j-log' });
+    const iLogs = db.getRecentLogs(500, wsI.id).map(l => l.message);
+    expect(iLogs).toContain('i-log');
+    expect(iLogs).not.toContain('j-log'); // no cross-tenant log leak
+    expect(db.getLogsForRun('run-j', wsI.id)).toHaveLength(0); // can't read another tenant's run logs
+  });
+
+  it('AI citation prompts + results are scoped per workspace', () => {
+    const kate = users.createUser({ email: `kate-${randomUUID()}@x.com`, password: 'password123' });
+    const liam = users.createUser({ email: `liam-${randomUUID()}@x.com`, password: 'password123' });
+    const wsK = ws.bootstrapUserWorkspace(kate, false);
+    const wsL = ws.bootstrapUserWorkspace(liam, false);
+    citations.addPrompt('kate prompt', null, wsK.id);
+    citations.addPrompt('liam prompt', null, wsL.id);
+    const kPrompts = citations.listPrompts(wsK.id).map(p => p.prompt);
+    expect(kPrompts).toContain('kate prompt');
+    expect(kPrompts).not.toContain('liam prompt'); // no cross-tenant prompt leak
+    // Deleting is workspace-guarded: Kate can't delete Liam's prompt.
+    const liamPrompt = citations.listPrompts(wsL.id)[0];
+    citations.deletePrompt(liamPrompt.id, wsK.id);
+    expect(citations.listPrompts(wsL.id).map(p => p.id)).toContain(liamPrompt.id); // still there
   });
 
   it('resolves the Bing key from the site’s own workspace', () => {
