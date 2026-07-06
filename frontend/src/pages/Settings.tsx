@@ -823,12 +823,11 @@ export default function SettingsPage() {
   }
 
   async function clearAuth() {
-    if (!confirm('Clear all Google authentication credentials? You will need to re-authenticate.')) return;
+    if (!confirm('Disconnect all Google accounts from THIS workspace? Other workspaces are unaffected. You will need to re-connect them here.')) return;
     setClearLoading(true);
     await api.clearAuth();
     await refresh();
     setClearLoading(false);
-    window.location.href = '/setup';
   }
 
   return (

@@ -20,11 +20,13 @@ type DbMod = typeof import('../db/database.js');
 let users: UsersMod;
 let ws: WsMod;
 let db: DbMod;
+let googleAuth: typeof import('../auth/google-oauth.js');
 
 beforeAll(async () => {
   users = await import('../auth/users.js');
   ws = await import('../auth/workspaces.js');
   db = await import('../db/database.js');
+  googleAuth = await import('../auth/google-oauth.js');
 });
 
 function makeSite(id: string, workspaceId: string) {
@@ -65,6 +67,26 @@ describe('workspace tenant isolation', () => {
     const adminIds = ws.accessibleWorkspaces(alice).map(w => w.id);
     expect(adminIds).toContain(wsA.id);
     expect(adminIds).toContain(wsB.id);
+  });
+
+  it('clearAuthForWorkspace only clears the calling workspace’s Google accounts', () => {
+    const eve = users.createUser({ email: `eve-${randomUUID()}@x.com`, password: 'password123' });
+    const frank = users.createUser({ email: `frank-${randomUUID()}@x.com`, password: 'password123' });
+    const wsE = ws.bootstrapUserWorkspace(eve, false);
+    const wsF = ws.bootstrapUserWorkspace(frank, false);
+    const mkAcct = (workspaceId: string) => {
+      const id = `ga-${randomUUID().slice(0, 8)}`;
+      db.upsertGoogleAccount({ id, email: `${id}@x.com`, client_id: 'c', client_secret: 's', access_token: null, refresh_token: 'r', token_expiry: null, workspace_id: workspaceId });
+      return id;
+    };
+    mkAcct(wsE.id); mkAcct(wsE.id); mkAcct(wsF.id);
+    expect(db.getGoogleAccountsForWorkspace(wsE.id)).toHaveLength(2);
+    expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1);
+
+    // The bug: this used to wipe EVERY workspace's accounts. It must not.
+    googleAuth.clearAuthForWorkspace(wsE.id);
+    expect(db.getGoogleAccountsForWorkspace(wsE.id)).toHaveLength(0);
+    expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1); // Frank untouched
   });
 
   it('resolves the Bing key from the site’s own workspace', () => {

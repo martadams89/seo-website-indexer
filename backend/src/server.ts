@@ -69,7 +69,7 @@ import {
 } from './db/database.js';
 import {
   getAuthStatus,
-  clearAuth,
+  clearAuthForWorkspace,
   saveCredentials,
   exchangeCodeForTokens,
   disconnectGoogleAccount,
@@ -734,8 +734,13 @@ app.delete('/api/auth/accounts/:id', async (req, reply) => {
   return { ok: true };
 });
 
-app.post('/api/auth/clear', async () => {
-  clearAuth();
+app.post('/api/auth/clear', async (req, reply) => {
+  // Tenant-scoped: only disconnect the CURRENT workspace's Google accounts.
+  // (Previously this called the global clearAuth(), so one user clearing their
+  // credentials wiped every workspace's Google auth — a cross-tenant data loss.)
+  const ws = currentWorkspace(req);
+  if (!ws) return reply.code(400).send({ error: 'No active workspace' });
+  clearAuthForWorkspace(ws);
   return { ok: true };
 });
 
