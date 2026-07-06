@@ -19,6 +19,8 @@ import cron from 'node-cron';
 import { randomUUID } from 'crypto';
 import {
   getAllSites,
+  getEnabledSitesForWorkspace,
+  getWorkspaceIdsWithSites,
   getSetting,
   getUrlState,
   upsertUrlState,
@@ -80,18 +82,24 @@ export { subscribeToLogs };
 
 // ── Run State ─────────────────────────────────────────────────────────────────
 
-let _running = false;
-let _stopRequested = false;
-let _currentRunId: string | null = null;
+// Runs are PER-WORKSPACE: different tenants run concurrently, each with its own
+// state + persistent lock, and a run shows as "running" only in its workspace.
+interface ActiveRun { runId: string; workspaceId: string; stopRequested: boolean; }
+const _activeRuns = new Map<string, ActiveRun>(); // keyed by workspaceId
 let _scheduledTask: ReturnType<typeof cron.schedule> | null = null;
 
-export function isRunning(): boolean { return _running; }
-export function getCurrentRunId(): string | null { return _currentRunId; }
-
-export function forceStopRun(): void {
-  if (_running) {
-    _stopRequested = true;
-  }
+/** Is a run active? For a specific workspace, or (no arg) anywhere. */
+export function isRunning(workspaceId?: string | null): boolean {
+  return workspaceId ? _activeRuns.has(workspaceId) : _activeRuns.size > 0;
+}
+export function getCurrentRunId(workspaceId?: string | null): string | null {
+  if (workspaceId) return _activeRuns.get(workspaceId)?.runId ?? null;
+  const first = _activeRuns.values().next().value as ActiveRun | undefined;
+  return first?.runId ?? null;
+}
+export function forceStopRun(workspaceId: string): void {
+  const r = _activeRuns.get(workspaceId);
+  if (r) r.stopRequested = true;
 }
 
 // ── Log Helper ────────────────────────────────────────────────────────────────
@@ -118,6 +126,8 @@ function log(
 // ── Main Run ──────────────────────────────────────────────────────────────────
 
 export interface RunOptions {
+  /** The workspace (tenant) to run. Required — runs are per-workspace. */
+  workspaceId?: string;
   trigger?: 'manual' | 'scheduled';
   /** Override per-project Google Indexing daily limit for this run (testing only) */
   googleLimit?: number;
@@ -136,23 +146,25 @@ export interface RunOptions {
 }
 
 export async function runIndexing(options: RunOptions = {}): Promise<string> {
-  if (_running) throw new Error('An indexing run is already in progress.');
+  const workspaceId = options.workspaceId;
+  if (!workspaceId) throw new Error('runIndexing requires a workspaceId (runs are per-workspace).');
+  if (_activeRuns.has(workspaceId)) throw new Error('An indexing run is already in progress for this workspace.');
 
   const runId    = randomUUID();
   const trigger  = options.trigger ?? 'manual';
   const googleLimitPerProject = options.googleLimit ?? GOOGLE_DAILY_LIMIT_PER_PROJECT;
 
-  // Acquire persistent lock with TTL so a crashed run doesn't block forever.
-  if (!acquireRunLock(runId)) {
-    throw new Error('Another run holds the persistent lock. Wait for it to expire (max 60 min) or restart the server.');
+  // Per-workspace persistent lock with TTL so a crashed run doesn't block forever.
+  if (!acquireRunLock(runId, workspaceId)) {
+    throw new Error("Another run holds this workspace's lock. Wait for it to expire (max 60 min) or restart the server.");
   }
 
-  _running = true;
-  _stopRequested = false;
-  _currentRunId = runId;
+  const activeRun: ActiveRun = { runId, workspaceId, stopRequested: false };
+  _activeRuns.set(workspaceId, activeRun);
 
   const run = {
     id: runId,
+    workspace_id: workspaceId,
     started_at: new Date().toISOString(),
     finished_at: null,
     status: 'running' as const,
@@ -164,10 +176,9 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
   insertRun(run);
 
   // Run async, don't await here — caller can track via SSE
-  _doRun(runId, run, options, googleLimitPerProject).finally(() => {
-    _running = false;
-    _currentRunId = null;
-    releaseRunLock();
+  _doRun(runId, run, options, googleLimitPerProject, activeRun).finally(() => {
+    _activeRuns.delete(workspaceId);
+    releaseRunLock(workspaceId);
   });
 
   return runId;
@@ -177,9 +188,11 @@ async function _doRun(
   runId: string,
   run: { total_submitted: number; total_skipped: number; total_failed: number },
   options: RunOptions,
-  googleLimitPerProject: number
+  googleLimitPerProject: number,
+  activeRun: ActiveRun
 ): Promise<void> {
-  let allSites = getAllSites();
+  // Only this workspace's enabled sites (tenant isolation for runs).
+  let allSites = getEnabledSitesForWorkspace(activeRun.workspaceId);
   if (options.siteIds?.length) {
     allSites = allSites.filter(s => options.siteIds!.includes(s.id));
   }
@@ -217,7 +230,7 @@ async function _doRun(
   const siteDataMap = new Map<string, SiteData>();
 
   await Promise.all(allSites.map(async (site) => {
-    if (_stopRequested) return;
+    if (activeRun.stopRequested) return;
     try {
       // Fetch the primary sitemap PLUS any sitemaps declared in robots.txt
       // (e.g. llms-sitemap.xml). Partition into indexable HTML pages and
@@ -296,7 +309,7 @@ async function _doRun(
       if (targets.length > 0) {
         log(runId, 'info', `${site.domain} — auditing JSON-LD schemas for ${targets.length} pages`, site.id);
         for (const entry of targets) {
-          if (_stopRequested) break;
+          if (activeRun.stopRequested) break;
           try {
             const res = await fetch(entry.url, {
               headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (schema-crawler)' },
@@ -331,7 +344,7 @@ async function _doRun(
   if (!options.skipSitemaps) {
     log(runId, 'info', '── Step 2: Re-submitting sitemaps to Google Search Console (delta-triggered) ──');
     for (const site of allSites) {
-      if (_stopRequested) break;
+      if (activeRun.stopRequested) break;
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
@@ -431,11 +444,11 @@ async function _doRun(
     let googleSubmitted = 0;
 
     while (queues.some(q => q.pos < q.queue.length)) {
-      if (_stopRequested) break;
+      if (activeRun.stopRequested) break;
       let progressedThisRound = false;
 
       for (const sq of queues) {
-        if (_stopRequested) break;
+        if (activeRun.stopRequested) break;
         if (sq.pos >= sq.queue.length) continue;
 
         const accountId = sq.site.google_account_id || allAccounts[0]?.id;
@@ -548,7 +561,7 @@ async function _doRun(
     const indexNowBackedOff = getRecentlyBackedOffUrls('indexnow', 3, 30);
 
     for (const site of allSites) {
-      if (_stopRequested) break;
+      if (activeRun.stopRequested) break;
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
@@ -636,7 +649,7 @@ async function _doRun(
       // Track which URLs we've claimed as submitted so we can clear/record failures.
       let cursor = 0;
       for (const r of results) {
-        if (_stopRequested) break;
+        if (activeRun.stopRequested) break;
         const batchUrls = indexNowUrls.slice(cursor, cursor + r.urlCount);
         cursor += r.urlCount;
 
@@ -692,7 +705,7 @@ async function _doRun(
       const BING_DAILY_LIMIT_FALLBACK = 100; // used only if the live quota lookup fails
 
       for (const site of allSites) {
-        if (_stopRequested) break;
+        if (activeRun.stopRequested) break;
         const data = siteDataMap.get(site.id);
         if (!data || data.error) continue;
 
@@ -731,7 +744,7 @@ async function _doRun(
         const results = await submitToBingInBatches(bingApiKey, siteUrl, toSubmit);
         let cursor = 0;
         for (const r of results) {
-          if (_stopRequested) break;
+          if (activeRun.stopRequested) break;
           const batchUrls = toSubmit.slice(cursor, cursor + r.urlCount);
           cursor += r.urlCount;
           if (r.success) {
@@ -764,7 +777,7 @@ async function _doRun(
     const inspectExhaustedAccount = new Set<string>();
 
     for (const site of allSites) {
-      if (_stopRequested) break;
+      if (activeRun.stopRequested) break;
       const accountId = site.google_account_id || allAccounts[0]?.id;
       if (!accountId) {
         log(runId, 'warn', `URL Inspection skipped: No Google Account linked for site ${site.domain}.`, site.id);
@@ -806,7 +819,7 @@ async function _doRun(
       let propertyConsecutive429 = 0;
 
       for (const state of oldestInspected) {
-        if (_stopRequested) break;
+        if (activeRun.stopRequested) break;
         if (inspectExhaustedAccount.has(accountId)) break;
 
         try {
@@ -853,7 +866,7 @@ async function _doRun(
   // ── Step 6: GEO file deployment (robots.txt + llms.txt) ───────────────────
 
   for (const site of allSites) {
-    if (_stopRequested) break;
+    if (activeRun.stopRequested) break;
     // Monitor-only sites keep their hand-maintained files — never overwrite.
     if (!site.geo_manage) continue;
     // Only deploy if a target is configured.
@@ -870,7 +883,7 @@ async function _doRun(
 
   // ── Finalize ──────────────────────────────────────────────────────────────
 
-  const isStopped = _stopRequested;
+  const isStopped = activeRun.stopRequested;
   const status = isStopped ? 'failed' : (run.total_failed > 0 && run.total_submitted === 0 ? 'failed' : 'completed');
 
   if (isStopped) {
@@ -952,10 +965,14 @@ export function startScheduler(): void {
 
   _scheduledTask = cron.schedule(cronExpr, async () => {
     console.log(`[scheduler] Cron triggered (${cronExpr})`);
-    try {
-      await runIndexing({ trigger: 'scheduled' });
-    } catch (e) {
-      console.error('[scheduler] Run failed:', e);
+    // Runs are per-workspace: kick off an independent run for each tenant that
+    // has enabled sites. They run concurrently and never block one another.
+    for (const workspaceId of getWorkspaceIdsWithSites()) {
+      try {
+        await runIndexing({ trigger: 'scheduled', workspaceId });
+      } catch (e) {
+        console.error(`[scheduler] Scheduled run skipped for workspace ${workspaceId}:`, e instanceof Error ? e.message : e);
+      }
     }
   });
 

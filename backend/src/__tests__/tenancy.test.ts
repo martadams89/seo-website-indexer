@@ -102,6 +102,31 @@ describe('workspace tenant isolation', () => {
     expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1); // Frank untouched
   });
 
+  it('run locks + run history are per-workspace (concurrent tenant runs)', () => {
+    const gina = users.createUser({ email: `gina-${randomUUID()}@x.com`, password: 'password123' });
+    const hank = users.createUser({ email: `hank-${randomUUID()}@x.com`, password: 'password123' });
+    const wsG = ws.bootstrapUserWorkspace(gina, false);
+    const wsH = ws.bootstrapUserWorkspace(hank, false);
+
+    // A run in one workspace does NOT block another workspace.
+    expect(db.acquireRunLock('run-g1', wsG.id)).toBe(true);
+    expect(db.acquireRunLock('run-g2', wsG.id)).toBe(false); // G already running
+    expect(db.acquireRunLock('run-h1', wsH.id)).toBe(true);  // H runs concurrently
+    db.releaseRunLock(wsG.id);
+    expect(db.acquireRunLock('run-g3', wsG.id)).toBe(true);   // G free again
+    db.releaseRunLock(wsG.id); db.releaseRunLock(wsH.id);
+
+    // Run history is scoped to the owning workspace.
+    const mkRun = (id: string, workspaceId: string) => db.insertRun({
+      id, workspace_id: workspaceId, started_at: new Date().toISOString(), finished_at: null,
+      status: 'completed', total_submitted: 0, total_skipped: 0, total_failed: 0, trigger: 'manual',
+    });
+    mkRun('hist-g', wsG.id); mkRun('hist-h', wsH.id);
+    const gRuns = db.getRecentRuns(50, wsG.id).map(r => r.id);
+    expect(gRuns).toContain('hist-g');
+    expect(gRuns).not.toContain('hist-h'); // no cross-tenant leak
+  });
+
   it('resolves the Bing key from the site’s own workspace', () => {
     const carol = users.createUser({ email: `carol-${randomUUID()}@x.com`, password: 'password123' });
     const wsC = ws.bootstrapUserWorkspace(carol, false);

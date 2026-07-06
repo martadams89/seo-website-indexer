@@ -381,6 +381,12 @@ function initSchema(db: Database.Database): void {
       SELECT w.owner_user_id FROM workspaces w WHERE w.id = google_accounts.workspace_id
     ) WHERE owner_user_id IS NULL AND workspace_id IS NOT NULL;`);
   }
+  // Runs are per-workspace: which tenant an indexing run belongs to.
+  const rhCols = db.prepare("PRAGMA table_info(run_history)").all() as { name: string }[];
+  if (rhCols.length > 0 && !rhCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE run_history ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_run_history_ws ON run_history(workspace_id);");
+  }
   // agent_readiness gained isitagentready level/source columns.
   const arCols = db.prepare("PRAGMA table_info(agent_readiness)").all() as { name: string }[];
   if (arCols.length > 0) {
@@ -598,6 +604,17 @@ export function getSitesForWorkspace(workspaceId: string): Site[] {
     .map(decryptSiteSecrets);
 }
 
+// Enabled sites within one workspace — used by the per-workspace scheduler run.
+export function getEnabledSitesForWorkspace(workspaceId: string): Site[] {
+  return (getDb().prepare('SELECT * FROM sites WHERE workspace_id = ? AND enabled = 1 ORDER BY created_at').all(workspaceId) as Site[])
+    .map(decryptSiteSecrets);
+}
+
+/** Workspace IDs that have at least one enabled site (drives the per-workspace cron). */
+export function getWorkspaceIdsWithSites(): string[] {
+  return (getDb().prepare("SELECT DISTINCT workspace_id AS id FROM sites WHERE enabled = 1 AND workspace_id IS NOT NULL").all() as Array<{ id: string }>).map(r => r.id);
+}
+
 export function getSiteById(id: string): Site | null {
   const row = getDb().prepare('SELECT * FROM sites WHERE id = ?').get(id) as Site | undefined;
   return row ? decryptSiteSecrets(row) : null;
@@ -756,6 +773,7 @@ export function getRecentLogs(limit = 200): LogEntry[] {
 
 export interface RunRecord {
   id: string;
+  workspace_id?: string | null;   // the tenant this run belongs to (runs are per-workspace)
   started_at: string;
   finished_at: string | null;
   status: 'running' | 'completed' | 'failed';
@@ -767,9 +785,9 @@ export interface RunRecord {
 
 export function insertRun(run: RunRecord): void {
   getDb().prepare(`
-    INSERT INTO run_history(id, started_at, status, total_submitted, total_skipped, total_failed, trigger)
-    VALUES(@id, @started_at, @status, @total_submitted, @total_skipped, @total_failed, @trigger)
-  `).run(run);
+    INSERT INTO run_history(id, workspace_id, started_at, status, total_submitted, total_skipped, total_failed, trigger)
+    VALUES(@id, @workspace_id, @started_at, @status, @total_submitted, @total_skipped, @total_failed, @trigger)
+  `).run({ workspace_id: null, ...run });
 }
 
 export function updateRun(id: string, updates: Partial<RunRecord>): void {
@@ -777,7 +795,11 @@ export function updateRun(id: string, updates: Partial<RunRecord>): void {
   getDb().prepare(`UPDATE run_history SET ${sets} WHERE id = @id`).run({ id, ...updates });
 }
 
-export function getRecentRuns(limit = 20): RunRecord[] {
+/** Recent runs, optionally scoped to one workspace (the tenant boundary). */
+export function getRecentRuns(limit = 20, workspaceId?: string | null): RunRecord[] {
+  if (workspaceId) {
+    return getDb().prepare('SELECT * FROM run_history WHERE workspace_id = ? ORDER BY started_at DESC LIMIT ?').all(workspaceId, limit) as RunRecord[];
+  }
   return getDb().prepare('SELECT * FROM run_history ORDER BY started_at DESC LIMIT ?').all(limit) as RunRecord[];
 }
 
@@ -981,8 +1003,9 @@ export function getAllUrlFailures(): UrlFailure[] {
 
 // ── Run Lock with TTL ─────────────────────────────────────────────────────────
 
-const RUN_LOCK_KEY = 'run_lock';
+const RUN_LOCK_PREFIX = 'run_lock:'; // one persistent lock PER workspace (concurrent runs across tenants)
 const RUN_LOCK_TTL_MS = 60 * 60 * 1000; // 60 min — much longer than any real run
+const lockKey = (workspaceId: string) => `${RUN_LOCK_PREFIX}${workspaceId}`;
 
 export interface RunLock {
   runId: string;
@@ -990,8 +1013,9 @@ export interface RunLock {
   acquiredAt: string;
 }
 
-export function acquireRunLock(runId: string): boolean {
-  const existing = getSetting(RUN_LOCK_KEY);
+export function acquireRunLock(runId: string, workspaceId: string): boolean {
+  const key = lockKey(workspaceId);
+  const existing = getSetting(key);
   if (existing) {
     try {
       const parsed = JSON.parse(existing) as RunLock;
@@ -1000,18 +1024,18 @@ export function acquireRunLock(runId: string): boolean {
       // Stale lock — overwrite
     } catch { /* corrupt lock — overwrite */ }
   }
-  setSetting(RUN_LOCK_KEY, JSON.stringify({
+  setSetting(key, JSON.stringify({
     runId, pid: process.pid, acquiredAt: new Date().toISOString()
   } satisfies RunLock));
   return true;
 }
 
-export function releaseRunLock(): void {
-  getDb().prepare('DELETE FROM settings WHERE key = ?').run(RUN_LOCK_KEY);
+export function releaseRunLock(workspaceId: string): void {
+  getDb().prepare('DELETE FROM settings WHERE key = ?').run(lockKey(workspaceId));
 }
 
-export function getRunLock(): RunLock | null {
-  const raw = getSetting(RUN_LOCK_KEY);
+export function getRunLock(workspaceId: string): RunLock | null {
+  const raw = getSetting(lockKey(workspaceId));
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as RunLock;
