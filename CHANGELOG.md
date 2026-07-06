@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/martadams89/seo-website-indexer/compare/v1.18.5...v1.19.0) (2026-07-06)
+
+
+### ✨ Features
+
+* account-level Google accounts (shared across the owner's workspaces) ([#123](https://github.com/martadams89/seo-website-indexer/issues/123)) ([8c696c5](https://github.com/martadams89/seo-website-indexer/commit/8c696c5e6999b6a8701bee0a70ab9cac8b831c31))
+
 ## [1.18.5](https://github.com/martadams89/seo-website-indexer/compare/v1.18.4...v1.18.5) (2026-07-06)
 
 
