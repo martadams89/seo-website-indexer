@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.4](https://github.com/martadams89/seo-website-indexer/compare/v1.18.3...v1.18.4) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* scope 'Clear Google credentials' to the current workspace (cross-tenant data loss) ([#120](https://github.com/martadams89/seo-website-indexer/issues/120)) ([b227b60](https://github.com/martadams89/seo-website-indexer/commit/b227b60386ed36bfba996a7e82c9ac1853ec5367))
+
 ## [1.18.3](https://github.com/martadams89/seo-website-indexer/compare/v1.18.2...v1.18.3) (2026-07-06)
 
 
