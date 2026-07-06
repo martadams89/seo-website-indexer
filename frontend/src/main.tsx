@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import { AppProvider } from './AppContext'
 import { AuthGate } from './auth/AuthGate'
@@ -14,7 +14,6 @@ import SiteAnalyticsPage from './pages/SiteAnalytics'
 import CitationsPage from './pages/Citations'
 import SettingsPage from './pages/Settings'
 import SetupPage from './pages/Setup'
-import AccountsPage from './pages/Accounts'
 import ResetPasswordPage from './pages/ResetPassword'
 
 createRoot(document.getElementById('root')!).render(
@@ -50,7 +49,8 @@ function InnerRoutes() {
           <Route element={<Layout />}>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/sites"    element={<SitesPage />} />
-            <Route path="/accounts" element={<AccountsPage />} />
+            {/* Google accounts now live under Settings → Google Accounts */}
+            <Route path="/accounts" element={<Navigate to="/settings" replace />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/analytics/:siteId" element={<SiteAnalyticsPage />} />
             <Route path="/citations" element={<CitationsPage />} />

@@ -5,6 +5,7 @@ import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
 import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
+import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
 
 type Tab = 'account' | 'workspace' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
@@ -18,17 +19,6 @@ interface KeyGuide {
 }
 
 const KEY_GUIDES: KeyGuide[] = [
-  {
-    key: 'bing_api_key',
-    label: 'Bing Webmaster API key',
-    hint: 'Direct URL submission into your verified Bing properties + daily quota. Optional — IndexNow already notifies Bing.',
-    free: 'free',
-    steps: [
-      { text: 'Open Bing Webmaster Tools and sign in.', href: 'https://www.bing.com/webmasters/', linkLabel: 'bing.com/webmasters' },
-      { text: 'Verify your sites — "Import from Google Search Console" does it in one click.' },
-      { text: 'Gear icon (top right) → API access → API Key → generate & copy. One key covers all your verified sites.' },
-    ],
-  },
   {
     key: 'crux_api_key',
     label: 'CrUX API key (Core Web Vitals)',
@@ -109,7 +99,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boo
   { id: 'notify',    label: 'Notifications', icon: Bell },
   { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
   { id: 'schedule',  label: 'Scheduling', icon: Clock, superAdmin: true },
-  { id: 'google',    label: 'Google',     icon: User, superAdmin: true },
+  { id: 'google',    label: 'Google Accounts', icon: User },
 ];
 
 function AccountTab() {
@@ -293,17 +283,13 @@ function WorkspaceTab() {
   const [name, setName] = useState(active?.name ?? '');
   const [msg, setMsg] = useState<string | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [bing, setBing] = useState<BingAccount[]>([]);
   const [memberEmail, setMemberEmail] = useState('');
-  const [bingName, setBingName] = useState('');
-  const [bingKey, setBingKey] = useState('');
 
   const canManage = !!active?.is_owner;
 
   async function load() {
     if (!active) return;
     setMembers(await api.getWorkspaceMembers(active.id).catch(() => []));
-    setBing(await api.getBingAccounts().catch(() => []));
   }
   useEffect(() => { setName(active?.name ?? ''); load(); }, [active?.id]);
 
@@ -322,16 +308,6 @@ function WorkspaceTab() {
   async function removeMember(userId: string) {
     if (!active) return;
     await api.removeWorkspaceMember(active.id, userId).catch(() => null);
-    await load();
-  }
-  async function addBing() {
-    if (!bingKey.trim()) return;
-    setMsg(null);
-    try { await api.addBingAccount(bingName.trim() || 'Bing account', bingKey.trim()); setBingName(''); setBingKey(''); await load(); }
-    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
-  }
-  async function removeBing(id: string) {
-    await api.removeBingAccount(id).catch(() => null);
     await load();
   }
 
@@ -380,29 +356,6 @@ function WorkspaceTab() {
           </div>
         )}
         {canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>The user must already have an account (create them under the Users tab).</p>}
-      </div>
-
-      <div className="card">
-        <div className="card-title"><KeyRound size={13} /> Bing Webmaster accounts</div>
-        <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
-          Add one or more Bing API keys for this workspace. Each site can pick which account to use, or fall back to the first.
-        </p>
-        <div className="member-list">
-          {bing.map(b => (
-            <div key={b.id} className="member-row">
-              <span className="member-name">{b.name}</span>
-              {canManage && <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeBing(b.id)}><Trash2 size={13} /></button>}
-            </div>
-          ))}
-          {bing.length === 0 && <div className="empty-note">No Bing accounts yet.</div>}
-        </div>
-        {canManage && (
-          <div className="flex gap-2 mt-3 flex-wrap" style={{ maxWidth: 520 }}>
-            <input className="input" style={{ flex: '1 1 140px' }} placeholder="Label (e.g. Client A)" value={bingName} onChange={e => setBingName(e.target.value)} />
-            <input className="input" style={{ flex: '2 1 200px' }} type="password" placeholder="Bing API key" value={bingKey} onChange={e => setBingKey(e.target.value)} />
-            <button className="btn btn-secondary btn-sm" disabled={!bingKey.trim()} onClick={addBing}><Plus size={13} /> Add</button>
-          </div>
-        )}
       </div>
     </>
   );
@@ -670,6 +623,53 @@ function NotificationsTab() {
   );
 }
 
+// Bing Webmaster accounts — one or more API keys per workspace (each site can
+// pick which to use). Lives in the API Keys tab alongside the other credentials.
+function BingAccounts() {
+  const { active } = useWorkspace();
+  const canManage = !!active?.is_owner;
+  const [bing, setBing] = useState<BingAccount[]>([]);
+  const [bingName, setBingName] = useState('');
+  const [bingKey, setBingKey] = useState('');
+
+  const load = useCallback(async () => { setBing(await api.getBingAccounts().catch(() => [])); }, []);
+  useEffect(() => { load(); }, [load, active?.id]);
+
+  async function addBing() {
+    if (!bingKey.trim()) return;
+    await api.addBingAccount(bingName.trim() || 'Bing account', bingKey.trim()).catch(() => null);
+    setBingName(''); setBingKey(''); await load();
+  }
+  async function removeBing(id: string) { await api.removeBingAccount(id).catch(() => null); await load(); }
+
+  return (
+    <div className="card mt-4">
+      <div className="card-title"><KeyRound size={13} /> Bing Webmaster accounts{active ? ` — ${active.name}` : ''}</div>
+      <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+        Direct URL submission into your verified Bing properties (optional — IndexNow already pings Bing). Add one key, or
+        several (one per client property) and pick which each site uses. Generate a key at{' '}
+        <a href="https://www.bing.com/webmasters/" target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> bing.com/webmasters</a> → Settings → API access.
+      </p>
+      <div className="member-list">
+        {bing.map(b => (
+          <div key={b.id} className="member-row">
+            <span className="member-name">{b.name}</span>
+            {canManage && <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeBing(b.id)}><Trash2 size={13} /></button>}
+          </div>
+        ))}
+        {bing.length === 0 && <div className="empty-note">No Bing accounts yet.</div>}
+      </div>
+      {canManage && (
+        <div className="flex gap-2 mt-3 flex-wrap" style={{ maxWidth: 520 }}>
+          <input className="input" style={{ flex: '1 1 140px' }} placeholder="Label (e.g. Client A)" value={bingName} onChange={e => setBingName(e.target.value)} />
+          <input className="input" style={{ flex: '2 1 200px' }} type="password" placeholder="Bing API key" value={bingKey} onChange={e => setBingKey(e.target.value)} />
+          <button className="btn btn-secondary btn-sm" disabled={!bingKey.trim()} onClick={addBing}><Plus size={13} /> Add</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── API Keys tab: per-workspace overrides, layered over super-admin platform defaults ──
 function KeysTab() {
   const { user } = useAuth();
@@ -724,7 +724,7 @@ function KeysTab() {
         Keys are write-only — stored server-side, never echoed back.
       </p>
       <p className="text-dim" style={{ fontSize: 11.5, marginBottom: 14 }}>
-        <strong>Bing Webmaster:</strong> set a single key here, or manage multiple Bing accounts (one per client property) under the <strong>Workspace</strong> tab.
+        <strong>Bing Webmaster</strong> keys are managed just below (one or several — one per client property).
       </p>
       {KEY_GUIDES.map(g => (
         <details key={g.key} className="key-guide" open={!!wsVals[g.key]}>
@@ -784,6 +784,7 @@ function KeysTab() {
       </button>
       {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>Only the workspace owner can set keys for {active?.name}.</p>}
     </div>
+    <BingAccounts />
     <ModelPicker />
     </>
   );
@@ -894,56 +895,38 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* ── Google ── */}
+      {/* ── Google Accounts ── */}
       {tab === 'google' && (
-        <div className="card">
-          <div className="card-title">Google account</div>
-          <div className="flex items-center gap-3 mb-3">
-            <div style={{
-              width: 10, height: 10, borderRadius: '50%',
-              background: status?.auth.authenticated ? 'var(--ok)' : 'var(--error)',
-              boxShadow: status?.auth.authenticated ? '0 0 8px var(--ok)' : 'none',
-            }} />
-            <div>
-              {status?.auth.authenticated ? (
-                <>
-                  <span className="text-ok" style={{ fontWeight: 600 }}>Connected (Google OAuth 2.0)</span>
-                  {status.auth.expiresAt && (
-                    <div className="text-dim text-xs mt-1">
-                      Session active — token expires: {new Date(status.auth.expiresAt).toLocaleDateString()} (auto-refresh enabled)
-                    </div>
-                  )}
-                </>
-              ) : (
-                <span className="text-error" style={{ fontWeight: 600 }}>Not authenticated</span>
+        <>
+          <div className="card">
+            <div className="card-title"><User size={13} /> Connected Google accounts</div>
+            <AccountsPage embedded />
+          </div>
+
+          <div className="card mt-4">
+            <div className="card-title">Advanced</div>
+            <div className="input-group mb-3">
+              <label className="input-label">Google Cloud project ID <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
+              <input
+                className="input"
+                placeholder="auto-derived from your linked OAuth client — set only to override"
+                value={projectId}
+                onChange={e => setProjectId(e.target.value)}
+              />
+              <span className="input-hint">Used by the one-click Gemini key. Leave blank to use the project that owns your OAuth client.</span>
+            </div>
+            <div className="flex gap-2" style={{ alignItems: 'center' }}>
+              <button className="btn btn-primary btn-sm" disabled={saving === 'google'} onClick={() => save('google', { google_project_id: projectId.trim() })}>
+                {saving === 'google' ? <><span className="spinner" /> Saving…</> : saved === 'google' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
+              </button>
+              {status?.auth.authenticated && (
+                <button className="btn btn-danger btn-sm" disabled={clearLoading} onClick={clearAuth} title="Disconnect every Google account in this workspace">
+                  {clearLoading ? <><span className="spinner" /> Clearing…</> : <><LogOut size={12} /> Disconnect all</>}
+                </button>
               )}
             </div>
           </div>
-          <div className="flex gap-2 mb-4">
-            {!status?.auth.authenticated && (
-              <a href="/setup" className="btn btn-primary btn-sm">Set Up Authentication</a>
-            )}
-            {status?.auth.authenticated && (
-              <button className="btn btn-danger btn-sm" disabled={clearLoading} onClick={clearAuth}>
-                {clearLoading ? <><span className="spinner" /> Clearing…</> : <><LogOut size={12} /> Clear Credentials</>}
-              </button>
-            )}
-          </div>
-
-          <div className="input-group mb-3">
-            <label className="input-label">Google Cloud project ID <span className="text-dim" style={{ fontWeight: 400 }}>(optional)</span></label>
-            <input
-              className="input"
-              placeholder="auto-derived from your linked OAuth client — set only to override"
-              value={projectId}
-              onChange={e => setProjectId(e.target.value)}
-            />
-            <span className="input-hint">Used by the one-click Gemini key. Leave blank to use the project that owns your OAuth client.</span>
-          </div>
-          <button className="btn btn-primary" disabled={saving === 'google'} onClick={() => save('google', { google_project_id: projectId.trim() })}>
-            {saving === 'google' ? <><span className="spinner" /> Saving…</> : saved === 'google' ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save</>}
-          </button>
-        </div>
+        </>
       )}
 
       {/* ── API Keys ── */}

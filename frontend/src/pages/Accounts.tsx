@@ -3,7 +3,7 @@ import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, Smartphone } 
 import { api, getActiveWorkspaceId, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 
-export default function AccountsPage() {
+export default function AccountsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { status, refresh } = useApp();
   const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,15 +119,26 @@ export default function AccountsPage() {
 
   return (
     <div>
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Google Accounts</h1>
-          <p className="page-subtitle">Manage connected Google OAuth profiles for Search Console</p>
+      {embedded ? (
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-dim" style={{ fontSize: 12, margin: 0 }}>
+            Connect once, reuse across all your workspaces — pick the right account per site.
+          </p>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowAddForm(!showAddForm)}>
+            <Plus size={14} /> Connect Account
+          </button>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAddForm(!showAddForm)}>
-          <Plus size={14} /> Connect Account
-        </button>
-      </div>
+      ) : (
+        <div className="page-header flex items-center justify-between">
+          <div>
+            <h1 className="page-title">Google Accounts</h1>
+            <p className="page-subtitle">Manage connected Google OAuth profiles for Search Console</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => setShowAddForm(!showAddForm)}>
+            <Plus size={14} /> Connect Account
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-error mb-4">
