@@ -724,11 +724,12 @@ app.get('/api/auth/accounts', async (req) => {
 
 app.delete('/api/auth/accounts/:id', async (req, reply) => {
   const { id } = req.params as { id: string };
-  // Only disconnect an account that lives in a workspace the caller can access.
+  // Accounts are owner-level: only the owner (or a super-admin) may disconnect,
+  // which removes it from every workspace that owner uses it in.
   const acc = getGoogleAccountById(id);
   if (!acc) return reply.code(404).send({ error: 'Account not found' });
-  const ws = acc.workspace_id ?? null;
-  const allowed = ws ? canAccessWorkspace(currentUser(req), ws) : currentUser(req).is_super_admin;
+  const u = currentUser(req);
+  const allowed = acc.owner_user_id ? (acc.owner_user_id === u.id || u.is_super_admin) : u.is_super_admin;
   if (!allowed) return reply.code(404).send({ error: 'Account not found' });
   disconnectGoogleAccount(id);
   return { ok: true };
@@ -800,7 +801,9 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   }
 
   try {
-    await exchangeCodeForTokens(code, redirectUri, workspaceId);
+    // Owner = the signed-in user connecting the account; makes it available
+    // across all of their workspaces (account-level), not just `workspaceId`.
+    await exchangeCodeForTokens(code, redirectUri, workspaceId, sessionUser?.id ?? null);
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html lang="en">

@@ -108,7 +108,7 @@ async function fetchUserEmail(accessToken: string): Promise<string> {
  * Exchanges the authorization code received from Google for access/refresh tokens.
  * Persists the credentials inside SQLite.
  */
-export async function exchangeCodeForTokens(code: string, redirectUri: string, workspaceId?: string | null): Promise<string> {
+export async function exchangeCodeForTokens(code: string, redirectUri: string, workspaceId?: string | null, ownerUserId?: string | null): Promise<string> {
   const clientId     = _tempClientId     || BUILTIN_CLIENT_ID;
   const clientSecret = _tempClientSecret || BUILTIN_CLIENT_SECRET;
 
@@ -153,8 +153,9 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   const email = await fetchUserEmail(data.access_token);
 
   // Save the new account (uses email as account ID for extreme simplicity and clarity).
-  // workspace_id ties the account to the tenant that connected it; on re-link of
-  // an existing account the upsert preserves the original workspace (COALESCE).
+  // owner_user_id makes the account available across ALL of the owner's
+  // workspaces (account-level). workspace_id records the "home" workspace it was
+  // first connected in. The upsert's COALESCE preserves both on token refresh.
   upsertGoogleAccount({
     id: email,
     email,
@@ -164,6 +165,7 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
     refresh_token: data.refresh_token,
     token_expiry: expiryDate.toISOString(),
     workspace_id: workspaceId ?? null,
+    owner_user_id: ownerUserId ?? null,
   });
 
   // Best-effort: enable the Google APIs this tool needs (Web Search Indexing +

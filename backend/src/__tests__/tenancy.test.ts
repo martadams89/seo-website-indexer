@@ -69,21 +69,34 @@ describe('workspace tenant isolation', () => {
     expect(adminIds).toContain(wsB.id);
   });
 
-  it('clearAuthForWorkspace only clears the calling workspace’s Google accounts', () => {
+  const mkAcct = (workspaceId: string, ownerUserId: string) => {
+    const id = `ga-${randomUUID().slice(0, 8)}`;
+    db.upsertGoogleAccount({ id, email: `${id}@x.com`, client_id: 'c', client_secret: 's', access_token: null, refresh_token: 'r', token_expiry: null, workspace_id: workspaceId, owner_user_id: ownerUserId });
+    return id;
+  };
+
+  it('Google accounts are shared across all of one owner’s workspaces (account-level)', () => {
+    const owner = users.createUser({ email: `owner-${randomUUID()}@x.com`, password: 'password123' });
+    const wsOne = ws.bootstrapUserWorkspace(owner, false);
+    const wsTwo = ws.createWorkspace('Client B', owner.id); // same owner, second workspace
+    mkAcct(wsOne.id, owner.id); // connected while in wsOne
+
+    // The one account is available in BOTH of the owner's workspaces — so it's
+    // selectable for a site in either, and never "no accounts connected".
+    expect(db.getGoogleAccountsForWorkspace(wsOne.id)).toHaveLength(1);
+    expect(db.getGoogleAccountsForWorkspace(wsTwo.id)).toHaveLength(1);
+  });
+
+  it('clearAuthForWorkspace only clears the calling owner’s Google accounts', () => {
     const eve = users.createUser({ email: `eve-${randomUUID()}@x.com`, password: 'password123' });
     const frank = users.createUser({ email: `frank-${randomUUID()}@x.com`, password: 'password123' });
     const wsE = ws.bootstrapUserWorkspace(eve, false);
     const wsF = ws.bootstrapUserWorkspace(frank, false);
-    const mkAcct = (workspaceId: string) => {
-      const id = `ga-${randomUUID().slice(0, 8)}`;
-      db.upsertGoogleAccount({ id, email: `${id}@x.com`, client_id: 'c', client_secret: 's', access_token: null, refresh_token: 'r', token_expiry: null, workspace_id: workspaceId });
-      return id;
-    };
-    mkAcct(wsE.id); mkAcct(wsE.id); mkAcct(wsF.id);
+    mkAcct(wsE.id, eve.id); mkAcct(wsE.id, eve.id); mkAcct(wsF.id, frank.id);
     expect(db.getGoogleAccountsForWorkspace(wsE.id)).toHaveLength(2);
     expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1);
 
-    // The bug: this used to wipe EVERY workspace's accounts. It must not.
+    // The bug: this used to wipe EVERY owner's accounts. It must not.
     googleAuth.clearAuthForWorkspace(wsE.id);
     expect(db.getGoogleAccountsForWorkspace(wsE.id)).toHaveLength(0);
     expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1); // Frank untouched

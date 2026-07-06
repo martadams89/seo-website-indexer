@@ -371,6 +371,16 @@ function initSchema(db: Database.Database): void {
   if (gaCols.length > 0 && !gaCols.some(c => c.name === 'workspace_id')) {
     db.exec("ALTER TABLE google_accounts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
   }
+  // Google accounts are OWNER-level: available to every workspace the owner
+  // controls (so one connected account is reusable across that owner's
+  // workspaces). owner_user_id supersedes workspace_id for availability.
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'owner_user_id')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;");
+    // Backfill: owner = the owner of the account's home workspace.
+    db.exec(`UPDATE google_accounts SET owner_user_id = (
+      SELECT w.owner_user_id FROM workspaces w WHERE w.id = google_accounts.workspace_id
+    ) WHERE owner_user_id IS NULL AND workspace_id IS NOT NULL;`);
+  }
   // agent_readiness gained isitagentready level/source columns.
   const arCols = db.prepare("PRAGMA table_info(agent_readiness)").all() as { name: string }[];
   if (arCols.length > 0) {
@@ -805,7 +815,8 @@ export interface GoogleAccount {
   access_token: string | null;
   refresh_token: string;
   token_expiry: string | null;
-  workspace_id?: string | null;
+  workspace_id?: string | null;   // "home" workspace where it was first connected
+  owner_user_id?: string | null;  // owner: the account is available to all of this owner's workspaces
   created_at?: string;
 }
 
@@ -813,9 +824,24 @@ export function getAllGoogleAccounts(): GoogleAccount[] {
   return getDb().prepare('SELECT * FROM google_accounts ORDER BY created_at').all() as GoogleAccount[];
 }
 
-/** Google accounts belonging to one workspace (the tenant boundary). */
+/**
+ * Google accounts AVAILABLE to a workspace = every account owned by that
+ * workspace's owner. Accounts are account-level: connect once, reuse across all
+ * of the owner's workspaces, and pick the right one per site. (Cross-owner
+ * isolation is preserved — a different owner's accounts never appear.)
+ */
 export function getGoogleAccountsForWorkspace(workspaceId: string): GoogleAccount[] {
-  return getDb().prepare('SELECT * FROM google_accounts WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as GoogleAccount[];
+  return getDb().prepare(`
+    SELECT ga.* FROM google_accounts ga
+    WHERE ga.owner_user_id IS NOT NULL
+      AND ga.owner_user_id = (SELECT owner_user_id FROM workspaces WHERE id = ?)
+    ORDER BY ga.created_at
+  `).all(workspaceId) as GoogleAccount[];
+}
+
+/** All Google accounts owned by a user (their account-level pool). */
+export function getGoogleAccountsForOwner(ownerUserId: string): GoogleAccount[] {
+  return getDb().prepare('SELECT * FROM google_accounts WHERE owner_user_id = ? ORDER BY created_at').all(ownerUserId) as GoogleAccount[];
 }
 
 export function getGoogleAccountById(id: string): GoogleAccount | null {
@@ -845,8 +871,8 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
   // refreshes don't carry a workspace), while still allowing a first
   // assignment when the row had none.
   getDb().prepare(`
-    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry, workspace_id)
-    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry, @workspace_id)
+    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry, workspace_id, owner_user_id)
+    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry, @workspace_id, @owner_user_id)
     ON CONFLICT(id) DO UPDATE SET
       email         = excluded.email,
       client_id     = excluded.client_id,
@@ -854,8 +880,9 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
       access_token  = excluded.access_token,
       refresh_token = excluded.refresh_token,
       token_expiry  = excluded.token_expiry,
-      workspace_id  = COALESCE(google_accounts.workspace_id, excluded.workspace_id)
-  `).run({ workspace_id: null, ...acc });
+      workspace_id  = COALESCE(google_accounts.workspace_id, excluded.workspace_id),
+      owner_user_id = COALESCE(google_accounts.owner_user_id, excluded.owner_user_id)
+  `).run({ workspace_id: null, owner_user_id: null, ...acc });
 }
 
 export function deleteGoogleAccount(id: string): void {
