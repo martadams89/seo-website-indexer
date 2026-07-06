@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/martadams89/seo-website-indexer/compare/v1.19.0...v1.20.0) (2026-07-06)
+
+
+### ✨ Features
+
+* **ui:** Google Accounts under Settings + Bing consolidated to API Keys ([#125](https://github.com/martadams89/seo-website-indexer/issues/125)) ([4a7f4a5](https://github.com/martadams89/seo-website-indexer/commit/4a7f4a5ecda18daaf4fe6066694aa6290ef9e8d4))
+
 ## [1.19.0](https://github.com/martadams89/seo-website-indexer/compare/v1.18.5...v1.19.0) (2026-07-06)
 
 
