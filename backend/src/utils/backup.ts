@@ -61,7 +61,7 @@ export function listBackups(): Array<{ name: string; bytes: number; mtime: strin
     .sort((a, b) => b.mtime.localeCompare(a.mtime));
 }
 
-let _scheduled: cron.ScheduledTask | null = null;
+let _scheduled: ReturnType<typeof cron.schedule> | null = null;
 
 export function startBackupScheduler(): void {
   if (_scheduled) { _scheduled.stop(); _scheduled = null; }
