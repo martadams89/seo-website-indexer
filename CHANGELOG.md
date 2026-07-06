@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.18.3](https://github.com/martadams89/seo-website-indexer/compare/v1.18.2...v1.18.3) (2026-07-06)
+
+
+### 🧹 Maintenance
+
+* **deps:** lock file maintenance ([#118](https://github.com/martadams89/seo-website-indexer/issues/118)) ([e3eae5a](https://github.com/martadams89/seo-website-indexer/commit/e3eae5a3f9639a65ed32a3af10a6def5f7df3dd9))
+* **deps:** update renovatebot/github-action action to v46.1.18 ([#117](https://github.com/martadams89/seo-website-indexer/issues/117)) ([f539da1](https://github.com/martadams89/seo-website-indexer/commit/f539da19897ec4ad6cca1a5e6e1e94568c271ec2))
+
 ## [1.18.2](https://github.com/martadams89/seo-website-indexer/compare/v1.18.1...v1.18.2) (2026-07-05)
 
 
