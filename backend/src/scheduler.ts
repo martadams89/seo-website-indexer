@@ -102,6 +102,12 @@ export function forceStopRun(workspaceId: string): void {
   if (r) r.stopRequested = true;
 }
 
+/** Which workspace owns a given run (for tagging its logs). */
+function workspaceForRun(runId: string): string | null {
+  for (const r of _activeRuns.values()) if (r.runId === runId) return r.workspaceId;
+  return null;
+}
+
 // ── Log Helper ────────────────────────────────────────────────────────────────
 
 function log(
@@ -111,7 +117,7 @@ function log(
   siteId?: string,
   url?: string
 ): void {
-  const entry: LogEntry = { run_id: runId, level, message, site_id: siteId, url };
+  const entry: LogEntry = { run_id: runId, workspace_id: workspaceForRun(runId), level, message, site_id: siteId, url };
   insertLog(entry);
   emitLog(entry);
 

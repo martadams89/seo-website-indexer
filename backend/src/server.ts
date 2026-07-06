@@ -1106,18 +1106,25 @@ app.post('/api/runs/stop', async (req, reply) => {
 
 app.get('/api/runs/:id/logs', async (req) => {
   const { id } = req.params as { id: string };
-  return getLogsForRun(id);
+  return getLogsForRun(id, currentWorkspace(req));
 });
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
 app.get('/api/logs', async (req) => {
   const { limit } = req.query as { limit?: string };
-  return getRecentLogs(parseInt(limit ?? '200', 10));
+  return getRecentLogs(parseInt(limit ?? '200', 10), currentWorkspace(req));
 });
 
-// SSE: live log stream
+// SSE: live log stream — scoped to one workspace. EventSource can't set the
+// X-Workspace-Id header, so the workspace arrives as a ?workspace= query param
+// (validated against what the caller can access).
 app.get('/api/logs/stream', async (req, reply) => {
+  const user = currentUser(req);
+  const accessible = accessibleWorkspaces(user);
+  const wsParam = (req.query as { workspace?: string }).workspace;
+  const streamWs = (wsParam && accessible.some(w => w.id === wsParam)) ? wsParam : (accessible[0]?.id ?? null);
+
   reply.raw.setHeader('Content-Type', 'text/event-stream');
   reply.raw.setHeader('Cache-Control', 'no-cache');
   reply.raw.setHeader('Connection', 'keep-alive');
@@ -1131,6 +1138,7 @@ app.get('/api/logs/stream', async (req, reply) => {
   send({ type: 'connected', ts: new Date().toISOString() });
 
   const unsub = subscribeToLogs((entry) => {
+    if (entry.workspace_id !== streamWs) return; // only this workspace's logs
     send({ type: 'log', ...entry });
   });
 
@@ -1700,18 +1708,18 @@ app.get('/api/ai/providers', async () => ({
   configured: configuredProviders(),
 }));
 
-app.get('/api/ai/prompts', async () => listPrompts());
+app.get('/api/ai/prompts', async (req) => listPrompts(currentWorkspace(req)));
 app.post('/api/ai/prompts', async (req, reply) => {
   const { prompt, site_id } = (req.body ?? {}) as { prompt?: string; site_id?: string };
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt required' });
-  return addPrompt(prompt.trim(), site_id ?? null);
+  return addPrompt(prompt.trim(), site_id ?? null, currentWorkspace(req));
 });
 app.delete('/api/ai/prompts/:id', async (req) => {
-  deletePrompt(Number((req.params as { id: string }).id));
+  deletePrompt(Number((req.params as { id: string }).id), currentWorkspace(req));
   return { ok: true };
 });
 
-app.get('/api/ai/results', async () => getResults());
+app.get('/api/ai/results', async (req) => getResults(200, currentWorkspace(req)));
 app.post('/api/ai/run/:promptId', async (req) => ({
   results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)),
 }));

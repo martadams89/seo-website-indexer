@@ -6,7 +6,7 @@
  * Every provider is optional: configure its API key in Settings and it joins
  * the panel; unconfigured providers are skipped silently.
  */
-import { getDb, effectiveSetting, getAllSites } from '../db/database.js';
+import { getDb, effectiveSetting, getAllSites, getSitesForWorkspace } from '../db/database.js';
 import { resolveModel, type ModelProvider } from './models.js';
 import { logSystem } from '../utils/logger.js';
 
@@ -198,8 +198,9 @@ const ASK: Record<Provider, (turns: ChatTurn[], key: string, modelId?: string) =
 };
 
 /** Domains we count as "ours" for citation detection. */
-function trackedDomains(): string[] {
-  return getAllSites().map(s => s.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, ''));
+function trackedDomains(workspaceId: string | null = null): string[] {
+  const sites = workspaceId ? getSitesForWorkspace(workspaceId) : getAllSites();
+  return sites.map(s => s.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, ''));
 }
 
 function findDomains(answer: ProviderAnswer, domains: string[]): string[] {
@@ -207,22 +208,40 @@ function findDomains(answer: ProviderAnswer, domains: string[]): string[] {
   return domains.filter(d => hay.includes(d.toLowerCase()));
 }
 
-export interface PromptRow { id: number; site_id: string | null; prompt: string; enabled: number; created_at: string }
+export interface PromptRow { id: number; workspace_id: string | null; site_id: string | null; prompt: string; enabled: number; created_at: string }
 
-export function listPrompts(): PromptRow[] {
+/** Prompts for one workspace (the tenant boundary). */
+export function listPrompts(workspaceId: string | null = null): PromptRow[] {
+  if (workspaceId) {
+    return getDb().prepare('SELECT * FROM ai_prompts WHERE workspace_id = ? ORDER BY created_at DESC').all(workspaceId) as PromptRow[];
+  }
   return getDb().prepare('SELECT * FROM ai_prompts ORDER BY created_at DESC').all() as PromptRow[];
 }
 
-export function addPrompt(prompt: string, siteId?: string | null): PromptRow {
-  const r = getDb().prepare('INSERT INTO ai_prompts(site_id, prompt) VALUES(?, ?)').run(siteId ?? null, prompt);
+export function addPrompt(prompt: string, siteId?: string | null, workspaceId: string | null = null): PromptRow {
+  const r = getDb().prepare('INSERT INTO ai_prompts(site_id, prompt, workspace_id) VALUES(?, ?, ?)').run(siteId ?? null, prompt, workspaceId);
   return getDb().prepare('SELECT * FROM ai_prompts WHERE id = ?').get(r.lastInsertRowid) as PromptRow;
 }
 
-export function deletePrompt(id: number): void {
-  getDb().prepare('DELETE FROM ai_prompts WHERE id = ?').run(id);
+/** Delete a prompt, but only if it belongs to the caller's workspace. */
+export function deletePrompt(id: number, workspaceId: string | null = null): void {
+  if (workspaceId) {
+    getDb().prepare('DELETE FROM ai_prompts WHERE id = ? AND workspace_id = ?').run(id, workspaceId);
+  } else {
+    getDb().prepare('DELETE FROM ai_prompts WHERE id = ?').run(id);
+  }
 }
 
-export function getResults(limit = 200): Array<Record<string, unknown>> {
+/** Citation results, scoped to one workspace's prompts. */
+export function getResults(limit = 200, workspaceId: string | null = null): Array<Record<string, unknown>> {
+  if (workspaceId) {
+    return getDb().prepare(`
+      SELECT r.*, p.prompt, p.site_id FROM ai_results r
+      JOIN ai_prompts p ON p.id = r.prompt_id
+      WHERE p.workspace_id = ?
+      ORDER BY r.created_at DESC LIMIT ?
+    `).all(workspaceId, limit) as Array<Record<string, unknown>>;
+  }
   return getDb().prepare(`
     SELECT r.*, p.prompt, p.site_id FROM ai_results r
     JOIN ai_prompts p ON p.id = r.prompt_id
@@ -235,7 +254,7 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
   const db = getDb();
   const row = db.prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
   if (!row) throw new Error('Prompt not found');
-  const domains = trackedDomains();
+  const domains = trackedDomains(workspaceId);
   const providers = configuredProviders(workspaceId);
   if (providers.length === 0) throw new Error('No AI provider API keys configured (Settings)');
 
@@ -269,7 +288,7 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
 
 /** Run all enabled prompts (used by the scheduler's citation sweep). */
 export async function runAllPrompts(workspaceId: string | null = null): Promise<number> {
-  const prompts = listPrompts().filter(p => p.enabled);
+  const prompts = listPrompts(workspaceId).filter(p => p.enabled);
   let n = 0;
   for (const p of prompts) {
     try { await runPrompt(p.id, workspaceId); n++; } catch { /* logged in runPrompt */ }
@@ -313,7 +332,7 @@ export async function replyInThread(promptId: number, provider: Provider, follow
   if (turns.length === 0) turns.push({ role: 'user', content: promptRow.prompt });
   turns.push({ role: 'user', content: followUp });
 
-  const domains = trackedDomains();
+  const domains = trackedDomains(workspaceId);
   const parent = getThread(promptId, provider).at(-1);
   const modelId = resolveModel(workspaceId, provider as ModelProvider);
   const answer = await ASK[provider](turns, key, modelId);
