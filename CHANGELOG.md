@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/martadams89/seo-website-indexer/compare/v1.21.1...v1.22.0) (2026-07-06)
+
+
+### ✨ Features
+
+* per-workspace live logs + AI citations (tenant isolation) ([#131](https://github.com/martadams89/seo-website-indexer/issues/131)) ([51027b0](https://github.com/martadams89/seo-website-indexer/commit/51027b05e1b4c990ef3d3bb22ce716a728fb203f))
+
 ## [1.21.1](https://github.com/martadams89/seo-website-indexer/compare/v1.21.0...v1.21.1) (2026-07-06)
 
 
