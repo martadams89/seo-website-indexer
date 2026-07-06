@@ -25,6 +25,7 @@ import {
   getSetting,
   setSetting,
   getAllGoogleAccounts,
+  getGoogleAccountsForWorkspace,
   getGoogleAccountById,
   upsertGoogleAccount,
   deleteGoogleAccount,
@@ -311,10 +312,21 @@ export function disconnectGoogleAccount(id: string): void {
   _tokenCache.delete(id);
 }
 
-/** Backward-compatible stub: wipes all accounts and tokens */
+/** Disconnect every Google account in ONE workspace (tenant-scoped). */
+export function clearAuthForWorkspace(workspaceId: string): void {
+  for (const acc of getGoogleAccountsForWorkspace(workspaceId)) {
+    disconnectGoogleAccount(acc.id);
+  }
+}
+
+/**
+ * DANGER: wipes ALL Google accounts across EVERY workspace/tenant. Only for
+ * a single-tenant reset / super-admin factory-reset — never expose this on a
+ * per-user route (that caused a cross-tenant data-loss: one user clearing
+ * their creds nuked every workspace's Google auth). Use clearAuthForWorkspace.
+ */
 export function clearAuth(): void {
-  const accounts = getAllGoogleAccounts();
-  for (const acc of accounts) {
+  for (const acc of getAllGoogleAccounts()) {
     disconnectGoogleAccount(acc.id);
   }
 }
