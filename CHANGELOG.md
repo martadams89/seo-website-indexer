@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/martadams89/seo-website-indexer/compare/v1.20.0...v1.21.0) (2026-07-06)
+
+
+### ✨ Features
+
+* per-workspace concurrent indexing runs ([#127](https://github.com/martadams89/seo-website-indexer/issues/127)) ([e668978](https://github.com/martadams89/seo-website-indexer/commit/e668978f21e67d5c924cab91447440a976307d2f))
+
 ## [1.20.0](https://github.com/martadams89/seo-website-indexer/compare/v1.19.0...v1.20.0) (2026-07-06)
 
 
