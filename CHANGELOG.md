@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/martadams89/seo-website-indexer/compare/v1.21.0...v1.21.1) (2026-07-06)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vitest to ^4.1.10 ([#129](https://github.com/martadams89/seo-website-indexer/issues/129)) ([0cb82c6](https://github.com/martadams89/seo-website-indexer/commit/0cb82c6c3f622908c311548e7c80d073bd4f9bdc))
+
 ## [1.21.0](https://github.com/martadams89/seo-website-indexer/compare/v1.20.0...v1.21.0) (2026-07-06)
 
 
