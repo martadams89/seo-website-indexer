@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.1](https://github.com/martadams89/seo-website-indexer/compare/v1.22.0...v1.22.1) (2026-07-06)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency typescript-eslint to ^8.63.0 ([#133](https://github.com/martadams89/seo-website-indexer/issues/133)) ([489f8d7](https://github.com/martadams89/seo-website-indexer/commit/489f8d75b1b33aec2c0d65e96b98168786c4710c))
+
 ## [1.22.0](https://github.com/martadams89/seo-website-indexer/compare/v1.21.1...v1.22.0) (2026-07-06)
 
 
