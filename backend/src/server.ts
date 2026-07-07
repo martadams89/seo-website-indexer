@@ -60,6 +60,7 @@ import {
   getAllGoogleAccounts,
   getGoogleAccountsForWorkspace,
   getGoogleAccountById,
+  isGoogleAccountAvailableToWorkspace,
   getUrlsBySite,
   getAllQuotaUsageForDay,
   getAllUrlFailures,
@@ -350,11 +351,12 @@ app.get('/api/healthz', async (_req, reply) => {
 // ── Status ────────────────────────────────────────────────────────────────────
 
 app.get('/api/status', async (req) => {
-  const auth = await getAuthStatus();
-  const cronSchedule = getSetting('cron_schedule') ?? '0 3 * * *';
-  // Everything is tenant-scoped: a user sees THEIR active workspace's run state
-  // and totals, not the whole install's. A run in another workspace is invisible.
+  // Everything is tenant-scoped: a user sees THEIR active workspace's run state,
+  // auth status and totals, not the whole install's. A run (or Google account)
+  // in another workspace is invisible.
   const ws = currentWorkspace(req);
+  const auth = await getAuthStatus(ws);
+  const cronSchedule = getSetting('cron_schedule') ?? '0 3 * * *';
   const lock = ws ? getRunLock(ws) : null;
   return {
     auth,
@@ -849,9 +851,10 @@ app.get('/api/auth/gsc-sites', async (req, reply) => {
   const ws = currentWorkspace(req);
   try {
     if (accountId) {
-      // Authorize: the account must belong to the active workspace.
-      const acc = getGoogleAccountById(accountId);
-      if (!acc || (acc.workspace_id ?? null) !== ws) {
+      // Authorize: the account must be available to the active workspace
+      // (account-level — usable across all of its owner's workspaces, not
+      // just the one it was first connected in).
+      if (!ws || !isGoogleAccountAvailableToWorkspace(accountId, ws)) {
         return reply.status(404).send({ error: 'Account not found' });
       }
       const sites = await listGSCSites(accountId);
@@ -921,11 +924,11 @@ app.post('/api/sites', async (req, reply) => {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
   }
   const workspaceId = requireWorkspace(req);
-  // A site may only be linked to a Google account in its own workspace.
+  // A site may only be linked to a Google account available to its workspace
+  // (account-level — usable across all of the owner's workspaces).
   if (googleAccountId) {
-    const acc = getGoogleAccountById(googleAccountId);
-    if (!acc || (acc.workspace_id ?? null) !== workspaceId) {
-      return reply.status(400).send({ error: 'That Google account is not in this workspace.' });
+    if (!isGoogleAccountAvailableToWorkspace(googleAccountId, workspaceId)) {
+      return reply.status(400).send({ error: 'That Google account is not available in this workspace.' });
     }
   }
   const id = randomUUID();
@@ -982,11 +985,11 @@ app.put('/api/sites/:id', async (req, reply) => {
     updates.google_account_id !== undefined ? updates.google_account_id :
     undefined;
 
-  // Validate the FK target exists AND lives in this site's workspace, otherwise
+  // Validate the FK target exists AND is available to this site's workspace
+  // (account-level — usable across all of the owner's workspaces), otherwise
   // the upsert would either throw or link across a tenant boundary.
   if (incomingAccountId) {
-    const acc = getGoogleAccountById(incomingAccountId);
-    if (!acc || (acc.workspace_id ?? null) !== (existing.workspace_id ?? null)) {
+    if (!existing.workspace_id || !isGoogleAccountAvailableToWorkspace(incomingAccountId, existing.workspace_id)) {
       return reply.status(400).send({
         error: `Google account "${incomingAccountId}" is not available in this workspace.`,
       });

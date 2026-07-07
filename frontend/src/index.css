@@ -1504,16 +1504,15 @@ body {
 
 /* ── Settings tabs & key guides ───────────────────────────────────────────── */
 .settings-tabs {
-  display: flex; gap: 4px; margin-bottom: 16px;
-  border-bottom: 1px solid var(--border); overflow-x: auto;
-  scrollbar-width: none;
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
-.settings-tabs::-webkit-scrollbar { display: none; }
 .settings-tab {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 9px 14px; font-size: 12.5px; font-weight: 600;
   background: none; border: none; border-bottom: 2px solid transparent;
   color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+  flex-shrink: 0;
 }
 .settings-tab:hover { color: var(--text-primary, inherit); }
 .settings-tab.active { color: var(--accent, #7c6cf5); border-bottom-color: var(--accent, #7c6cf5); }
@@ -1795,6 +1794,4 @@ body {
 select, select.input { min-width: 0; }
 .input-group { min-width: 0; }
 .input-hint code, .card code, .empty-note code, .alert code { overflow-wrap: anywhere; word-break: break-word; }
-.settings-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.settings-tabs .settings-tab { flex-shrink: 0; }
 .flex.flex-wrap { flex-wrap: wrap; }

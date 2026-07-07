@@ -81,12 +81,52 @@ describe('workspace tenant isolation', () => {
     const owner = users.createUser({ email: `owner-${randomUUID()}@x.com`, password: 'password123' });
     const wsOne = ws.bootstrapUserWorkspace(owner, false);
     const wsTwo = ws.createWorkspace('Client B', owner.id); // same owner, second workspace
-    mkAcct(wsOne.id, owner.id); // connected while in wsOne
+    const acctId = mkAcct(wsOne.id, owner.id); // connected while in wsOne
 
     // The one account is available in BOTH of the owner's workspaces — so it's
     // selectable for a site in either, and never "no accounts connected".
     expect(db.getGoogleAccountsForWorkspace(wsOne.id)).toHaveLength(1);
     expect(db.getGoogleAccountsForWorkspace(wsTwo.id)).toHaveLength(1);
+
+    // And it's actually usable (not just listed) in both — the check used to
+    // authorize linking/using an account, not just displaying it.
+    expect(db.isGoogleAccountAvailableToWorkspace(acctId, wsOne.id)).toBe(true);
+    expect(db.isGoogleAccountAvailableToWorkspace(acctId, wsTwo.id)).toBe(true);
+
+    // A different owner's workspace never sees it (strict cross-account isolation).
+    const stranger = users.createUser({ email: `stranger-${randomUUID()}@x.com`, password: 'password123' });
+    const wsStranger = ws.bootstrapUserWorkspace(stranger, false);
+    expect(db.isGoogleAccountAvailableToWorkspace(acctId, wsStranger.id)).toBe(false);
+  });
+
+  it('a Google account already owned by one user cannot be taken over by another', () => {
+    const owner = users.createUser({ email: `own2-${randomUUID()}@x.com`, password: 'password123' });
+    const other = users.createUser({ email: `other-${randomUUID()}@x.com`, password: 'password123' });
+    const acctId = mkAcct(ws.bootstrapUserWorkspace(owner, false).id, owner.id);
+
+    // The original owner may always reconnect/refresh it.
+    expect(db.canOwnGoogleAccount(acctId, owner.id)).toBe(true);
+    // A different tenant reconnecting the SAME Google email must be rejected —
+    // otherwise the upsert would silently overwrite the original owner's
+    // tokens with the other tenant's, a cross-account credential clash.
+    expect(db.canOwnGoogleAccount(acctId, other.id)).toBe(false);
+
+    // A brand-new (never-connected) email has no owner yet, so anyone may claim it.
+    expect(db.canOwnGoogleAccount(`ga-${randomUUID()}@x.com`, other.id)).toBe(true);
+  });
+
+  it('auth status is scoped to the workspace, not leaked from other tenants', () => {
+    const connected = users.createUser({ email: `conn-${randomUUID()}@x.com`, password: 'password123' });
+    const bare = users.createUser({ email: `bare-${randomUUID()}@x.com`, password: 'password123' });
+    const wsConnected = ws.bootstrapUserWorkspace(connected, false);
+    const wsBare = ws.bootstrapUserWorkspace(bare, false);
+    mkAcct(wsConnected.id, connected.id);
+
+    // A tenant with a connected Google account sees itself as authenticated...
+    expect(googleAuth.getAuthStatus(wsConnected.id).authenticated).toBe(true);
+    // ...but a totally unrelated tenant with NO accounts of its own must not,
+    // even though some other tenant in the same install has one connected.
+    expect(googleAuth.getAuthStatus(wsBare.id).authenticated).toBe(false);
   });
 
   it('clearAuthForWorkspace only clears the calling owner’s Google accounts', () => {
