@@ -29,6 +29,7 @@ import {
   getGoogleAccountById,
   upsertGoogleAccount,
   deleteGoogleAccount,
+  canOwnGoogleAccount,
   type GoogleAccount
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
@@ -151,6 +152,17 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   
   // Fetch Google email address to identify account
   const email = await fetchUserEmail(data.access_token);
+
+  // Reject if this Google account already belongs to a different tenant.
+  // Without this, the upsert below would silently overwrite that tenant's
+  // tokens with ours while leaving ownership unchanged — a cross-tenant
+  // credential clash, not a real reassignment. Strict account-level tenancy:
+  // a Google account connected under one account is never usable by another.
+  if (ownerUserId && !canOwnGoogleAccount(email, ownerUserId)) {
+    throw new Error(
+      `This Google account (${email}) is already connected to a different account in this app. Disconnect it there first, or sign in with a different Google account.`
+    );
+  }
 
   // Save the new account (uses email as account ID for extreme simplicity and clarity).
   // owner_user_id makes the account available across ALL of the owner's
@@ -292,9 +304,16 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
   return refreshAccountToken(account);
 }
 
-/** Returns the current authentication status for the API/UI. */
-export function getAuthStatus(): AuthStatus {
-  const accounts = getAllGoogleAccounts();
+/**
+ * Returns the current authentication status for the API/UI, scoped to
+ * `workspaceId`'s owner (account-level). Falls back to every account when no
+ * workspace is given (system-wide checks, e.g. /api/health).
+ * IMPORTANT: pass the caller's workspace — using getAllGoogleAccounts() here
+ * would leak "authenticated" across tenants (a workspace with zero Google
+ * accounts would appear connected just because a DIFFERENT tenant has one).
+ */
+export function getAuthStatus(workspaceId?: string | null): AuthStatus {
+  const accounts = workspaceId ? getGoogleAccountsForWorkspace(workspaceId) : getAllGoogleAccounts();
   const hasBuiltin = hasBuiltinCredentials();
   const authenticated = accounts.length > 0;
   

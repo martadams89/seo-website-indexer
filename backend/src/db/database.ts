@@ -891,6 +891,17 @@ export function getGoogleAccountsForWorkspace(workspaceId: string): GoogleAccoun
   `).all(workspaceId) as GoogleAccount[];
 }
 
+/**
+ * True if `accountId` is usable from `workspaceId` (i.e. it's in the list
+ * `getGoogleAccountsForWorkspace` would return). This is the single source of
+ * truth for authorizing use of a Google account, so a shared account is
+ * actually usable in every one of its owner's workspaces — not just visible
+ * in the picker but rejected everywhere except its original "home" workspace.
+ */
+export function isGoogleAccountAvailableToWorkspace(accountId: string, workspaceId: string): boolean {
+  return getGoogleAccountsForWorkspace(workspaceId).some(a => a.id === accountId);
+}
+
 /** All Google accounts owned by a user (their account-level pool). */
 export function getGoogleAccountsForOwner(ownerUserId: string): GoogleAccount[] {
   return getDb().prepare('SELECT * FROM google_accounts WHERE owner_user_id = ? ORDER BY created_at').all(ownerUserId) as GoogleAccount[];
@@ -907,6 +918,18 @@ export function getGoogleAccountByEmail(email: string): GoogleAccount | null {
 /** Assign (or move) a Google account to a workspace. */
 export function setGoogleAccountWorkspace(id: string, workspaceId: string): void {
   getDb().prepare('UPDATE google_accounts SET workspace_id = ? WHERE id = ?').run(workspaceId, id);
+}
+
+/**
+ * True unless the account already belongs to a DIFFERENT owner. Guards the
+ * upsert below: without this, a second tenant reconnecting the same Google
+ * email would silently overwrite the first owner's tokens (ownership stays
+ * with the original owner via COALESCE, but their credentials would now
+ * secretly be the second tenant's) — a cross-tenant credential clash.
+ */
+export function canOwnGoogleAccount(id: string, ownerUserId: string): boolean {
+  const existing = getGoogleAccountById(id);
+  return !existing?.owner_user_id || existing.owner_user_id === ownerUserId;
 }
 
 export function upsertGoogleAccount(acc: GoogleAccount): void {
