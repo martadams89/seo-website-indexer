@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.22.2](https://github.com/martadams89/seo-website-indexer/compare/v1.22.1...v1.22.2) (2026-07-07)
+
+
+### 🐛 Bug Fixes
+
+* account-level Google account reuse + visible settings nav ([#135](https://github.com/martadams89/seo-website-indexer/issues/135)) ([9444c13](https://github.com/martadams89/seo-website-indexer/commit/9444c13ecfc13d8c59666c2418268b7934ec65b6))
+* add missing Vite dev proxy for /api ([#136](https://github.com/martadams89/seo-website-indexer/issues/136)) ([f9e7997](https://github.com/martadams89/seo-website-indexer/commit/f9e79970a1418a2223a6b6378f7f57714fe26671))
+
 ## [1.22.1](https://github.com/martadams89/seo-website-indexer/compare/v1.22.0...v1.22.1) (2026-07-06)
 
 
