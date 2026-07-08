@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.3](https://github.com/martadams89/seo-website-indexer/compare/v1.22.2...v1.22.3) (2026-07-08)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/node to ^24.13.3 ([#138](https://github.com/martadams89/seo-website-indexer/issues/138)) ([72a34f3](https://github.com/martadams89/seo-website-indexer/commit/72a34f3636def3c72c355e9a950ba972b352bf9b))
+
 ## [1.22.2](https://github.com/martadams89/seo-website-indexer/compare/v1.22.1...v1.22.2) (2026-07-07)
 
 
