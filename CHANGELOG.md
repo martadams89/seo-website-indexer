@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.8](https://github.com/martadams89/seo-website-indexer/compare/v1.22.7...v1.22.8) (2026-07-09)
+
+
+### 🧹 Maintenance
+
+* **renovate:** hold frontend TypeScript major bumps until typescript-eslint supports TS7 ([#149](https://github.com/martadams89/seo-website-indexer/issues/149)) ([681e2d0](https://github.com/martadams89/seo-website-indexer/commit/681e2d034f38afe19305f302c866819200056f1b))
+
 ## [1.22.7](https://github.com/martadams89/seo-website-indexer/compare/v1.22.6...v1.22.7) (2026-07-09)
 
 
