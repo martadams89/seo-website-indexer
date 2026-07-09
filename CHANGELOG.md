@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.7](https://github.com/martadams89/seo-website-indexer/compare/v1.22.6...v1.22.7) (2026-07-09)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** stop cloud-platform scope breaking token refresh (invalid_rapt) ([#147](https://github.com/martadams89/seo-website-indexer/issues/147)) ([0ea4b5a](https://github.com/martadams89/seo-website-indexer/commit/0ea4b5aee1fc20878b2df97f5e887f992c4e28dd))
+
 ## [1.22.6](https://github.com/martadams89/seo-website-indexer/compare/v1.22.5...v1.22.6) (2026-07-09)
 
 
