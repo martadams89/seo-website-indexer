@@ -15,6 +15,13 @@
   },
   "packageRules": [
     {
+      "description": "frontend/'s typescript-eslint crashes outright on TypeScript 7 (peer range is still <6.1.0, and it's a real runtime TypeError, not just a stale peer warning) \u2014 hold major TS bumps there until typescript-eslint ships TS7 support. backend/ has no such dependency and can update freely. Remove once typescript-eslint's peer range covers ^7.",
+      "matchFileNames": ["frontend/package.json"],
+      "matchDepNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "description": "Auto-merge everything \u2014 major/minor/patch/pin/digest \u2014 once required CI is green (backend tests+build, frontend lint+build, full Docker build). CI is the gate, not semver.",
       "matchUpdateTypes": [
         "major",
