@@ -381,6 +381,13 @@ function initSchema(db: Database.Database): void {
       SELECT w.owner_user_id FROM workspaces w WHERE w.id = google_accounts.workspace_id
     ) WHERE owner_user_id IS NULL AND workspace_id IS NOT NULL;`);
   }
+  // Marks an account whose refresh token can no longer be refreshed (revoked, or
+  // killed by a Google Workspace reauth/session-control policy → invalid_rapt).
+  // Lets the UI flag "Reconnect required" and stops us hammering Google's token
+  // endpoint on every scheduler run for a token that will never succeed again.
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'needs_reauth')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN needs_reauth INTEGER NOT NULL DEFAULT 0;");
+  }
   // Runs are per-workspace: which tenant an indexing run belongs to.
   const rhCols = db.prepare("PRAGMA table_info(run_history)").all() as { name: string }[];
   if (rhCols.length > 0 && !rhCols.some(c => c.name === 'workspace_id')) {
@@ -869,6 +876,7 @@ export interface GoogleAccount {
   token_expiry: string | null;
   workspace_id?: string | null;   // "home" workspace where it was first connected
   owner_user_id?: string | null;  // owner: the account is available to all of this owner's workspaces
+  needs_reauth?: number;          // 1 when the refresh token is dead (revoked / reauth policy) and the user must reconnect
   created_at?: string;
 }
 
@@ -958,6 +966,16 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
       workspace_id  = COALESCE(google_accounts.workspace_id, excluded.workspace_id),
       owner_user_id = COALESCE(google_accounts.owner_user_id, excluded.owner_user_id)
   `).run({ workspace_id: null, owner_user_id: null, ...acc });
+}
+
+/**
+ * Flag (or clear) an account as needing reconnection. Set when a token refresh
+ * fails permanently (revoked token / reauth policy); cleared on the next
+ * successful refresh or reconnect. Kept as a targeted UPDATE so it never
+ * disturbs the token columns the upsert manages.
+ */
+export function setGoogleAccountNeedsReauth(id: string, needsReauth: boolean): void {
+  getDb().prepare('UPDATE google_accounts SET needs_reauth = ? WHERE id = ?').run(needsReauth ? 1 : 0, id);
 }
 
 export function deleteGoogleAccount(id: string): void {
