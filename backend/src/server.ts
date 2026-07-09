@@ -720,6 +720,7 @@ app.get('/api/auth/accounts', async (req) => {
     email: acc.email,
     client_id: acc.client_id,
     created_at: acc.created_at,
+    needs_reauth: acc.needs_reauth ? 1 : 0,
   }));
 });
 
@@ -734,6 +735,23 @@ app.delete('/api/auth/accounts/:id', async (req, reply) => {
   if (!allowed) return reply.code(404).send({ error: 'Account not found' });
   disconnectGoogleAccount(id);
   return { ok: true };
+});
+
+// Re-authorise an EXISTING account without disconnecting it or re-typing the
+// client id/secret. We prime the pending OAuth exchange with the account's
+// already-stored credentials; the popup then runs the normal consent flow and
+// the callback re-mints tokens onto the same row (matched by Google email),
+// clearing any needs_reauth flag. Returns the client id so the frontend can
+// build the consent URL for self-hosted (non-builtin) OAuth clients.
+app.post('/api/auth/accounts/:id/reconnect', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const acc = getGoogleAccountById(id);
+  if (!acc) return reply.code(404).send({ error: 'Account not found' });
+  const u = currentUser(req);
+  const allowed = acc.owner_user_id ? (acc.owner_user_id === u.id || u.is_super_admin) : u.is_super_admin;
+  if (!allowed) return reply.code(404).send({ error: 'Account not found' });
+  saveCredentials(acc.client_id, acc.client_secret);
+  return { ok: true, clientId: acc.client_id };
 });
 
 app.post('/api/auth/clear', async (req, reply) => {

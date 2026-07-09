@@ -68,6 +68,7 @@ export interface GoogleAccount {
   email: string | null;
   client_id: string;
   created_at: string;
+  needs_reauth?: number;
 }
 
 export interface Site {
@@ -243,6 +244,8 @@ export const api = {
   getAccounts: () => apiFetch<GoogleAccount[]>('/api/auth/accounts'),
   disconnectAccount: (id: string) =>
     apiFetch<{ ok: boolean }>(`/api/auth/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  reconnectAccount: (id: string) =>
+    apiFetch<{ ok: boolean; clientId: string }>(`/api/auth/accounts/${encodeURIComponent(id)}/reconnect`, { method: 'POST' }),
 
   // Sites
   getSites: () => apiFetch<Site[]>('/api/sites'),

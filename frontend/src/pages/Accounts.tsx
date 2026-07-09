@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, Smartphone } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, AlertTriangle, RefreshCw, Smartphone } from 'lucide-react';
 import { api, getActiveWorkspaceId, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 
@@ -14,7 +14,12 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [connecting, setConnecting] = useState(false);
-  const [autoSetup, setAutoSetup] = useState(true);
+  const [reconnectingId, setReconnectingId] = useState<string | null>(null);
+  // Opt-in, not default: ticking this requests the broad cloud-platform scope,
+  // which makes refresh tokens for managed (Google Workspace) accounts subject
+  // to reauth/session-control policies → periodic "invalid_rapt" failures. Core
+  // Search Console + Indexing works without it.
+  const [autoSetup, setAutoSetup] = useState(false);
   const [connectError, setConnectError] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -51,15 +56,25 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
     return () => window.removeEventListener('message', handleMessage);
   }, [refresh]);
 
-  async function startGoogleAuth() {
+  // `reconnect` re-authorises an existing account in place: it reuses the
+  // account's stored client id/secret (primed server-side), so the user never
+  // has to disconnect it or re-enter credentials — the fresh tokens land on the
+  // same row and clear its "Reconnect required" flag.
+  async function startGoogleAuth(reconnect?: GoogleAccount) {
     setConnectError('');
-    setConnecting(true);
+    if (reconnect) setReconnectingId(reconnect.id); else setConnecting(true);
     try {
-      if (!hasBuiltin) {
-        await api.saveCredentials(clientId.trim(), clientSecret.trim());
+      let activeClientId: string;
+      if (reconnect) {
+        // Prime the pending exchange with the account's stored credentials.
+        const primed = await api.reconnectAccount(reconnect.id);
+        activeClientId = primed.clientId;
+      } else {
+        if (!hasBuiltin) {
+          await api.saveCredentials(clientId.trim(), clientSecret.trim());
+        }
+        activeClientId = hasBuiltin ? (status?.auth?.clientId || '') : clientId.trim();
       }
-      
-      const activeClientId = hasBuiltin ? (status?.auth?.clientId || '') : clientId.trim();
       if (!activeClientId) {
         throw new Error('Google OAuth Client ID is missing.');
       }
@@ -98,6 +113,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       setConnectError(String(e).replace('Error: ', ''));
     }
     setConnecting(false);
+    setReconnectingId(null);
   }
 
   async function disconnectAccount(id: string, email: string | null) {
@@ -179,12 +195,14 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
           <label className="autosetup-row">
             <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
             <div>
-              <strong>Auto-configure Google APIs</strong> <span className="badge badge-ok">recommended</span>
+              <strong>Auto-configure Google APIs</strong>
               <div className="text-dim" style={{ fontSize: 11.5 }}>
                 After you sign in, the tool enables the Web Search Indexing &amp; Search Console APIs on your
-                project for you, and can provision a one-click Gemini key later. This requests Google Cloud
-                access on the consent screen. Uncheck for the minimal scope (you'll enable those APIs by hand
-                in the Cloud console).
+                project for you, and can provision a one-click Gemini key later. This requests broad Google
+                Cloud access on the consent screen. <strong>Managed (Google Workspace) accounts:</strong> leave
+                this unchecked — the Cloud scope makes your login subject to your organisation's re-authentication
+                policy and forces a periodic reconnect. Search Console indexing works without it; you can enable
+                those APIs by hand in the Cloud console.
               </div>
             </div>
           </label>
@@ -196,7 +214,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
               </div>
               <h3 style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>One-Click Google Sign-In</h3>
               <p className="text-secondary text-xs mb-3">Uses your pre-configured environment credentials.</p>
-              <button className="btn btn-primary" onClick={startGoogleAuth} disabled={connecting}>
+              <button className="btn btn-primary" onClick={() => startGoogleAuth()} disabled={connecting}>
                 {connecting ? 'Launching popup…' : 'Sign in with Google'}
               </button>
             </div>
@@ -218,7 +236,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
 
               <div className="flex gap-2 justify-end">
                 <button className="btn btn-secondary" onClick={() => setShowAddForm(false)}>Cancel</button>
-                <button className="btn btn-primary" disabled={!clientId.trim() || !clientSecret.trim() || connecting} onClick={startGoogleAuth}>
+                <button className="btn btn-primary" disabled={!clientId.trim() || !clientSecret.trim() || connecting} onClick={() => startGoogleAuth()}>
                   {connecting ? 'Launching popup…' : 'Start Authorization'}
                 </button>
               </div>
@@ -242,18 +260,36 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
         ) : (
           <div className="flex-col gap-3">
             {accounts.map(acc => (
-              <div key={acc.id} className="flex items-center gap-3 p-3" style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-input)' }}>
-                <div style={{ background: 'var(--ok-dim)', width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <ShieldCheck size={18} style={{ color: 'var(--ok)' }} />
+              <div key={acc.id} className="flex items-center gap-3 p-3" style={{ border: `1px solid ${acc.needs_reauth ? 'var(--error)' : 'var(--border)'}`, borderRadius: 8, background: 'var(--bg-input)' }}>
+                <div style={{ background: acc.needs_reauth ? 'var(--error-dim)' : 'var(--ok-dim)', width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {acc.needs_reauth
+                    ? <AlertTriangle size={18} style={{ color: 'var(--error)' }} />
+                    : <ShieldCheck size={18} style={{ color: 'var(--ok)' }} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{acc.email || 'Google Account'}</div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {acc.email || 'Google Account'}
+                    {!!acc.needs_reauth && <span className="badge badge-error">Reconnect required</span>}
+                  </div>
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <span>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></span>
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>
+                  {!!acc.needs_reauth && (
+                    <div style={{ fontSize: 11, color: 'var(--error)', marginTop: 4 }}>
+                      Its Google token can no longer be refreshed (revoked or a Workspace reauth policy). Click <strong>Reconnect</strong> to re-authorise — it reuses this account's credentials, so no need to disconnect or re-enter your client ID/secret.
+                    </div>
+                  )}
                 </div>
+                <button
+                  className={`btn btn-sm ${acc.needs_reauth ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => startGoogleAuth(acc)}
+                  disabled={reconnectingId === acc.id}
+                  title="Reconnect this account (reuses stored credentials)"
+                >
+                  <RefreshCw size={14} /> {reconnectingId === acc.id ? 'Reconnecting…' : 'Reconnect'}
+                </button>
                 <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => disconnectAccount(acc.id, acc.email)} title="Disconnect Account">
                   <Trash2 size={14} /> Disconnect
                 </button>

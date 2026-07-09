@@ -29,6 +29,7 @@ import {
   getGoogleAccountById,
   upsertGoogleAccount,
   deleteGoogleAccount,
+  setGoogleAccountNeedsReauth,
   canOwnGoogleAccount,
   type GoogleAccount
 } from '../db/database.js';
@@ -180,6 +181,11 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
     owner_user_id: ownerUserId ?? null,
   });
 
+  // Reconnecting mints a fresh refresh token, so clear any stale reauth flag
+  // (the upsert's ON CONFLICT preserves the old needs_reauth value otherwise).
+  setGoogleAccountNeedsReauth(email, false);
+  _tokenCache.delete(email);
+
   // Best-effort: enable the Google APIs this tool needs (Web Search Indexing +
   // Search Console) on the linked project, so the user doesn't have to do it by
   // hand in the Cloud console. Needs the cloud-platform scope; if that wasn't
@@ -254,13 +260,25 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     error_description?: string;
   };
   if (!data.access_token) {
-    // 'invalid_grant' = user revoked or refresh token expired (~6 months unused)
+    // 'invalid_grant' = the refresh token is permanently dead: the user revoked
+    // access, it expired (~6 months unused), OR a Google Workspace reauth /
+    // session-control policy killed it. The last case surfaces as
+    // "invalid_grant: reauth related error (invalid_rapt)" and is triggered by
+    // the sensitive cloud-platform scope (opt-in "Auto-configure" box) — the
+    // core webmasters/indexing scopes don't attract it. Persist a needs_reauth
+    // flag so the UI can prompt for reconnection and the scheduler stops
+    // retrying a token that will never refresh again.
     const isInvalidGrant = data.error === 'invalid_grant';
+    const isReauth = isInvalidGrant && /rapt|reauth/i.test(data.error_description ?? '');
+    if (isInvalidGrant) setGoogleAccountNeedsReauth(account.id, true);
+    _tokenCache.delete(account.id);
     throw new Error(
       `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_description ? `: ${data.error_description}` : ''}). ` +
-      (isInvalidGrant
-        ? 'Refresh token has been revoked or expired. Please reconnect this account on the Accounts page.'
-        : 'Please re-connect this account on the Google Accounts tab.')
+      (isReauth
+        ? 'Your Google Workspace requires periodic re-authentication (reauth policy). Please reconnect this account on the Accounts page — leaving "Auto-configure Google APIs" unchecked avoids this recurring for managed accounts.'
+        : isInvalidGrant
+          ? 'Refresh token has been revoked or expired. Please reconnect this account on the Accounts page.'
+          : 'Please re-connect this account on the Google Accounts tab.')
     );
   }
 
@@ -273,6 +291,8 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     account.refresh_token = data.refresh_token;
   }
   upsertGoogleAccount(account);
+  // A successful refresh clears any prior reauth flag (e.g. after reconnecting).
+  if (account.needs_reauth) setGoogleAccountNeedsReauth(account.id, false);
 
   _tokenCache.set(account.id, { token: data.access_token, expiry: expiryDate });
 
