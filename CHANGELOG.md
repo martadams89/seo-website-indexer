@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.9](https://github.com/martadams89/seo-website-indexer/compare/v1.22.8...v1.22.9) (2026-07-11)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.7.0 ([#151](https://github.com/martadams89/seo-website-indexer/issues/151)) ([c7486c6](https://github.com/martadams89/seo-website-indexer/commit/c7486c6eedb475d141bb4f96b453c9e5a0cc7673))
+
 ## [1.22.8](https://github.com/martadams89/seo-website-indexer/compare/v1.22.7...v1.22.8) (2026-07-09)
 
 
