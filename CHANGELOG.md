@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.11](https://github.com/martadams89/seo-website-indexer/compare/v1.22.10...v1.22.11) (2026-07-11)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.0 ([#155](https://github.com/martadams89/seo-website-indexer/issues/155)) ([13d4aad](https://github.com/martadams89/seo-website-indexer/commit/13d4aad022fc892150568588541296bc9b281aa1))
+
 ## [1.22.10](https://github.com/martadams89/seo-website-indexer/compare/v1.22.9...v1.22.10) (2026-07-11)
 
 
