@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.15](https://github.com/martadams89/seo-website-indexer/compare/v1.22.14...v1.22.15) (2026-07-14)
+
+
+### 🧹 Maintenance
+
+* **deps:** update actions/setup-node action to v7 ([#164](https://github.com/martadams89/seo-website-indexer/issues/164)) ([bafd193](https://github.com/martadams89/seo-website-indexer/commit/bafd1935a96df683bf9e32f555a057059c34f848))
+
 ## [1.22.14](https://github.com/martadams89/seo-website-indexer/compare/v1.22.13...v1.22.14) (2026-07-13)
 
 
