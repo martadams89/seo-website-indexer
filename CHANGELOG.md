@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.16](https://github.com/martadams89/seo-website-indexer/compare/v1.22.15...v1.22.16) (2026-07-16)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vite to ^8.1.5 ([#166](https://github.com/martadams89/seo-website-indexer/issues/166)) ([8ec6b6b](https://github.com/martadams89/seo-website-indexer/commit/8ec6b6b43b1bd786442e9b484644dfdb2af9771b))
+
 ## [1.22.15](https://github.com/martadams89/seo-website-indexer/compare/v1.22.14...v1.22.15) (2026-07-14)
 
 
