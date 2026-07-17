@@ -79,6 +79,19 @@ interface CachedToken {
 }
 const _tokenCache = new Map<string, CachedToken>();
 
+// In-flight refresh, keyed by account id. Google accounts are shared across a
+// user's workspaces, and a single snapshot/run can fire several Google API
+// calls for the same account at once (see perf-store.ts's Promise.all, and
+// the scheduler's concurrent per-workspace runs). Without de-duping, two
+// callers whose cached token expired at the same moment would each fire an
+// independent refresh_token request. Google occasionally rotates the refresh
+// token on refresh (see the comment in refreshAccountToken below), so the
+// loser of that race would get invalid_grant for a token the winner had
+// already superseded — wrongly flagging a perfectly healthy account as
+// needs_reauth. Routing concurrent callers through the same in-flight promise
+// closes that window.
+const _inFlightRefresh = new Map<string, Promise<string>>();
+
 // ── Temporary Custom Credentials Cache ────────────────────────────────────────
 
 let _tempClientId: string | null = null;
@@ -270,8 +283,24 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     // retrying a token that will never refresh again.
     const isInvalidGrant = data.error === 'invalid_grant';
     const isReauth = isInvalidGrant && /rapt|reauth/i.test(data.error_description ?? '');
-    if (isInvalidGrant) setGoogleAccountNeedsReauth(account.id, true);
+
+    // Belt-and-suspenders on top of the in-flight de-dup in
+    // getAccessTokenForAccount: if the DB's refresh_token no longer matches
+    // the one this request sent, a concurrent refresh already won and
+    // rotated it (or the user reconnected mid-flight) — this failure is
+    // stale, not a real dead account, so don't flag needs_reauth over it.
+    const current = isInvalidGrant ? getGoogleAccountById(account.id) : null;
+    const supersededByConcurrentRefresh = !!current && current.refresh_token !== account.refresh_token;
+
+    if (isInvalidGrant && !supersededByConcurrentRefresh) setGoogleAccountNeedsReauth(account.id, true);
     _tokenCache.delete(account.id);
+
+    if (supersededByConcurrentRefresh && current!.access_token && current!.token_expiry && new Date(current!.token_expiry) > new Date()) {
+      const expiryDate = new Date(current!.token_expiry);
+      _tokenCache.set(account.id, { token: current!.access_token, expiry: expiryDate });
+      return current!.access_token;
+    }
+
     throw new Error(
       `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_description ? `: ${data.error_description}` : ''}). ` +
       (isReauth
@@ -310,6 +339,14 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
     return cached.token;
   }
 
+  // Join an already-running refresh for this account rather than starting a
+  // second one. Safe to check before the DB read below: everything from here
+  // up to the first `await` inside refreshAccountToken runs synchronously, so
+  // a concurrent caller can never observe this map between the check and the
+  // set.
+  const inFlight = _inFlightRefresh.get(accountId);
+  if (inFlight) return inFlight;
+
   const account = getGoogleAccountById(accountId);
   if (!account) {
     throw new Error(`Google Account "${accountId}" not found. Link your account first.`);
@@ -321,7 +358,11 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
     return account.access_token;
   }
 
-  return refreshAccountToken(account);
+  const refreshPromise = refreshAccountToken(account).finally(() => {
+    _inFlightRefresh.delete(accountId);
+  });
+  _inFlightRefresh.set(accountId, refreshPromise);
+  return refreshPromise;
 }
 
 /**
