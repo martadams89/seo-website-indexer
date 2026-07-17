@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.18](https://github.com/martadams89/seo-website-indexer/compare/v1.22.17...v1.22.18) (2026-07-17)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** eliminate concurrent Google token refresh race ([#170](https://github.com/martadams89/seo-website-indexer/issues/170)) ([a663100](https://github.com/martadams89/seo-website-indexer/commit/a663100dd11a8012b735da8acc8da072f3bc9e98))
+
 ## [1.22.17](https://github.com/martadams89/seo-website-indexer/compare/v1.22.16...v1.22.17) (2026-07-17)
 
 
