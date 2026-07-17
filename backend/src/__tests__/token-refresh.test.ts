@@ -109,6 +109,24 @@ describe('Google token refresh', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('cross-process lock: a second holder is blocked until the first releases, then a stale lock can be taken over', () => {
+    const id = seedExpiredAccount();
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-a', 20_000)).toBe(true);
+    // Same TTL window: a different holder must not also acquire it.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-b', 20_000)).toBe(false);
+
+    db.releaseGoogleTokenLock(id, 'holder-a');
+    // Freed: a new holder can now acquire it.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-b', 20_000)).toBe(true);
+
+    // Releasing with the wrong holder (already-superseded) must not clear it.
+    db.releaseGoogleTokenLock(id, 'holder-a');
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-c', 20_000)).toBe(false);
+
+    // A negative TTL always counts the held lock as stale — forced takeover.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-c', -1_000)).toBe(true);
+  });
+
   it('does not flag needs_reauth when a losing concurrent refresh hits invalid_grant against an already-rotated token', async () => {
     const id = seedExpiredAccount();
 

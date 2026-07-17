@@ -21,6 +21,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import { randomUUID } from 'crypto';
 import {
   getSetting,
   setSetting,
@@ -31,6 +32,8 @@ import {
   deleteGoogleAccount,
   setGoogleAccountNeedsReauth,
   canOwnGoogleAccount,
+  tryAcquireGoogleTokenLock,
+  releaseGoogleTokenLock,
   type GoogleAccount
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
@@ -328,6 +331,52 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
   return data.access_token;
 }
 
+const TOKEN_LOCK_TTL_MS = 20_000; // stale-lock takeover — much longer than any real token-endpoint round trip
+const TOKEN_LOCK_POLL_MS = 200;
+const TOKEN_LOCK_MAX_WAIT_MS = 20_000; // ~ one TTL cycle; if still stuck, take the lock over rather than hang the request
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Cross-process counterpart to the in-process single-flight guard in
+ * getAccessTokenForAccount: wraps refreshAccountToken in a DB-backed lock so
+ * that if this app is ever scaled to multiple instances sharing one SQLite
+ * file, only one of them refreshes a given account's token at a time. Other
+ * instances poll the row and pick up the winner's fresh token instead of
+ * also POSTing the same (about-to-be-superseded) refresh_token to Google.
+ */
+async function refreshAccountTokenWithLock(account: GoogleAccount): Promise<string> {
+  const holder = `${process.pid}:${randomUUID()}`;
+  const start = Date.now();
+  let acquired = tryAcquireGoogleTokenLock(account.id, holder, TOKEN_LOCK_TTL_MS);
+
+  while (!acquired) {
+    const latest = getGoogleAccountById(account.id);
+    if (latest?.access_token && latest.token_expiry && new Date(latest.token_expiry) > new Date()) {
+      const expiryDate = new Date(latest.token_expiry);
+      _tokenCache.set(account.id, { token: latest.access_token, expiry: expiryDate });
+      return latest.access_token;
+    }
+    if (Date.now() - start > TOKEN_LOCK_MAX_WAIT_MS) {
+      // Waited a full TTL cycle with no fresh token appearing — the holder
+      // almost certainly crashed mid-refresh. Force the takeover unconditionally
+      // (negative "TTL" so the staleness check always passes) rather than hang.
+      acquired = tryAcquireGoogleTokenLock(account.id, holder, -1_000);
+      break;
+    }
+    await sleep(TOKEN_LOCK_POLL_MS);
+    acquired = tryAcquireGoogleTokenLock(account.id, holder, TOKEN_LOCK_TTL_MS);
+  }
+
+  try {
+    return await refreshAccountToken(account);
+  } finally {
+    if (acquired) releaseGoogleTokenLock(account.id, holder);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -358,7 +407,7 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
     return account.access_token;
   }
 
-  const refreshPromise = refreshAccountToken(account).finally(() => {
+  const refreshPromise = refreshAccountTokenWithLock(account).finally(() => {
     _inFlightRefresh.delete(accountId);
   });
   _inFlightRefresh.set(accountId, refreshPromise);
