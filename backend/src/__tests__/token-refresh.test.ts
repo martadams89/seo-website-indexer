@@ -88,4 +88,65 @@ describe('Google token refresh', () => {
     await expect(oauth.getAccessTokenForAccount(id)).rejects.toThrow(/Token refresh failed/i);
     expect(db.getGoogleAccountById(id)?.needs_reauth).toBe(0);
   });
+
+  it('de-dupes concurrent refreshes for the same account into a single token-endpoint call', async () => {
+    const id = seedExpiredAccount();
+    const fetchMock = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ access_token: 'fresh-access-token', refresh_token: 'rt-2', expires_in: 3600 }),
+    } as unknown as Response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Two workspaces sharing this account (or two Google calls in the same
+    // Promise.all) both see an expired token at once.
+    const [a, b] = await Promise.all([
+      oauth.getAccessTokenForAccount(id),
+      oauth.getAccessTokenForAccount(id),
+    ]);
+
+    expect(a).toBe('fresh-access-token');
+    expect(b).toBe('fresh-access-token');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cross-process lock: a second holder is blocked until the first releases, then a stale lock can be taken over', () => {
+    const id = seedExpiredAccount();
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-a', 20_000)).toBe(true);
+    // Same TTL window: a different holder must not also acquire it.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-b', 20_000)).toBe(false);
+
+    db.releaseGoogleTokenLock(id, 'holder-a');
+    // Freed: a new holder can now acquire it.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-b', 20_000)).toBe(true);
+
+    // Releasing with the wrong holder (already-superseded) must not clear it.
+    db.releaseGoogleTokenLock(id, 'holder-a');
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-c', 20_000)).toBe(false);
+
+    // A negative TTL always counts the held lock as stale — forced takeover.
+    expect(db.tryAcquireGoogleTokenLock(id, 'holder-c', -1_000)).toBe(true);
+  });
+
+  it('does not flag needs_reauth when a losing concurrent refresh hits invalid_grant against an already-rotated token', async () => {
+    const id = seedExpiredAccount();
+
+    // Simulate a refresh that raced a concurrent one which already rotated
+    // the refresh_token in the DB before this call's response came back.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      db.upsertGoogleAccount({
+        id, email: id, client_id: '123-abc.apps.googleusercontent.com', client_secret: 'shh',
+        access_token: 'winner-access-token', refresh_token: 'rt-rotated-by-winner',
+        token_expiry: new Date(Date.now() + 3600_000).toISOString(),
+        workspace_id: null, owner_user_id: null,
+      });
+      return {
+        ok: false, status: 400,
+        json: async () => ({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }),
+      } as unknown as Response;
+    }));
+
+    const token = await oauth.getAccessTokenForAccount(id);
+    expect(token).toBe('winner-access-token');
+    expect(db.getGoogleAccountById(id)?.needs_reauth).toBe(0);
+  });
 });

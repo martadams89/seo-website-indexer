@@ -318,6 +318,19 @@ function initSchema(db: Database.Database): void {
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_bing_accounts_ws ON bing_accounts(workspace_id);
+
+    -- Cross-process advisory lock so only one process refreshes a given
+    -- Google account's token at a time (accounts are shared across a user's
+    -- workspaces, and this app may one day run as more than one instance
+    -- against the same SQLite file). The in-process single-flight guard in
+    -- google-oauth.ts covers a single instance; this covers the same race
+    -- across instances. acquired_at drives TTL-based takeover of a lock
+    -- abandoned by a crashed process.
+    CREATE TABLE IF NOT EXISTS google_token_locks (
+      account_id  TEXT PRIMARY KEY,
+      holder      TEXT NOT NULL,
+      acquired_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Backwards compatibility migrations
@@ -1116,5 +1129,39 @@ export function getRunLock(workspaceId: string): RunLock | null {
   } catch {
     return null;
   }
+}
+
+// ── Google Token Refresh Lock (cross-process, TTL takeover) ─────────────────
+//
+// Unlike the run lock above (JS-side read-then-write — fine for run starts,
+// which are rare, human/cron-timescale events), token refreshes for a shared
+// account can genuinely be attempted within the same millisecond (e.g. a
+// Promise.all of several Google API calls). The acquire below is a single
+// conditional UPSERT so the check-and-take is atomic in SQLite itself, not
+// just in this process's JS: a stale lock is only stolen when the UPDATE's
+// WHERE clause matches, and SQLite guarantees only one connection's statement
+// wins that race.
+
+/**
+ * Attempt to acquire the refresh lock for a Google account. Returns true if
+ * acquired (either the lock was free, or held past `ttlMs` by a holder that
+ * never released it — most likely a crashed process). `holder` should be
+ * unique per attempt so a caller can safely release only the lock it holds.
+ */
+export function tryAcquireGoogleTokenLock(accountId: string, holder: string, ttlMs: number): boolean {
+  const result = getDb().prepare(`
+    INSERT INTO google_token_locks (account_id, holder, acquired_at)
+    VALUES (@account_id, @holder, datetime('now'))
+    ON CONFLICT(account_id) DO UPDATE SET
+      holder = excluded.holder,
+      acquired_at = excluded.acquired_at
+    WHERE (unixepoch('now') - unixepoch(google_token_locks.acquired_at)) * 1000 > @ttlMs
+  `).run({ account_id: accountId, holder, ttlMs });
+  return result.changes > 0;
+}
+
+/** Release the lock, but only if `holder` still holds it (no-op otherwise — it was already taken over). */
+export function releaseGoogleTokenLock(accountId: string, holder: string): void {
+  getDb().prepare('DELETE FROM google_token_locks WHERE account_id = ? AND holder = ?').run(accountId, holder);
 }
 
