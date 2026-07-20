@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.19](https://github.com/martadams89/seo-website-indexer/compare/v1.22.18...v1.22.19) (2026-07-20)
+
+
+### 🧹 Maintenance
+
+* **deps:** lock file maintenance ([#172](https://github.com/martadams89/seo-website-indexer/issues/172)) ([fbc7606](https://github.com/martadams89/seo-website-indexer/commit/fbc7606286e0bca6c678042bab0168ea877ec2e8))
+
 ## [1.22.18](https://github.com/martadams89/seo-website-indexer/compare/v1.22.17...v1.22.18) (2026-07-17)
 
 
