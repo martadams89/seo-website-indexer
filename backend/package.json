@@ -1,6 +1,6 @@
 {
   "name": "seo-website-indexer-backend",
-  "version": "1.22.21",
+  "version": "1.22.22",
   "description": "Self-hosted Google Search Console + IndexNow submission engine",
   "type": "module",
   "main": "dist/server.js",
