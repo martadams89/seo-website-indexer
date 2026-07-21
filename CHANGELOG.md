@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.23](https://github.com/martadams89/seo-website-indexer/compare/v1.22.22...v1.22.23) (2026-07-21)
+
+
+### 🧹 Maintenance
+
+* **renovate:** run daily at 2am UTC ([#181](https://github.com/martadams89/seo-website-indexer/issues/181)) ([7a4f767](https://github.com/martadams89/seo-website-indexer/commit/7a4f7674eae0ddb8efa49d17983a53cdc8f29aef))
+
 ## [1.22.22](https://github.com/martadams89/seo-website-indexer/compare/v1.22.21...v1.22.22) (2026-07-21)
 
 
