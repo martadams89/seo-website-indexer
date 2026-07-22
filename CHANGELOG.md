@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.24](https://github.com/martadams89/seo-website-indexer/compare/v1.22.23...v1.22.24) (2026-07-22)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.0.4 ([#183](https://github.com/martadams89/seo-website-indexer/issues/183)) ([236ca1f](https://github.com/martadams89/seo-website-indexer/commit/236ca1f24fc3b2f65584e2ab481927819bf66b5a))
+
 ## [1.22.23](https://github.com/martadams89/seo-website-indexer/compare/v1.22.22...v1.22.23) (2026-07-21)
 
 
