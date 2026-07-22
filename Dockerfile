@@ -36,7 +36,12 @@ WORKDIR /app
 # Copy backend dist + node_modules (production only)
 COPY --from=backend-builder /app/backend/dist ./dist
 COPY backend/package*.json ./
-RUN npm ci --only=production --prefer-offline
+# better-sqlite3 has no prebuilt musl/Alpine binary, so node-gyp needs a C++
+# toolchain here too — install it just for this layer, then remove it so the
+# final image doesn't carry compiler tooling.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+    && npm ci --only=production --prefer-offline \
+    && apk del .build-deps
 
 # Copy compiled frontend into the dist/public directory
 # Fastify @fastify/static will serve it from there
