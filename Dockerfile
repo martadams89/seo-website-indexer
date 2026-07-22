@@ -10,6 +10,9 @@ RUN npm run build
 # ── Stage 2: Build backend ────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM node:24.18.0-alpine AS backend-builder
 
+# python3/make/g++: better-sqlite3 doesn't ship a prebuilt musl/Alpine binary,
+# so node-gyp has to compile it from source here.
+RUN apk add --no-cache python3 make g++
 WORKDIR /app/backend
 COPY backend/package*.json ./
 RUN npm ci --prefer-offline
