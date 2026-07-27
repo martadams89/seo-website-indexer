@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.22.30](https://github.com/martadams89/seo-website-indexer/compare/v1.22.29...v1.22.30) (2026-07-27)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency globals to ^17.8.0 ([#196](https://github.com/martadams89/seo-website-indexer/issues/196)) ([f9d9f31](https://github.com/martadams89/seo-website-indexer/commit/f9d9f31c1cc36509d63de0d6e287f73a85720eb8))
+* **deps:** update renovatebot/github-action action to v46.1.21 ([#195](https://github.com/martadams89/seo-website-indexer/issues/195)) ([4c43622](https://github.com/martadams89/seo-website-indexer/commit/4c43622dfe3668a982a3adf30d4b8ee8d7651108))
+
 ## [1.22.29](https://github.com/martadams89/seo-website-indexer/compare/v1.22.28...v1.22.29) (2026-07-26)
 
 
