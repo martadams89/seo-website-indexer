@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.22.32](https://github.com/martadams89/seo-website-indexer/compare/v1.22.31...v1.22.32) (2026-07-30)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/rate-limit to ^11.2.0 ([#202](https://github.com/martadams89/seo-website-indexer/issues/202)) ([a3b6c73](https://github.com/martadams89/seo-website-indexer/commit/a3b6c73ea45febe2f0b4e7625ec83501b7a6e405))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v24.18.1 ([#200](https://github.com/martadams89/seo-website-indexer/issues/200)) ([2b13372](https://github.com/martadams89/seo-website-indexer/commit/2b13372c5e721604516724c7605685fabff38cb1))
+* **deps:** update renovatebot/github-action action to v46.2.0 ([#201](https://github.com/martadams89/seo-website-indexer/issues/201)) ([2aeb4a0](https://github.com/martadams89/seo-website-indexer/commit/2aeb4a0deba2b187025dc847d269aad11658bbee))
+
 ## [1.22.31](https://github.com/martadams89/seo-website-indexer/compare/v1.22.30...v1.22.31) (2026-07-29)
 
 
