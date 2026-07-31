@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.34](https://github.com/martadams89/seo-website-indexer/compare/v1.22.33...v1.22.34) (2026-07-31)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to v11 ([#206](https://github.com/martadams89/seo-website-indexer/issues/206)) ([60ff0f5](https://github.com/martadams89/seo-website-indexer/commit/60ff0f5a63cb37f099c32f78959767452fc09e74))
+
 ## [1.22.33](https://github.com/martadams89/seo-website-indexer/compare/v1.22.32...v1.22.33) (2026-07-31)
 
 
