@@ -1,6 +1,6 @@
 {
   "name": "seo-website-indexer-backend",
-  "version": "1.22.32",
+  "version": "1.22.33",
   "description": "Self-hosted Google Search Console + IndexNow submission engine",
   "type": "module",
   "main": "dist/server.js",
@@ -17,8 +17,8 @@
     "@fastify/static": "^10.1.2",
     "@simplewebauthn/server": "^13.3.2",
     "better-sqlite3": "^13.0.2",
-    "fastify": "^5.10.0",
     "google-auth-library": "^11.0.0",
+    "fastify": "^5.11.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.3",
     "pino": "^10.3.1",
