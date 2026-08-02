@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.35](https://github.com/martadams89/seo-website-indexer/compare/v1.22.34...v1.22.35) (2026-08-02)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/better-sqlite3 to v9 ([#209](https://github.com/martadams89/seo-website-indexer/issues/209)) ([22fc0f4](https://github.com/martadams89/seo-website-indexer/commit/22fc0f4dcc1577f0e4a3f83b0a3f42fc6542f781))
+
 ## [1.22.34](https://github.com/martadams89/seo-website-indexer/compare/v1.22.33...v1.22.34) (2026-07-31)
 
 
