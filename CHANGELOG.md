@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.22.36](https://github.com/martadams89/seo-website-indexer/compare/v1.22.35...v1.22.36) (2026-08-03)
+
+
+### 🧹 Maintenance
+
+* **deps:** update npm dependencies (non-major) ([#212](https://github.com/martadams89/seo-website-indexer/issues/212)) ([1bd4bbb](https://github.com/martadams89/seo-website-indexer/commit/1bd4bbb6d6262c16163b857b7fc30ed7b369f3f5))
+* **deps:** update renovatebot/github-action action to v46.2.1 ([#211](https://github.com/martadams89/seo-website-indexer/issues/211)) ([93ddea8](https://github.com/martadams89/seo-website-indexer/commit/93ddea82ce4c5ee72c7ed82b21cc393282013052))
+
 ## [1.22.35](https://github.com/martadams89/seo-website-indexer/compare/v1.22.34...v1.22.35) (2026-08-02)
 
 
