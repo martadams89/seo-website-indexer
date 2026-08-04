@@ -18,7 +18,7 @@
     "@simplewebauthn/server": "^13.3.2",
     "better-sqlite3": "^13.0.2",
     "google-auth-library": "^11.0.0",
-    "fastify": "^5.11.0",
+    "fastify": "^5.11.2",
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.3",
     "pino": "^10.3.1",
