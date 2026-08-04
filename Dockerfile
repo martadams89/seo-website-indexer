@@ -1,5 +1,5 @@
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:24.18.1-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24.19.0-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -8,7 +8,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Build backend ────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:24.18.1-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:24.19.0-alpine AS backend-builder
 
 # python3/make/g++: better-sqlite3 doesn't ship a prebuilt musl/Alpine binary,
 # so node-gyp has to compile it from source here.
@@ -20,7 +20,7 @@ COPY backend/ ./
 RUN npm run build
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
-FROM node:24.18.1-alpine AS runtime
+FROM node:24.19.0-alpine AS runtime
 
 ARG APP_VERSION=dev
 
