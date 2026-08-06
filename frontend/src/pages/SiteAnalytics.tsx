@@ -121,20 +121,20 @@ export default function SiteAnalyticsPage() {
             disabled={busy === 'google-submit' || !status?.auth.authenticated || !site.google_account_id}
             title={
               !status?.auth.authenticated ? 'Connect a Google account in Settings first'
-                : !site.google_account_id ? 'This site has no linked Google account (IndexNow only) — assign one in the site’s Configuration tab'
-                : 'Submit new & changed URLs to the Google Indexing API'
+                : !site.google_account_id ? 'This site has no linked Google account — assign one in the site’s Configuration tab'
+                : 'Re-submit a changed sitemap and refresh Search Console URL Inspection data'
             }
             onClick={() => act('google-submit',
               () => api.triggerRun({ siteIds: [siteId], skipIndexNow: true, skipBing: true }),
-              'Google submission run triggered — watch Live Logs for progress')}>
-            <Send size={12} /> <span className="hide-mobile">Submit to Google</span>
+              'Google sitemap and inspection run triggered — watch Live Logs for progress')}>
+            <Send size={12} /> <span className="hide-mobile">Refresh Google</span>
           </button>
           <button className="btn btn-primary btn-sm" disabled={busy === 'bing-submit'}
             onClick={() => act('bing-submit', () => api.bingSubmit(siteId), 'Submitted to Bing Webmaster')}>
             <Send size={12} /> <span className="hide-mobile">Submit to Bing</span>
           </button>
           <button className="btn btn-primary btn-sm" disabled={busy === 'submit-both'}
-            title="Submit to Google (Indexing API run) and Bing (Webmaster) in one action"
+            title="Refresh Google sitemap/inspection data and submit changed URLs to Bing"
             onClick={submitBoth}>
             <Send size={12} /> <span className="hide-mobile">Submit to both</span>
           </button>
@@ -152,10 +152,10 @@ export default function SiteAnalyticsPage() {
       <div className="stat-grid">
         <StatCard label="URLs in sitemap" value={snapshot.urls_total} />
         <StatCard label="Indexed" value={snapshot.urls_indexed} sub={`${rate}%`} tone="ok" />
-        <StatCard label="Google-submitted" value={snapshot.urls_google} />
+        <StatCard label="GSC-inspected" value={snapshot.urls_google} />
         <StatCard label="IndexNow-submitted" value={snapshot.urls_indexnow} />
         <StatCard label="Stale" value={snapshot.urls_stale} tone={snapshot.urls_stale ? 'warn' : undefined} />
-        <StatCard label="With schema" value={snapshot.urls_with_schema} />
+        <StatCard label="JSON-LD detected" value={snapshot.urls_with_schema} />
       </div>
 
       <div className="two-col">
@@ -164,7 +164,7 @@ export default function SiteAnalyticsPage() {
           <FunnelBar stages={[
             { label: 'Sitemap', value: snapshot.urls_total, color: 'var(--info)' },
             { label: 'Submitted', value: snapshot.urls_submitted, color: 'var(--accent, #7c6cf5)' },
-            { label: 'Google', value: snapshot.urls_google, color: 'var(--warn)' },
+            { label: 'Inspected', value: snapshot.urls_google, color: 'var(--warn)' },
             { label: 'Indexed', value: snapshot.urls_indexed, color: 'var(--ok)' },
           ]} />
           <h3 className="panel-title" style={{ marginTop: 18 }}>Indexed trend (60d)</h3>
@@ -229,7 +229,7 @@ export default function SiteAnalyticsPage() {
       {/* Failing URLs */}
       {failures.length > 0 && (
         <div className="panel">
-          <h3 className="panel-title" style={{ color: 'var(--error)' }}>Failing URLs ({failures.length})</h3>
+          <h3 className="panel-title" style={{ color: 'var(--error)' }}>Submission failures ({failures.length})</h3>
           <div className="table-scroll" style={{ maxHeight: 220, overflowY: 'auto' }}>
             <table className="mini-table">
               <thead><tr>
@@ -251,7 +251,7 @@ export default function SiteAnalyticsPage() {
             </table>
           </div>
           <div className="text-dim" style={{ fontSize: 11, marginTop: 6 }}>
-            Details of each failure are in the run logs around the timestamp shown.
+            These are IndexNow or Bing submission failures for URLs in the current sitemap. JSON-LD detection is reported separately and is not schema validation.
           </div>
         </div>
       )}

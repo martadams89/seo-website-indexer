@@ -69,6 +69,10 @@ export interface GoogleAccount {
   client_id: string;
   created_at: string;
   needs_reauth?: number;
+  refresh_token_expiry?: string | null;
+  last_refreshed_at?: string | null;
+  last_refresh_error?: string | null;
+  granted_scopes?: string | null;
 }
 
 export interface Site {
@@ -133,7 +137,6 @@ export interface AppStatus {
 
 export interface QuotaSummary {
   day: string;
-  google_indexing: { used: number; limit: number; perProjectLimit: number; projects: Array<{ bucket: string; count: number }> };
   gsc_inspection:  { used: number; perPropertyLimit: number; properties: Array<{ bucket: string; count: number }> };
   indexnow:        { used: number; perSiteLimit: number; sites: Array<{ bucket: string; count: number }> };
 }
@@ -279,7 +282,7 @@ export const api = {
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
-  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; gscLimit?: number; googleLimit?: number }) =>
+  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; gscLimit?: number }) =>
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),

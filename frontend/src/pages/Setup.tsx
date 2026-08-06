@@ -77,11 +77,11 @@ export default function SetupPage() {
       }
 
       // 3. Initiate Standard Web Application OAuth Flow
-      const scope = 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/indexing https://www.googleapis.com/auth/userinfo.email';
+      const scope = 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/userinfo.email';
       // Attach the account to the workspace the user is in (OAuth `state`).
       const ws = getActiveWorkspaceId();
       const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent${stateParam}`;
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account%20consent${stateParam}`;
 
       // 4. Open in popup window
       const width = 600;
@@ -188,9 +188,17 @@ export default function SetupPage() {
       {step === 'welcome' && (
         <div className="flex-col gap-4">
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            This application uses the <strong>Google Indexing API</strong> and <strong>Search Console API</strong> to automate indexing.
+            This application uses the <strong>Google Search Console API</strong> to submit sitemaps and inspect indexing coverage.
             We authenticate using secure Google OAuth 2.0 Web Application Flow.
           </p>
+
+          <div className="alert alert-warn">
+            <div className="alert-content">
+              External OAuth apps left in <strong>Testing</strong> receive refresh tokens that expire after seven days.
+              Set the app to <strong>In production</strong>, or use an <strong>Internal/Trusted</strong> Workspace app,
+              before connecting accounts that must run unattended.
+            </div>
+          </div>
 
           {hasBuiltin ? (
             <div className="card text-center" style={{ padding: '32px 24px' }}>
@@ -272,10 +280,9 @@ export default function SetupPage() {
               <li>
                 <strong>Enable required Search APIs:</strong>
                 <br />
-                Enable the following two APIs in your new project (ensure your new project is selected in the top bar):
+                Enable the Search Console API in your new project (ensure your new project is selected in the top bar):
                 <ul style={{ paddingLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <li>👉 <a href="https://console.cloud.google.com/apis/library/searchconsole.googleapis.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Google Search Console API <ExternalLink size={10} style={{ display: 'inline' }} /></a> (Allows sitemap submissions).</li>
-                  <li>👉 <a href="https://console.cloud.google.com/apis/library/indexing.googleapis.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', color: 'var(--accent)', fontWeight: 600 }}>Web Search Indexing API <ExternalLink size={10} style={{ display: 'inline' }} /></a> (Allows rapid URL submission).</li>
                 </ul>
               </li>
 

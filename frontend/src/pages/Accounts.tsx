@@ -18,7 +18,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   // Opt-in, not default: ticking this requests the broad cloud-platform scope,
   // which makes refresh tokens for managed (Google Workspace) accounts subject
   // to reauth/session-control policies → periodic "invalid_rapt" failures. Core
-  // Search Console + Indexing works without it.
+  // Search Console works without it.
   const [autoSetup, setAutoSetup] = useState(false);
   const [connectError, setConnectError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -84,7 +84,6 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       // key on request. Must match the backend OAUTH_SCOPES for those to work.
       const baseScopes = [
         'https://www.googleapis.com/auth/webmasters',
-        'https://www.googleapis.com/auth/indexing',
         'https://www.googleapis.com/auth/userinfo.email',
       ];
       if (autoSetup) baseScopes.push('https://www.googleapis.com/auth/cloud-platform');
@@ -93,7 +92,11 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       // account to the tenant the user is actually viewing (not just their first).
       const ws = getActiveWorkspaceId();
       const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true${stateParam}`;
+      const loginHint = reconnect?.email ? `&login_hint=${encodeURIComponent(reconnect.email)}` : '';
+      // Do not use include_granted_scopes here. Carrying an old cloud-platform
+      // grant into a minimal reconnect can keep a managed account subject to a
+      // Workspace session-control policy even when Auto-configure is off.
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account%20consent${stateParam}${loginHint}`;
 
       const width = 600;
       const height = 700;
@@ -169,8 +172,16 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             <Key size={18} style={{ color: 'var(--accent)' }} /> Link Google Account
           </h2>
           <p className="text-secondary text-sm mb-4">
-            Connect an additional Google Cloud project. You can link sites to this profile to submit URLs and sitemaps.
+            Connect an additional Google account. You can link sites to this profile for Search Console inspection and sitemap submission.
           </p>
+
+          <div className="alert alert-warn mb-4">
+            <div className="alert-content">
+              <strong>For a durable connection:</strong> set the OAuth app to <strong>In production</strong>, or use an
+              <strong> Internal</strong> app for your Workspace. Google deliberately expires refresh tokens after seven days
+              for External apps left in Testing. A Workspace administrator can also mark the app Trusted.
+            </div>
+          </div>
 
           <div style={{ background: 'var(--bg-input)', padding: '16px 20px', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 20 }}>
             <strong style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-primary)' }}>Authorized Redirect URI:</strong>
@@ -197,12 +208,12 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             <div>
               <strong>Auto-configure Google APIs</strong>
               <div className="text-dim" style={{ fontSize: 11.5 }}>
-                After you sign in, the tool enables the Web Search Indexing &amp; Search Console APIs on your
-                project for you, and can provision a one-click Gemini key later. This requests broad Google
+                After you sign in, the tool enables the Search Console API on your project for you and can
+                provision a one-click Gemini key later. This requests broad Google
                 Cloud access on the consent screen. <strong>Managed (Google Workspace) accounts:</strong> leave
                 this unchecked — the Cloud scope makes your login subject to your organisation's re-authentication
-                policy and forces a periodic reconnect. Search Console indexing works without it; you can enable
-                those APIs by hand in the Cloud console.
+                policy and forces a periodic reconnect. Search Console works without it; you can enable the API
+                by hand in the Cloud console.
               </div>
             </div>
           </label>
@@ -276,9 +287,27 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>
+                  {acc.refresh_token_expiry && (
+                    <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
+                      Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}.
+                      Publish the OAuth app or make it Internal/Trusted before reconnecting.
+                    </div>
+                  )}
+                  {acc.last_refreshed_at && !acc.needs_reauth && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                      Last refreshed automatically {new Date(acc.last_refreshed_at).toLocaleString()}.
+                    </div>
+                  )}
+                  {acc.granted_scopes?.split(' ').includes('https://www.googleapis.com/auth/cloud-platform') && (
+                    <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 3 }}>
+                      This grant includes broad Google Cloud access and may be subject to your Workspace session-control policy.
+                      Revoke the app in Google Account connections, then reconnect with Auto-configure disabled if periodic reauthentication continues.
+                    </div>
+                  )}
                   {!!acc.needs_reauth && (
                     <div style={{ fontSize: 11, color: 'var(--error)', marginTop: 4 }}>
                       Its Google token can no longer be refreshed (revoked or a Workspace reauth policy). Click <strong>Reconnect</strong> to re-authorise — it reuses this account's credentials, so no need to disconnect or re-enter your client ID/secret.
+                      {acc.last_refresh_error && <><br />Google response: <code>{acc.last_refresh_error}</code></>}
                     </div>
                   )}
                 </div>

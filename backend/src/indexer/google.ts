@@ -1,9 +1,7 @@
 /**
  * google.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Wrappers for:
- *  1. Google Indexing API  — URL_UPDATED notifications (200 quota/day/project)
- *  2. Google Search Console — sitemap submission
+ * Wrappers for Google Search Console sitemap submission and URL Inspection.
  *
  * All calls go through `getAccessTokenForAccount(accountId)` from google-oauth.ts
  * so any auth strategy works transparently.
@@ -13,15 +11,6 @@
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-export interface IndexingResult {
-  url: string;
-  success: boolean;
-  statusCode: number;
-  message?: string;
-  /** Server-suggested wait time in ms before retrying (parsed from Retry-After). */
-  retryAfterMs?: number;
-}
 
 export interface SitemapSubmitResult {
   sitemapUrl: string;
@@ -37,80 +26,6 @@ function parseRetryAfter(headerValue: string | null): number | undefined {
   const asDate = Date.parse(headerValue);
   if (Number.isFinite(asDate)) return Math.max(0, asDate - Date.now());
   return undefined;
-}
-
-// ── Indexing API ─────────────────────────────────────────────────────────────
-
-const INDEXING_ENDPOINT = 'https://indexing.googleapis.com/v3/urlNotifications:publish';
-
-/**
- * Notifies Google of an updated URL via the Indexing API.
- * Requires the service account / OAuth user to be a verified owner in GSC.
- */
-export async function notifyGoogle(accountId: string, url: string, type: 'URL_UPDATED' | 'URL_DELETED' = 'URL_UPDATED'): Promise<IndexingResult> {
-  let token: string;
-  try {
-    token = await getAccessTokenForAccount(accountId);
-  } catch (e) {
-    return { url, success: false, statusCode: 0, message: `Auth error: ${String(e)}` };
-  }
-
-  const payload = JSON.stringify({ url, type });
-
-  let attempt = 0;
-  while (attempt < 3) {
-    attempt++;
-    let res: Response;
-    try {
-      res = await fetch(INDEXING_ENDPOINT, {
-        signal: AbortSignal.timeout(30_000),
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: payload,
-      });
-    } catch (e) {
-      if (attempt < 3) continue;
-      return { url, success: false, statusCode: 0, message: `Network error: ${String(e)}` };
-    }
-
-    if (res.status === 200) {
-      return { url, success: true, statusCode: 200 };
-    }
-    if (res.status === 429) {
-      const retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
-      return {
-        url,
-        success: false,
-        statusCode: 429,
-        message: 'Daily quota exhausted (200 URLs/day per project).',
-        retryAfterMs,
-      };
-    }
-    if (res.status === 401 && attempt < 3) {
-      // Token may have just expired — wait briefly and let the next iteration
-      // call getAccessTokenForAccount() again (which will refresh)
-      await sleep(1000);
-      try { token = await getAccessTokenForAccount(accountId); } catch { /* ignore */ }
-      continue;
-    }
-    if (res.status >= 500 && attempt < 3) {
-      await sleep(attempt * 2000);
-      continue;
-    }
-
-    // 4xx or exhausted retries
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = await res.json() as { error?: { message?: string } };
-      message = body?.error?.message ?? message;
-    } catch { /* ignore */ }
-    return { url, success: false, statusCode: res.status, message };
-  }
-
-  return { url, success: false, statusCode: 0, message: 'All retries exhausted.' };
 }
 
 // ── Search Console — Sitemap Submission ──────────────────────────────────────

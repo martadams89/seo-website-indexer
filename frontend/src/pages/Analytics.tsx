@@ -123,8 +123,8 @@ export default function AnalyticsPage() {
               ]} />
               <div className="site-card-foot">
                 {s.urls_stale > 0 && <span className="badge badge-warn">{s.urls_stale} stale</span>}
-                {s.failures > 0 && <span className="badge badge-error">{s.failures} failing</span>}
-                {s.urls_with_schema > 0 && <span className="badge">{s.urls_with_schema} schema</span>}
+                {s.failures > 0 && <span className="badge badge-error">{s.failures} submission failures</span>}
+                {s.urls_with_schema > 0 && <span className="badge">{s.urls_with_schema} with JSON-LD</span>}
               </div>
             </Link>
           );

@@ -880,8 +880,8 @@ export default function SettingsPage() {
           </div>
           <div className="alert alert-info mb-3">
             <div className="alert-content" style={{ fontSize: 12 }}>
-              <strong>Google Indexing API limit:</strong> 200 URLs/day per Google Cloud project. The scheduler
-              round-robins the budget across sites, prioritising new and changed URLs (via sitemap <code>&lt;lastmod&gt;</code>).
+              <strong>Google delivery:</strong> the scheduler re-submits changed sitemaps and rotates Search Console URL Inspection across current sitemap URLs.
+              Google's separate URL-level Indexing API is not used because Google restricts it to job-posting and livestream pages.
               IndexNow key setup lives on the <strong>Sites</strong> page (per-site verify), with full options in the
               {' '}<a href="https://github.com/martadams89/seo-website-indexer#indexnow--setting-up-the-key-file" target="_blank" rel="noopener noreferrer">README ↗</a>.
             </div>
