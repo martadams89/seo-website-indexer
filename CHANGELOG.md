@@ -1,5 +1,177 @@
 # Changelog
 
+## [1.22.39](https://github.com/martadams89/seo-website-indexer/compare/v1.22.38...v1.22.39) (2026-08-06)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency tsx to ^4.23.8 ([#219](https://github.com/martadams89/seo-website-indexer/issues/219)) ([132cbc5](https://github.com/martadams89/seo-website-indexer/commit/132cbc52256d502d2374d401055873463c527764))
+
+## [1.22.38](https://github.com/martadams89/seo-website-indexer/compare/v1.22.37...v1.22.38) (2026-08-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#217](https://github.com/martadams89/seo-website-indexer/issues/217)) ([bef93f6](https://github.com/martadams89/seo-website-indexer/commit/bef93f6c0a85a8a5691d00039cd8b1777eb43c4f))
+
+## [1.22.37](https://github.com/martadams89/seo-website-indexer/compare/v1.22.36...v1.22.37) (2026-08-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#214](https://github.com/martadams89/seo-website-indexer/issues/214)) ([cfcfafe](https://github.com/martadams89/seo-website-indexer/commit/cfcfafe216c81467b90b16809392eaf1936d8e94))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v24.19.0 ([#215](https://github.com/martadams89/seo-website-indexer/issues/215)) ([2df0a8a](https://github.com/martadams89/seo-website-indexer/commit/2df0a8ab22948c2bc3ff3117c97bdda695db176a))
+
+## [1.22.36](https://github.com/martadams89/seo-website-indexer/compare/v1.22.35...v1.22.36) (2026-08-03)
+
+
+### 🧹 Maintenance
+
+* **deps:** update npm dependencies (non-major) ([#212](https://github.com/martadams89/seo-website-indexer/issues/212)) ([1bd4bbb](https://github.com/martadams89/seo-website-indexer/commit/1bd4bbb6d6262c16163b857b7fc30ed7b369f3f5))
+* **deps:** update renovatebot/github-action action to v46.2.1 ([#211](https://github.com/martadams89/seo-website-indexer/issues/211)) ([93ddea8](https://github.com/martadams89/seo-website-indexer/commit/93ddea82ce4c5ee72c7ed82b21cc393282013052))
+
+## [1.22.35](https://github.com/martadams89/seo-website-indexer/compare/v1.22.34...v1.22.35) (2026-08-02)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/better-sqlite3 to v9 ([#209](https://github.com/martadams89/seo-website-indexer/issues/209)) ([22fc0f4](https://github.com/martadams89/seo-website-indexer/commit/22fc0f4dcc1577f0e4a3f83b0a3f42fc6542f781))
+
+## [1.22.34](https://github.com/martadams89/seo-website-indexer/compare/v1.22.33...v1.22.34) (2026-07-31)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to v11 ([#206](https://github.com/martadams89/seo-website-indexer/issues/206)) ([60ff0f5](https://github.com/martadams89/seo-website-indexer/commit/60ff0f5a63cb37f099c32f78959767452fc09e74))
+
+## [1.22.33](https://github.com/martadams89/seo-website-indexer/compare/v1.22.32...v1.22.33) (2026-07-31)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#205](https://github.com/martadams89/seo-website-indexer/issues/205)) ([1d75aca](https://github.com/martadams89/seo-website-indexer/commit/1d75aca996a9d6e08e411d72be0111558c491d98))
+
+
+### 🧹 Maintenance
+
+* **deps:** update node.js to v24.18.1 ([#204](https://github.com/martadams89/seo-website-indexer/issues/204)) ([b71ed00](https://github.com/martadams89/seo-website-indexer/commit/b71ed00626d1f1a8292dbdbc1b1a6549c38844be))
+
+## [1.22.32](https://github.com/martadams89/seo-website-indexer/compare/v1.22.31...v1.22.32) (2026-07-30)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/rate-limit to ^11.2.0 ([#202](https://github.com/martadams89/seo-website-indexer/issues/202)) ([a3b6c73](https://github.com/martadams89/seo-website-indexer/commit/a3b6c73ea45febe2f0b4e7625ec83501b7a6e405))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v24.18.1 ([#200](https://github.com/martadams89/seo-website-indexer/issues/200)) ([2b13372](https://github.com/martadams89/seo-website-indexer/commit/2b13372c5e721604516724c7605685fabff38cb1))
+* **deps:** update renovatebot/github-action action to v46.2.0 ([#201](https://github.com/martadams89/seo-website-indexer/issues/201)) ([2aeb4a0](https://github.com/martadams89/seo-website-indexer/commit/2aeb4a0deba2b187025dc847d269aad11658bbee))
+
+## [1.22.31](https://github.com/martadams89/seo-website-indexer/compare/v1.22.30...v1.22.31) (2026-07-29)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#198](https://github.com/martadams89/seo-website-indexer/issues/198)) ([2252caf](https://github.com/martadams89/seo-website-indexer/commit/2252cafacec0dc41be758638764097b2be8c4cee))
+
+## [1.22.30](https://github.com/martadams89/seo-website-indexer/compare/v1.22.29...v1.22.30) (2026-07-27)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency globals to ^17.8.0 ([#196](https://github.com/martadams89/seo-website-indexer/issues/196)) ([f9d9f31](https://github.com/martadams89/seo-website-indexer/commit/f9d9f31c1cc36509d63de0d6e287f73a85720eb8))
+* **deps:** update renovatebot/github-action action to v46.1.21 ([#195](https://github.com/martadams89/seo-website-indexer/issues/195)) ([4c43622](https://github.com/martadams89/seo-website-indexer/commit/4c43622dfe3668a982a3adf30d4b8ee8d7651108))
+
+## [1.22.29](https://github.com/martadams89/seo-website-indexer/compare/v1.22.28...v1.22.29) (2026-07-26)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.27.0 ([#193](https://github.com/martadams89/seo-website-indexer/issues/193)) ([4503df3](https://github.com/martadams89/seo-website-indexer/commit/4503df3a23c737f359534ed4dd813fe45321a411))
+
+## [1.22.28](https://github.com/martadams89/seo-website-indexer/compare/v1.22.27...v1.22.28) (2026-07-25)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.8.0 ([#191](https://github.com/martadams89/seo-website-indexer/issues/191)) ([ddddbe5](https://github.com/martadams89/seo-website-indexer/commit/ddddbe554e805abe7df5c2ffc9d1fff6731b0b67))
+
+## [1.22.27](https://github.com/martadams89/seo-website-indexer/compare/v1.22.26...v1.22.27) (2026-07-24)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#189](https://github.com/martadams89/seo-website-indexer/issues/189)) ([e5a9726](https://github.com/martadams89/seo-website-indexer/commit/e5a9726b66d25de5f00a559becee516d725dc667))
+
+## [1.22.26](https://github.com/martadams89/seo-website-indexer/compare/v1.22.25...v1.22.26) (2026-07-23)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.2 ([#187](https://github.com/martadams89/seo-website-indexer/issues/187)) ([82ebdcf](https://github.com/martadams89/seo-website-indexer/commit/82ebdcf3e7687716a2e15b50fcbf19995deeb55a))
+
+## [1.22.25](https://github.com/martadams89/seo-website-indexer/compare/v1.22.24...v1.22.25) (2026-07-22)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency better-sqlite3 to v13 ([#178](https://github.com/martadams89/seo-website-indexer/issues/178)) ([784d555](https://github.com/martadams89/seo-website-indexer/commit/784d555c768b5383885a715f0c2a5c93d5563b8f))
+
+## [1.22.24](https://github.com/martadams89/seo-website-indexer/compare/v1.22.23...v1.22.24) (2026-07-22)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.0.4 ([#183](https://github.com/martadams89/seo-website-indexer/issues/183)) ([236ca1f](https://github.com/martadams89/seo-website-indexer/commit/236ca1f24fc3b2f65584e2ab481927819bf66b5a))
+
+## [1.22.23](https://github.com/martadams89/seo-website-indexer/compare/v1.22.22...v1.22.23) (2026-07-21)
+
+
+### 🧹 Maintenance
+
+* **renovate:** run daily at 2am UTC ([#181](https://github.com/martadams89/seo-website-indexer/issues/181)) ([7a4f767](https://github.com/martadams89/seo-website-indexer/commit/7a4f7674eae0ddb8efa49d17983a53cdc8f29aef))
+
+## [1.22.22](https://github.com/martadams89/seo-website-indexer/compare/v1.22.21...v1.22.22) (2026-07-21)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) to ^19.2.8 ([#179](https://github.com/martadams89/seo-website-indexer/issues/179)) ([df5c72d](https://github.com/martadams89/seo-website-indexer/commit/df5c72df3147aec09b81e1aba6c8f68101efc075))
+
+## [1.22.21](https://github.com/martadams89/seo-website-indexer/compare/v1.22.20...v1.22.21) (2026-07-20)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency typescript-eslint to ^8.65.0 ([#176](https://github.com/martadams89/seo-website-indexer/issues/176)) ([43dbf24](https://github.com/martadams89/seo-website-indexer/commit/43dbf248bb4e24cba3a89a74c6d9239cb40f7bc5))
+
+## [1.22.20](https://github.com/martadams89/seo-website-indexer/compare/v1.22.19...v1.22.20) (2026-07-20)
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.1.20 ([#174](https://github.com/martadams89/seo-website-indexer/issues/174)) ([602352b](https://github.com/martadams89/seo-website-indexer/commit/602352b88ea9bce3ffdf6a414adfd57f2049c857))
+
+## [1.22.19](https://github.com/martadams89/seo-website-indexer/compare/v1.22.18...v1.22.19) (2026-07-20)
+
+
+### 🧹 Maintenance
+
+* **deps:** lock file maintenance ([#172](https://github.com/martadams89/seo-website-indexer/issues/172)) ([fbc7606](https://github.com/martadams89/seo-website-indexer/commit/fbc7606286e0bca6c678042bab0168ea877ec2e8))
+
+## [1.22.18](https://github.com/martadams89/seo-website-indexer/compare/v1.22.17...v1.22.18) (2026-07-17)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** eliminate concurrent Google token refresh race ([#170](https://github.com/martadams89/seo-website-indexer/issues/170)) ([a663100](https://github.com/martadams89/seo-website-indexer/commit/a663100dd11a8012b735da8acc8da072f3bc9e98))
+
 ## [1.22.17](https://github.com/martadams89/seo-website-indexer/compare/v1.22.16...v1.22.17) (2026-07-17)
 
 
