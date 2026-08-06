@@ -40,6 +40,10 @@ function initSchema(db: Database.Database): void {
       access_token  TEXT,
       refresh_token TEXT NOT NULL,
       token_expiry  TEXT,
+      refresh_token_expiry TEXT,
+      granted_scopes TEXT,
+      last_refreshed_at TEXT,
+      last_refresh_error TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -388,6 +392,22 @@ function initSchema(db: Database.Database): void {
   if (gaCols.length > 0 && !gaCols.some(c => c.name === 'needs_reauth')) {
     db.exec("ALTER TABLE google_accounts ADD COLUMN needs_reauth INTEGER NOT NULL DEFAULT 0;");
   }
+  // OAuth diagnostics. Google may issue a deliberately time-limited refresh
+  // token (notably for External apps in Testing) and returns its lifetime in
+  // `refresh_token_expires_in`. Persisting that signal lets the UI distinguish
+  // a Google policy expiry from a broken hourly access-token refresh.
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'refresh_token_expiry')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN refresh_token_expiry TEXT;");
+  }
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'granted_scopes')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN granted_scopes TEXT;");
+  }
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'last_refreshed_at')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN last_refreshed_at TEXT;");
+  }
+  if (gaCols.length > 0 && !gaCols.some(c => c.name === 'last_refresh_error')) {
+    db.exec("ALTER TABLE google_accounts ADD COLUMN last_refresh_error TEXT;");
+  }
   // Runs are per-workspace: which tenant an indexing run belongs to.
   const rhCols = db.prepare("PRAGMA table_info(run_history)").all() as { name: string }[];
   if (rhCols.length > 0 && !rhCols.some(c => c.name === 'workspace_id')) {
@@ -437,10 +457,15 @@ function initSchema(db: Database.Database): void {
   }
   // URLs discovered via robots.txt secondary sitemaps that are not indexable
   // HTML pages (e.g. llms.txt). Submitted to IndexNow only — never to the
-  // Google Indexing API, GSC sitemap submission, or URL Inspection.
+  // GSC sitemap submission or URL Inspection.
   if (!urlCols.some(c => c.name === 'indexnow_only')) {
     db.exec("ALTER TABLE url_state ADD COLUMN indexnow_only INTEGER DEFAULT 0;");
   }
+
+  // Older releases sent ordinary pages to Google's restricted Indexing API.
+  // That API only supports JobPosting and livestream BroadcastEvent pages, so
+  // its retained failures are not actionable for this sitemap indexer.
+  db.exec("DELETE FROM url_failures WHERE api = 'google_indexing';");
 
   // AI citations: conversation threading + provider citation URLs.
   const aiCols = db.prepare("PRAGMA table_info(ai_results)").all() as { name: string }[];
@@ -755,6 +780,39 @@ export function getUrlsBySite(siteId: string): UrlState[] {
   return getDb().prepare('SELECT * FROM url_state WHERE site_id = ?').all(siteId) as UrlState[];
 }
 
+/**
+ * Reconcile stored HTML URL state with a successfully fetched live sitemap.
+ * URL state drives the coverage dashboard, so it must represent the current
+ * inventory rather than every URL ever observed.
+ */
+export function pruneHtmlUrlStateForSite(
+  siteId: string,
+  liveUrls: readonly string[]
+): { states: number; failures: number } {
+  const db = getDb();
+  const live = new Set(liveUrls);
+  const stored = db.prepare(`
+    SELECT url FROM url_state
+    WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
+  `).all(siteId) as Array<{ url: string }>;
+  const retired = stored.filter(({ url }) => !live.has(url));
+  if (retired.length === 0) return { states: 0, failures: 0 };
+
+  const remove = db.transaction(() => {
+    let failures = 0;
+    let states = 0;
+    const deleteFailures = db.prepare('DELETE FROM url_failures WHERE site_id = ? AND url = ?');
+    const deleteState = db.prepare('DELETE FROM url_state WHERE site_id = ? AND url = ?');
+    for (const { url } of retired) {
+      failures += deleteFailures.run(siteId, url).changes;
+      states += deleteState.run(siteId, url).changes;
+    }
+    return { states, failures };
+  });
+
+  return remove();
+}
+
 // ── Log helpers ───────────────────────────────────────────────────────────────
 
 export interface LogEntry {
@@ -874,6 +932,10 @@ export interface GoogleAccount {
   access_token: string | null;
   refresh_token: string;
   token_expiry: string | null;
+  refresh_token_expiry?: string | null;
+  granted_scopes?: string | null;
+  last_refreshed_at?: string | null;
+  last_refresh_error?: string | null;
   workspace_id?: string | null;   // "home" workspace where it was first connected
   owner_user_id?: string | null;  // owner: the account is available to all of this owner's workspaces
   needs_reauth?: number;          // 1 when the refresh token is dead (revoked / reauth policy) and the user must reconnect
@@ -954,8 +1016,16 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
   // refreshes don't carry a workspace), while still allowing a first
   // assignment when the row had none.
   getDb().prepare(`
-    INSERT INTO google_accounts (id, email, client_id, client_secret, access_token, refresh_token, token_expiry, workspace_id, owner_user_id)
-    VALUES(@id, @email, @client_id, @client_secret, @access_token, @refresh_token, @token_expiry, @workspace_id, @owner_user_id)
+    INSERT INTO google_accounts (
+      id, email, client_id, client_secret, access_token, refresh_token,
+      token_expiry, refresh_token_expiry, granted_scopes, last_refreshed_at,
+      last_refresh_error, workspace_id, owner_user_id
+    )
+    VALUES(
+      @id, @email, @client_id, @client_secret, @access_token, @refresh_token,
+      @token_expiry, @refresh_token_expiry, @granted_scopes, @last_refreshed_at,
+      @last_refresh_error, @workspace_id, @owner_user_id
+    )
     ON CONFLICT(id) DO UPDATE SET
       email         = excluded.email,
       client_id     = excluded.client_id,
@@ -963,9 +1033,21 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
       access_token  = excluded.access_token,
       refresh_token = excluded.refresh_token,
       token_expiry  = excluded.token_expiry,
+      refresh_token_expiry = excluded.refresh_token_expiry,
+      granted_scopes = COALESCE(excluded.granted_scopes, google_accounts.granted_scopes),
+      last_refreshed_at = COALESCE(excluded.last_refreshed_at, google_accounts.last_refreshed_at),
+      last_refresh_error = excluded.last_refresh_error,
       workspace_id  = COALESCE(google_accounts.workspace_id, excluded.workspace_id),
       owner_user_id = COALESCE(google_accounts.owner_user_id, excluded.owner_user_id)
-  `).run({ workspace_id: null, owner_user_id: null, ...acc });
+  `).run({
+    workspace_id: null,
+    owner_user_id: null,
+    refresh_token_expiry: null,
+    granted_scopes: null,
+    last_refreshed_at: null,
+    last_refresh_error: null,
+    ...acc,
+  });
 }
 
 /**
@@ -976,6 +1058,11 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
  */
 export function setGoogleAccountNeedsReauth(id: string, needsReauth: boolean): void {
   getDb().prepare('UPDATE google_accounts SET needs_reauth = ? WHERE id = ?').run(needsReauth ? 1 : 0, id);
+}
+
+/** Record the last refresh failure without replacing any credential fields. */
+export function setGoogleAccountRefreshError(id: string, error: string | null): void {
+  getDb().prepare('UPDATE google_accounts SET last_refresh_error = ? WHERE id = ?').run(error, id);
 }
 
 export function deleteGoogleAccount(id: string): void {
@@ -1117,4 +1204,3 @@ export function getRunLock(workspaceId: string): RunLock | null {
     return null;
   }
 }
-

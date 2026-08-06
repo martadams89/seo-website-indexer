@@ -62,14 +62,12 @@ export function QuotaWidget({ siteNames }: Props) {
   if (!quota) return null;
 
   const label = (bucket: string, api: string) => {
-    if (api === 'indexnow' || api === 'google_indexing') {
+    if (api === 'indexnow') {
       const id = bucket.split(':')[1];
       if (siteNames && siteNames[id]) return siteNames[id];
     }
     return shortBucket(api, bucket);
   };
-
-  const giBar = bar(quota.google_indexing.used, quota.google_indexing.limit);
 
   return (
     <div className="card">
@@ -78,34 +76,6 @@ export function QuotaWidget({ siteNames }: Props) {
         <button className="btn-icon" onClick={load} title="Refresh quota" aria-label="Refresh quota">
           <RefreshCw size={12} />
         </button>
-      </div>
-
-      {/* Google Indexing */}
-      <div className="mb-3">
-        <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>
-          <span style={{ fontWeight: 600 }}>Google Indexing API</span>
-          <span className="text-dim">
-            {quota.google_indexing.used.toLocaleString()} / {quota.google_indexing.limit.toLocaleString()} ({quota.google_indexing.perProjectLimit}/project)
-          </span>
-        </div>
-        <div className="quota-bar-track">
-          <div className="quota-bar-fill" data-level={giBar.level} style={{ width: `${giBar.pct}%` }} />
-        </div>
-        {quota.google_indexing.projects.length > 0 && (
-          <div style={{ marginTop: 6, fontSize: 11 }} className="text-dim">
-            {quota.google_indexing.projects.map((p, i) => {
-              const b = bar(p.count, quota.google_indexing.perProjectLimit);
-              return (
-                <div key={i} className="flex items-center justify-between" style={{ marginTop: 2 }}>
-                  <span className="truncate" style={{ maxWidth: 220 }}>{shortBucket('google_indexing', p.bucket)}</span>
-                  <span style={{ color: b.level === 'high' ? 'var(--error)' : b.level === 'medium' ? 'var(--warn)' : 'inherit' }}>
-                    {p.count} / {quota.google_indexing.perProjectLimit}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* GSC Inspection */}

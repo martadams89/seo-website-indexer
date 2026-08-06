@@ -4,7 +4,7 @@
 
 **Self-hosted SEO & GEO automation for all your sites — indexing, analytics and AI-citation tracking in one container.**
 
-Submit every changed URL to Google & Bing the moment your sitemap moves, watch your index coverage as living dashboards, and measure whether ChatGPT, Claude, Gemini, Perplexity and Grok actually cite you.
+Submit changed sitemaps to Google and changed URLs to Bing/IndexNow, watch index coverage as living dashboards, and measure whether ChatGPT, Claude, Gemini, Perplexity and Grok actually cite you.
 
 [![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
 [![Docker](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml)
@@ -22,22 +22,21 @@ Submit every changed URL to Google & Bing the moment your sitemap moves, watch y
 
 ## Why this exists
 
-Search engines only recrawl what they're told about, and AI answer engines only cite what they can retrieve. Doing that properly across multiple sites means juggling the Indexing API, Search Console, IndexNow, Bing Webmaster, quota limits, `lastmod` diffing, `robots.txt`/`llms.txt` upkeep — and you still can't see whether any of it *works*. This container does all of it on a schedule and shows you the results as per-site dashboards: coverage funnels, freshness gaps, Core Web Vitals, and a prompt-by-prompt matrix of which AI engines cite your domains.
+Search engines only recrawl what they can discover, and AI answer engines only cite what they can retrieve. Doing that properly across multiple sites means juggling Search Console, IndexNow, Bing Webmaster, quota limits, `lastmod` diffing, `robots.txt`/`llms.txt` upkeep — and you still can't see whether any of it *works*. This container does all of it on a schedule and shows you the results as per-site dashboards: coverage funnels, freshness gaps, Core Web Vitals, and a prompt-by-prompt matrix of which AI engines cite your domains.
 
 ## Features
 
-- **Google Indexing API** — notify Google of URL changes (200 URLs/day per Google Cloud project)
 - **Google Search Console** — automatic sitemap submission per site
 - **IndexNow** — instantly alert Bing, Yandex, Yahoo, and other participating engines (all via one API call)
 - **Bing Webmaster URL Submission** — direct, quota-aware submission of changed pages into your verified Bing Webmaster property (complements IndexNow; opt-in with a Bing API key)
 - **robots.txt sitemap auto-discovery** — automatically finds every `Sitemap:` declared in `robots.txt` (not just the one you configured), so secondary sitemaps like `llms-sitemap.xml` are covered with zero extra setup
-- **GEO-aware routing** — non-HTML URLs (e.g. `llms.txt`, `llms-full.txt`) are pushed to **IndexNow only** (so Bing/AI answer engines re-crawl them) and deliberately kept out of the Google Indexing API + Search Console, where they'd just be noise
+- **GEO-aware routing** — non-HTML URLs (e.g. `llms.txt`, `llms-full.txt`) are pushed to **IndexNow only** and deliberately kept out of Search Console, where they'd just be noise
 - **Google URL Inspection API** — daily automated verification of indexing status, mobile usability, and actual search crawl time logs for sitemapped pages
 - **AI & Crawler GEO Audits** — automated rules auditing for key AI bots (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) in `robots.txt` + `llms.txt` existence validation
 - **Semantic JSON-LD Structured Schema Auditing** — extracts and catalogs page schemas (`SoftwareApplication`, `LocalBusiness`, etc.) during sitemap crawls
 - **Zero-Touch Key Deployments** — built-in pure-JS FTP/SFTP passive client + dynamic POST webhook callbacks to push IndexNow keys automatically
 - **Delta sitemap submission** — submits sitemaps to GSC only when changes (new/modified URLs) are detected to conserve Google quotas
-- **Multi-site round-robin** — interleaves URLs across all your sites `[A₀, B₀, C₀, A₁, B₁, C₁…]` so no single site monopolises the daily quota
+- **Multi-site scheduling** — reconciles and processes every enabled site's live sitemap in one run
 - **lastmod change detection** — fetches your live sitemap and only queues URLs whose `<lastmod>` has changed since the last run
 - **SQLite persistence** — URL state, submission history, and credentials survive container restarts
 - **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
@@ -173,13 +172,13 @@ docker exec <container> node dist/cli/admin.js make-admin you@example.com  # gra
 
 ---
 
-## Connecting Google (Search Console & Indexing)
+## Connecting Google Search Console
 
-> This is about linking a **Google account to a workspace** so the tool can call the Search Console / Indexing APIs on its behalf — separate from how *you* sign in to the dashboard (above). The account is attached to whichever workspace is active when you connect it.
+> This is about linking a **Google account to a workspace** so the tool can call the Search Console API on its behalf — separate from how *you* sign in to the dashboard (above). The account is attached to whichever workspace is active when you connect it.
 
-This application uses the secure **Google OAuth 2.0 Web Application Flow** (which is completely unrestricted by Google and operates using standard browser authorization redirects).
+This application uses the standard **Google OAuth 2.0 Web Application Flow** with offline access, so ordinary one-hour access tokens are renewed automatically from a stored refresh token. Google can still time-limit or revoke the refresh grant according to the OAuth project's publishing status and Workspace policy.
 
-> **Scopes requested**: Search Console (`webmasters`), Indexing API (`indexing`), your email address, and **Google Cloud (`cloud-platform`)**. The Cloud scope exists for exactly one optional feature — the *one-click Gemini API key* button in Settings, which creates a key on **your own** project, restricted to the Generative Language API only. Accounts linked before this scope was added keep working for indexing; they just need a one-time re-link before using that button.
+> **Default scopes requested**: Search Console (`webmasters`) and your email address. **Google Cloud (`cloud-platform`)** is requested only when you explicitly select Auto-configure Google APIs; leave that option off for managed Workspace accounts unless you need it.
 
 Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
 
@@ -192,19 +191,21 @@ If you don't have a pre-configured container, follow this simple guide to set up
 - Give your project a name (e.g., `SEO Website Indexer`) and click **Create**.
 - Make sure your new project is selected in the top project dropdown bar of the Cloud Console.
 
-#### 2️⃣ Step 2: Enable required Search APIs
-You must enable the two Google APIs that this tool communicates with:
+#### 2️⃣ Step 2: Enable the required Search API
+Enable the Google API that this tool communicates with:
 - 👉 Go to the [Google Search Console API Page](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com) and click **Enable**.
-- 👉 Go to the [Web Search Indexing API Page](https://console.cloud.google.com/apis/library/indexing.googleapis.com) and click **Enable**.
 
-#### 3️⃣ Step 3: Configure the OAuth Consent Screen
+#### 3️⃣ Step 3: Configure the OAuth Consent Screen for durable access
 Google requires you to describe how your app authorizes users:
 - Open the [OAuth Consent Screen Configuration Page](https://console.cloud.google.com/apis/credentials/consent).
-- Select **External** as the user type and click **Create**.
+- If every connected account belongs to your Google Workspace organisation, choose **Internal**. Otherwise choose **External**.
 - Enter your **App Name** (e.g., `SEO Indexer`) and your **User Support Email** (your Google email).
-- Scroll to the bottom and click **Save and Continue** until you reach the **Test Users** screen.
-- ⚠️ **CRITICAL STEP (Must Do):** Click **+ Add Users** and enter your Google account email address. Google restricts unverified "Testing" apps to explicitly authorized email addresses only. If you skip this, Google will block your login with an error!
-- Click **Save and Continue** to finish.
+- During initial setup of an External app, add each account under **Test users** so you can complete authorization.
+- Before relying on unattended refresh, change the External app's publishing status from **Testing** to **In production**. Google deliberately expires non-basic refresh grants from External/Testing apps after seven days.
+- For Workspace accounts, an administrator can instead mark the OAuth app **Trusted**. Workspace session-control policies can still force reauthentication when broad Cloud scopes are granted, so leave **Auto-configure Google APIs** off unless required.
+- After changing the publishing/trust configuration, reconnect each account once so Google issues a new grant.
+
+The Accounts screen records any `refresh_token_expires_in` value Google returns and shows the exact last refresh error. A normal durable grant has no scheduled refresh-token expiry; its one-hour access tokens continue to renew automatically.
 
 #### 4️⃣ Step 4: Create your Web OAuth Client ID
 - Open the [Credentials Management Page](https://console.cloud.google.com/apis/credentials).
@@ -484,10 +485,10 @@ Sitemap: https://example.com/llms-sitemap.xml
 
 …both are crawled. URLs are then routed by type:
 
-| URL type | Google Indexing API | GSC sitemap | Bing Webmaster | IndexNow |
-|----------|:---:|:---:|:---:|:---:|
-| HTML pages | ✅ | ✅ | ✅ | ✅ |
-| `llms.txt`, `llms-full.txt`, other non-HTML | ❌ | ❌ | ❌ | ✅ |
+| URL type | GSC sitemap | Bing Webmaster | IndexNow |
+|----------|:---:|:---:|:---:|
+| HTML pages | ✅ | ✅ | ✅ |
+| `llms.txt`, `llms-full.txt`, other non-HTML | ❌ | ❌ | ✅ |
 
 Non-HTML files are intentionally kept out of Google/Bing search submission (they aren't indexable pages and would just create "Excluded" noise), but **are** pushed to IndexNow so Bing and AI answer engines re-crawl your latest AI index. Their change-state is tracked the same way as pages, so they're only re-submitted when their `<lastmod>` changes.
 
@@ -556,11 +557,11 @@ plugins:
 There is no limit to the number of sites you can add. Each site gets:
 - Its own IndexNow key (stored in SQLite)
 - Its own URL state and lastmod tracking
-- A share of the daily Google Indexing API quota (distributed round-robin)
+- Its own Search Console sitemap and URL Inspection state
 
 To add a site: **Dashboard → Sites → Add Site**, enter the domain, sitemap URL, and Google Search Console property URL.
 
-The Google Indexing API is limited to **200 URLs/day across all sites in your Google Cloud project**. With 5 sites, each gets ~40 URLs/day. The scheduler prioritises new and recently-changed pages within that budget.
+Google's URL-level Indexing API is intentionally not used: Google restricts it to `JobPosting` and livestream `BroadcastEvent` pages. Ordinary sites are handled through canonical sitemaps, crawlable links and Search Console coverage inspection.
 
 ---
 
@@ -678,9 +679,9 @@ npm run dev       # http://localhost:5173 (proxies /api/* to :3000)
 └────┬──────────────────┬──────────────────────┘
      │                  │
      ▼                  ▼
-Google APIs         IndexNow API
-(Indexing API +    (api.indexnow.org →
- Search Console)    Bing, Yandex, Yahoo…)
+Google Search       IndexNow API
+Console API        (api.indexnow.org →
+                   Bing, Yandex, Yahoo…)
 ```
 
 ---

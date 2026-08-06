@@ -721,6 +721,10 @@ app.get('/api/auth/accounts', async (req) => {
     client_id: acc.client_id,
     created_at: acc.created_at,
     needs_reauth: acc.needs_reauth ? 1 : 0,
+    refresh_token_expiry: acc.refresh_token_expiry ?? null,
+    last_refreshed_at: acc.last_refreshed_at ?? null,
+    last_refresh_error: acc.last_refresh_error ?? null,
+    granted_scopes: acc.granted_scopes ?? null,
   }));
 });
 
@@ -1106,7 +1110,6 @@ app.post('/api/runs', async (req, reply) => {
     skipBing?: boolean;
     skipSitemaps?: boolean;
     gscLimit?: number;
-    googleLimit?: number;
   };
   try {
     const runId = await runIndexing({ trigger: 'manual', workspaceId: ws, ...opts });
@@ -1293,23 +1296,16 @@ app.get('/api/quota/today', async (req) => {
   const { day } = (req.query ?? {}) as { day?: string };
   const targetDay = day ?? new Date().toISOString().slice(0, 10);
 
-  // Tenant scope: only count quota buckets that belong to this workspace, so the
-  // bucket names (site ids, GSC property URLs, account ids) can't reveal other
-  // tenants. Buckets are keyed `site:<id>`, `property:<gscUrl>`, `account:<id>`
-  // or `project:<id>`. Google-indexing usage is summed from the `account:`
-  // buckets (each success also writes a `project:` bucket; using accounts avoids
-  // both the double-count and any cross-tenant project attribution).
+  // Tenant scope: only count site and Search Console property buckets that
+  // belong to this workspace, so identifiers cannot leak between tenants.
   const ws = currentWorkspace(req);
   const wsSites = ws ? getSitesForWorkspace(ws) : [];
   const siteIds = new Set(wsSites.map(s => s.id));
   const gscUrls = new Set(wsSites.map(s => s.gsc_url));
-  const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
-  const accountIds = new Set(accounts.map(a => a.id));
   const inWorkspace = (bucket: string): boolean => {
     if (bucket.startsWith('site:')) return siteIds.has(bucket.slice(5));
     if (bucket.startsWith('property:')) return gscUrls.has(bucket.slice('property:'.length));
-    if (bucket.startsWith('account:')) return accountIds.has(bucket.slice('account:'.length));
-    return false; // project: and anything else — excluded from the tenant view
+    return false;
   };
   const rows = getAllQuotaUsageForDay(targetDay).filter(r => inWorkspace(r.bucket));
 
@@ -1322,15 +1318,8 @@ app.get('/api/quota/today', async (req) => {
   }
 
   // Build summary limits using current configuration
-  const distinctProjects = new Set(accounts.map(a => a.client_id)).size || 1;
   const summary = {
     day: targetDay,
-    google_indexing: {
-      used: grouped['google_indexing']?.total ?? 0,
-      limit: 200 * distinctProjects,
-      perProjectLimit: 200,
-      projects: grouped['google_indexing']?.buckets ?? [],
-    },
     gsc_inspection: {
       used: grouped['gsc_inspection']?.total ?? 0,
       perPropertyLimit: 2000,

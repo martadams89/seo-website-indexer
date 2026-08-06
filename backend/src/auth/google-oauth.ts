@@ -1,22 +1,21 @@
 /**
  * google-oauth.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Google OAuth 2.0 Device Authorization Flow (RFC 8628)
+ * Google OAuth 2.0 Web Application Flow with offline refresh tokens
  *
  * THE OUT-OF-THE-BOX SOLUTION — PRE-CONFIGURED OAUTH CLIENT:
  * ─────────────────────────────────────────────────────────────
- * This app ships with a pre-configured, built-in Google OAuth 2.0 "Desktop app"
- * client ID and secret, identical to how CLI tools like rclone work.
+ * This app can use a pre-configured Google OAuth client ID and secret.
  *
  *   • Users get a zero-setup, one-click "Sign in with Google" experience out of the box.
- *   • Just click "Sign in with Google", see a URL + 8-char code, and authorize it.
+ *   • Users authorize in a browser popup and the callback stores an offline grant.
  *   • Self-builders can easily override this via GOOGLE_OAUTH_CLIENT_ID and 
  *     GOOGLE_OAUTH_CLIENT_SECRET environment variables.
  *
  * TO CREATE YOUR OWN CLIENT (optional):
  *   1. console.cloud.google.com → APIs & Services → Credentials
- *   2. Enable: Google Search Console API + Web Search Indexing API
- *   3. Create Credentials → OAuth client ID → Desktop app
+ *   2. Enable: Google Search Console API
+ *   3. Create Credentials → OAuth client ID → Web application
  *   4. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in your env
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -30,6 +29,7 @@ import {
   upsertGoogleAccount,
   deleteGoogleAccount,
   setGoogleAccountNeedsReauth,
+  setGoogleAccountRefreshError,
   canOwnGoogleAccount,
   type GoogleAccount
 } from '../db/database.js';
@@ -39,12 +39,7 @@ import { logSystem } from '../utils/logger.js';
 
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/webmasters',
-  'https://www.googleapis.com/auth/indexing',
   'https://www.googleapis.com/auth/userinfo.email',
-  // Needed for one-click Gemini key provisioning (API Keys API + Service
-  // Usage). Accounts linked before this scope existed must re-link once to
-  // use that feature; everything else works without it.
-  'https://www.googleapis.com/auth/cloud-platform',
 ].join(' ');
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
@@ -78,6 +73,11 @@ interface CachedToken {
   expiry: Date;
 }
 const _tokenCache = new Map<string, CachedToken>();
+// Search Console requests for one account often start together. Without a
+// single-flight guard, an expired access token could trigger several refreshes
+// at once. That is wasteful and can lose a rotated refresh token if responses
+// complete out of order.
+const _refreshInFlight = new Map<string, Promise<string>>();
 
 // ── Temporary Custom Credentials Cache ────────────────────────────────────────
 
@@ -133,7 +133,9 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   const data = await res.json() as {
     access_token?:  string;
     refresh_token?: string;
+    refresh_token_expires_in?: number;
     expires_in?:    number;
+    scope?:         string;
     error?:         string;
     error_description?: string;
   };
@@ -150,6 +152,10 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   }
 
   const expiryDate = new Date(Date.now() + ((data.expires_in ?? 3600) - 300) * 1_000);
+  const refreshTokenExpiry = data.refresh_token_expires_in
+    ? new Date(Date.now() + data.refresh_token_expires_in * 1_000).toISOString()
+    : null;
+  const issuedAt = new Date().toISOString();
   
   // Fetch Google email address to identify account
   const email = await fetchUserEmail(data.access_token);
@@ -177,6 +183,10 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     token_expiry: expiryDate.toISOString(),
+    refresh_token_expiry: refreshTokenExpiry,
+    granted_scopes: data.scope ?? null,
+    last_refreshed_at: issuedAt,
+    last_refresh_error: null,
     workspace_id: workspaceId ?? null,
     owner_user_id: ownerUserId ?? null,
   });
@@ -186,12 +196,14 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   setGoogleAccountNeedsReauth(email, false);
   _tokenCache.delete(email);
 
-  // Best-effort: enable the Google APIs this tool needs (Web Search Indexing +
-  // Search Console) on the linked project, so the user doesn't have to do it by
+  // Best-effort: enable the Google API this tool needs (Search Console) on the
+  // linked project, so the user doesn't have to do it by
   // hand in the Cloud console. Needs the cloud-platform scope; if that wasn't
   // granted the enable calls 403 and we skip silently (logged). Fire-and-forget
   // so it never delays the OAuth response.
-  void enableRequiredApis(data.access_token, clientId, email);
+  if ((data.scope ?? '').split(' ').includes('https://www.googleapis.com/auth/cloud-platform')) {
+    void enableRequiredApis(data.access_token, clientId, email);
+  }
 
   // Clear in-memory temp custom credentials
   _tempClientId = null;
@@ -207,7 +219,7 @@ function projectFromClientId(clientId: string): string | null {
   return m ? m[1] : null;
 }
 
-const AUTO_ENABLE_SERVICES = ['indexing.googleapis.com', 'searchconsole.googleapis.com'];
+const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com'];
 
 /**
  * Enable the APIs the tool depends on, on the project owning the OAuth client.
@@ -234,7 +246,7 @@ export async function enableRequiredApis(accessToken: string, clientId: string, 
     }
   }
   if (enabled.length) logSystem('ok', `Auto-enabled Google APIs for ${label}: ${enabled.map(s => s.replace('.googleapis.com', '')).join(', ')}`);
-  else logSystem('dim', `Could not auto-enable Google APIs for ${label} (grant Cloud access when connecting, or enable them manually) — indexing still works if already enabled on the project.`);
+  else logSystem('dim', `Could not auto-enable Google APIs for ${label} (grant Cloud access when connecting, or enable them manually) — Search Console calls still work if the API is already enabled on the project.`);
   return { enabled, skipped };
 }
 
@@ -255,25 +267,30 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
   const data = await res.json() as {
     access_token?: string;
     refresh_token?: string;
+    refresh_token_expires_in?: number;
     expires_in?: number;
+    scope?: string;
     error?: string;
+    error_subtype?: string;
     error_description?: string;
   };
   if (!data.access_token) {
     // 'invalid_grant' = the refresh token is permanently dead: the user revoked
-    // access, it expired (~6 months unused), OR a Google Workspace reauth /
+    // access, it expired (~6 months unused or a seven-day Testing grant), OR a Google Workspace reauth /
     // session-control policy killed it. The last case surfaces as
     // "invalid_grant: reauth related error (invalid_rapt)" and is triggered by
     // the sensitive cloud-platform scope (opt-in "Auto-configure" box) — the
-    // core webmasters/indexing scopes don't attract it. Persist a needs_reauth
+    // core Search Console scope doesn't attract it. Persist a needs_reauth
     // flag so the UI can prompt for reconnection and the scheduler stops
     // retrying a token that will never refresh again.
     const isInvalidGrant = data.error === 'invalid_grant';
-    const isReauth = isInvalidGrant && /rapt|reauth/i.test(data.error_description ?? '');
+    const isReauth = isInvalidGrant && /rapt|reauth/i.test(`${data.error_subtype ?? ''} ${data.error_description ?? ''}`);
+    const refreshError = `${data.error ?? `HTTP ${res.status}`}${data.error_subtype ? `/${data.error_subtype}` : ''}${data.error_description ? `: ${data.error_description}` : ''}`;
+    setGoogleAccountRefreshError(account.id, refreshError);
     if (isInvalidGrant) setGoogleAccountNeedsReauth(account.id, true);
     _tokenCache.delete(account.id);
     throw new Error(
-      `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_description ? `: ${data.error_description}` : ''}). ` +
+      `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_subtype ? `/${data.error_subtype}` : ''}${data.error_description ? `: ${data.error_description}` : ''}). ` +
       (isReauth
         ? 'Your Google Workspace requires periodic re-authentication (reauth policy). Please reconnect this account on the Accounts page — leaving "Auto-configure Google APIs" unchecked avoids this recurring for managed accounts.'
         : isInvalidGrant
@@ -286,6 +303,12 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
 
   account.access_token = data.access_token;
   account.token_expiry = expiryDate.toISOString();
+  account.last_refreshed_at = new Date().toISOString();
+  account.last_refresh_error = null;
+  if (data.refresh_token_expires_in) {
+    account.refresh_token_expiry = new Date(Date.now() + data.refresh_token_expires_in * 1_000).toISOString();
+  }
+  if (data.scope) account.granted_scopes = data.scope;
   // Google occasionally rotates the refresh token — persist the new one if provided.
   if (data.refresh_token && data.refresh_token !== account.refresh_token) {
     account.refresh_token = data.refresh_token;
@@ -321,7 +344,14 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
     return account.access_token;
   }
 
-  return refreshAccountToken(account);
+  const existingRefresh = _refreshInFlight.get(accountId);
+  if (existingRefresh) return existingRefresh;
+
+  const refresh = refreshAccountToken(account).finally(() => {
+    if (_refreshInFlight.get(accountId) === refresh) _refreshInFlight.delete(accountId);
+  });
+  _refreshInFlight.set(accountId, refresh);
+  return refresh;
 }
 
 /**
@@ -351,6 +381,7 @@ export function getAuthStatus(workspaceId?: string | null): AuthStatus {
 export function disconnectGoogleAccount(id: string): void {
   deleteGoogleAccount(id);
   _tokenCache.delete(id);
+  _refreshInFlight.delete(id);
 }
 
 /** Disconnect every Google account in ONE workspace (tenant-scoped). */

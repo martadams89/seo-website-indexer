@@ -41,15 +41,69 @@ function seedExpiredAccount(): string {
 }
 
 describe('Google token refresh', () => {
+  it('coalesces concurrent refreshes for the same account', async () => {
+    const id = seedExpiredAccount();
+    const fetchMock = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return {
+        ok: true, status: 200,
+        json: async () => ({ access_token: 'shared-fresh-token', expires_in: 3600 }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const tokens = await Promise.all([
+      oauth.getAccessTokenForAccount(id),
+      oauth.getAccessTokenForAccount(id),
+      oauth.getAccessTokenForAccount(id),
+    ]);
+
+    expect(tokens).toEqual(['shared-fresh-token', 'shared-fresh-token', 'shared-fresh-token']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a time-limited refresh grant returned by Google', async () => {
+    const id = `${randomUUID().slice(0, 8)}@example.com`;
+    oauth.saveCredentials('123-abc.apps.googleusercontent.com', 'shh');
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/token')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            access_token: 'issued-access-token', refresh_token: 'issued-refresh-token',
+            expires_in: 3600, refresh_token_expires_in: 604800,
+            scope: 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/userinfo.email',
+          }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => ({ email: id }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await oauth.exchangeCodeForTokens('code', 'https://example.test/api/auth/google/callback');
+
+    const account = db.getGoogleAccountById(id);
+    expect(account?.refresh_token_expiry).toBeTruthy();
+    const remaining = new Date(account!.refresh_token_expiry!).getTime() - Date.now();
+    expect(remaining).toBeGreaterThan(6 * 86_400_000);
+    expect(remaining).toBeLessThanOrEqual(7 * 86_400_000);
+    expect(account?.granted_scopes).toContain('/auth/webmasters');
+  });
+
   it('flags needs_reauth on an invalid_rapt reauth failure and raises an actionable error', async () => {
     const id = seedExpiredAccount();
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false, status: 400,
-      json: async () => ({ error: 'invalid_grant', error_description: 'reauth related error (invalid_rapt)' }),
+      json: async () => ({ error: 'invalid_grant', error_subtype: 'invalid_rapt', error_description: 'reauth required' }),
     } as unknown as Response)));
 
     await expect(oauth.getAccessTokenForAccount(id)).rejects.toThrow(/reconnect this account/i);
     expect(db.getGoogleAccountById(id)?.needs_reauth).toBe(1);
+    expect(db.getGoogleAccountById(id)?.last_refresh_error).toContain('invalid_rapt');
   });
 
   it('flags needs_reauth on a plain revoked/expired refresh token', async () => {

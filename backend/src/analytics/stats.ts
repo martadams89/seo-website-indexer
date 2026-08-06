@@ -27,25 +27,30 @@ function computeSnapshot(siteId: string): SiteSnapshot {
   const row = db.prepare(`
     SELECT
       COUNT(*) AS urls_total,
-      SUM(CASE WHEN submission_count > 0 THEN 1 ELSE 0 END) AS urls_submitted,
-      SUM(google_submitted) AS urls_google,
+      SUM(CASE WHEN last_submitted IS NOT NULL THEN 1 ELSE 0 END) AS urls_submitted,
+      SUM(CASE WHEN gsc_last_inspected IS NOT NULL THEN 1 ELSE 0 END) AS urls_google,
       SUM(indexnow_submitted) AS urls_indexnow,
       SUM(CASE WHEN has_schema = 1 THEN 1 ELSE 0 END) AS urls_with_schema,
       SUM(CASE WHEN last_seen_lastmod IS NOT NULL AND gsc_last_inspected IS NOT NULL
                 AND last_seen_lastmod > gsc_last_inspected THEN 1 ELSE 0 END) AS urls_stale
-    FROM url_state WHERE site_id = ?
+    FROM url_state WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
   `).get(siteId) as Record<string, number | null>;
 
   const idx = db.prepare(`
     SELECT
       SUM(CASE WHEN gsc_indexing_state IN (${INDEXED_STATES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS indexed,
       SUM(CASE WHEN gsc_indexing_state IS NOT NULL AND gsc_indexing_state NOT IN (${INDEXED_STATES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS not_indexed
-    FROM url_state WHERE site_id = ?
+    FROM url_state WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
   `).get(...INDEXED_STATES, ...INDEXED_STATES, siteId) as { indexed: number | null; not_indexed: number | null };
 
-  const failures = (db.prepare(
-    'SELECT COUNT(*) AS c FROM url_failures WHERE site_id = ?'
-  ).get(siteId) as { c: number } | undefined)?.c ?? 0;
+  const failures = (db.prepare(`
+    SELECT COUNT(*) AS c FROM url_failures f
+    WHERE f.site_id = ? AND EXISTS (
+      SELECT 1 FROM url_state s
+      WHERE s.site_id = f.site_id AND s.url = f.url
+        AND COALESCE(s.indexnow_only, 0) = 0
+    )
+  `).get(siteId) as { c: number } | undefined)?.c ?? 0;
 
   return {
     site_id: siteId,
@@ -161,7 +166,8 @@ export function getFreshnessRadar(siteId: string, limit = 100): FreshnessEntry[]
   return getDb().prepare(`
     SELECT url, last_seen_lastmod, gsc_last_inspected, gsc_indexing_state
     FROM url_state
-    WHERE site_id = ? AND last_seen_lastmod IS NOT NULL AND gsc_last_inspected IS NOT NULL
+    WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
+      AND last_seen_lastmod IS NOT NULL AND gsc_last_inspected IS NOT NULL
       AND last_seen_lastmod > gsc_last_inspected
     ORDER BY last_seen_lastmod DESC LIMIT ?
   `).all(siteId, limit) as FreshnessEntry[];
@@ -185,12 +191,18 @@ export function getSiteDetail(siteId: string): {
     trend: db.prepare('SELECT * FROM site_stats_daily WHERE site_id = ? ORDER BY day DESC LIMIT 60').all(siteId).reverse() as SiteSnapshot[],
     states: db.prepare(`
       SELECT COALESCE(gsc_indexing_state, 'Never inspected') AS state, COUNT(*) AS count
-      FROM url_state WHERE site_id = ? GROUP BY gsc_indexing_state ORDER BY count DESC
+      FROM url_state WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
+      GROUP BY gsc_indexing_state ORDER BY count DESC
     `).all(siteId) as Array<{ state: string; count: number }>,
     freshness: getFreshnessRadar(siteId, 50),
     failures: db.prepare(`
-      SELECT url, api, fail_count, last_failed_at FROM url_failures
-      WHERE site_id = ? ORDER BY last_failed_at DESC LIMIT 50
+      SELECT f.url, f.api, f.fail_count, f.last_failed_at FROM url_failures f
+      WHERE f.site_id = ? AND EXISTS (
+        SELECT 1 FROM url_state s
+        WHERE s.site_id = f.site_id AND s.url = f.url
+          AND COALESCE(s.indexnow_only, 0) = 0
+      )
+      ORDER BY f.last_failed_at DESC LIMIT 50
     `).all(siteId) as Array<{ url: string; api: string; fail_count: number; last_failed_at: string }>,
     crux: db.prepare('SELECT day, lcp_ms, inp_ms, cls FROM crux_snapshots WHERE site_id = ? ORDER BY day DESC LIMIT 60').all(siteId).reverse() as Array<{ day: string; lcp_ms: number | null; inp_ms: number | null; cls: number | null }>,
   };
