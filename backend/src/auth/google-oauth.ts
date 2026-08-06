@@ -76,11 +76,6 @@ interface CachedToken {
   expiry: Date;
 }
 const _tokenCache = new Map<string, CachedToken>();
-// Search Console requests for one account often start together. Without a
-// single-flight guard, an expired access token could trigger several refreshes
-// at once. That is wasteful and can lose a rotated refresh token if responses
-// complete out of order.
-const _refreshInFlight = new Map<string, Promise<string>>();
 
 // In-flight refresh, keyed by account id. Google accounts are shared across a
 // user's workspaces, and a single snapshot/run can fire several Google API
@@ -302,8 +297,18 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     const isInvalidGrant = data.error === 'invalid_grant';
     const isReauth = isInvalidGrant && /rapt|reauth/i.test(`${data.error_subtype ?? ''} ${data.error_description ?? ''}`);
     const refreshError = `${data.error ?? `HTTP ${res.status}`}${data.error_subtype ? `/${data.error_subtype}` : ''}${data.error_description ? `: ${data.error_description}` : ''}`;
-    setGoogleAccountRefreshError(account.id, refreshError);
-    if (isInvalidGrant) setGoogleAccountNeedsReauth(account.id, true);
+
+    // A different process may have refreshed and rotated this token while our
+    // request was in flight (or the user may have reconnected). In that case
+    // this invalid_grant belongs to the superseded token and must not mark the
+    // healthy replacement grant as dead.
+    const current = isInvalidGrant ? getGoogleAccountById(account.id) : null;
+    const supersededByConcurrentRefresh = !!current && current.refresh_token !== account.refresh_token;
+
+    if (!supersededByConcurrentRefresh) {
+      setGoogleAccountRefreshError(account.id, refreshError);
+      if (isInvalidGrant) setGoogleAccountNeedsReauth(account.id, true);
+    }
     _tokenCache.delete(account.id);
 
     if (supersededByConcurrentRefresh && current!.access_token && current!.token_expiry && new Date(current!.token_expiry) > new Date()) {
@@ -421,13 +426,10 @@ export async function getAccessTokenForAccount(accountId: string): Promise<strin
     return account.access_token;
   }
 
-  const existingRefresh = _refreshInFlight.get(accountId);
-  if (existingRefresh) return existingRefresh;
-
-  const refresh = refreshAccountToken(account).finally(() => {
-    if (_refreshInFlight.get(accountId) === refresh) _refreshInFlight.delete(accountId);
+  const refresh = refreshAccountTokenWithLock(account).finally(() => {
+    if (_inFlightRefresh.get(accountId) === refresh) _inFlightRefresh.delete(accountId);
   });
-  _refreshInFlight.set(accountId, refresh);
+  _inFlightRefresh.set(accountId, refresh);
   return refresh;
 }
 
@@ -458,7 +460,7 @@ export function getAuthStatus(workspaceId?: string | null): AuthStatus {
 export function disconnectGoogleAccount(id: string): void {
   deleteGoogleAccount(id);
   _tokenCache.delete(id);
-  _refreshInFlight.delete(id);
+  _inFlightRefresh.delete(id);
 }
 
 /** Disconnect every Google account in ONE workspace (tenant-scoped). */
