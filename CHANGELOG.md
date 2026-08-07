@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.40](https://github.com/martadams89/seo-website-indexer/compare/v1.22.39...v1.22.40) (2026-08-07)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update npm dependencies (non-major) ([#223](https://github.com/martadams89/seo-website-indexer/issues/223)) ([c631edd](https://github.com/martadams89/seo-website-indexer/commit/c631edde23d6b0a7fc28ad1c542c532ab722abf2))
+
 ## [1.22.39](https://github.com/martadams89/seo-website-indexer/compare/v1.22.38...v1.22.39) (2026-08-06)
 
 
