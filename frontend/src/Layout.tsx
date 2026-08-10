@@ -6,6 +6,7 @@ import {
 , BarChart3, Bot } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
+import { useWorkspace } from './workspace/WorkspaceContext';
 import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
 import { createLogStream } from './api';
 import { ToastHost } from './components/Toast';
@@ -24,21 +25,27 @@ const NAV = [
 // ── Layout Component ──────────────────────────────────────────────────────────
 
 export default function Layout() {
-  const { status, appendLog, theme, toggleTheme, sseConnected, setSseConnected, markSseAlive } = useApp();
+  const { status, sites, appendLog, theme, toggleTheme, sseConnected, setSseConnected, markSseAlive } = useApp();
   const { user, logout } = useAuth();
+  const { active } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
   const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer open
 
-  const needsSetup = status && !status.auth.authenticated;
+  // Only force the Google-auth setup wizard on a genuinely empty workspace —
+  // a member invited into a workspace that already has sites/content should
+  // never be dropped into onboarding, and a read-only viewer couldn't act on
+  // it anyway.
+  const isViewer = active?.role === 'viewer' && !user.is_super_admin;
+  const needsSetup = !!status && !status.auth.authenticated && sites.length === 0 && !isViewer;
 
   // Redirect to onboarding if not configured
   useEffect(() => {
-    if (status && !status.auth.authenticated && window.location.pathname !== '/setup') {
+    if (needsSetup && window.location.pathname !== '/setup') {
       navigate('/setup');
     }
-  }, [status, navigate]);
+  }, [needsSetup, navigate]);
 
   // SSE connection for live logs
   useEffect(() => {

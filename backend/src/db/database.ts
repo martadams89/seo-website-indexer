@@ -493,6 +493,46 @@ function initSchema(db: Database.Database): void {
       db.exec("ALTER TABLE ai_results ADD COLUMN user_prompt TEXT;");
     }
   }
+
+  // Global account disable (super-admin action) — distinct from a per-workspace
+  // membership disable below; a disabled user cannot log in at all.
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (userCols.length > 0 && !userCols.some(c => c.name === 'disabled')) {
+    db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;");
+  }
+
+  // Fuller per-workspace permissions: role gains 'admin'/'viewer' tiers (legacy
+  // 'member' rows are treated as 'editor' in code), ai_citations gates access to
+  // the AI Citations feature (and its API-token spend) per member, and disabled
+  // revokes a member's access to THIS workspace only (their account and other
+  // workspace memberships are unaffected).
+  const wmCols = db.prepare("PRAGMA table_info(workspace_members)").all() as { name: string }[];
+  if (wmCols.length > 0) {
+    if (!wmCols.some(c => c.name === 'ai_citations')) {
+      db.exec("ALTER TABLE workspace_members ADD COLUMN ai_citations INTEGER NOT NULL DEFAULT 1;");
+    }
+    if (!wmCols.some(c => c.name === 'disabled')) {
+      db.exec("ALTER TABLE workspace_members ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;");
+    }
+  }
+
+  // Email invites to join a workspace — a pending row until accepted/revoked.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_invites (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      email        TEXT NOT NULL COLLATE NOCASE,
+      role         TEXT NOT NULL DEFAULT 'editor',
+      ai_citations INTEGER NOT NULL DEFAULT 1,
+      token_hash   TEXT NOT NULL UNIQUE,
+      invited_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+      expires_at   TEXT NOT NULL,
+      accepted_at  TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_invites_ws ON workspace_invites(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_invites_email ON workspace_invites(email);
+  `);
 }
 
 function migrateSettingsToAccounts(db: Database.Database): void {

@@ -67,6 +67,8 @@ import {
   getRunLock,
   getDb,
   pruneOldLogs,
+  incrementQuota,
+  getQuotaUsage,
 } from './db/database.js';
 import {
   getAuthStatus,
@@ -109,16 +111,19 @@ import {
   createSession, getSessionUser, destroySession, setUserPassword,
   generateTotpSecret, totpUri, verifyTotp, setTotpSecret, getTotpSecret, enableTotp, disableTotp,
   toPublic, pruneExpiredSessions, listUsers, getUserById,
-  countSuperAdmins, setUserSuperAdmin, deleteUser,
+  countSuperAdmins, setUserSuperAdmin, deleteUser, setUserDisabled,
   createPasswordReset, consumePasswordReset, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
 import { sendTestNotification, configuredChannels, NOTIFY_KEYS } from './utils/notify.js';
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
-  canAccessWorkspace, canManageWorkspace, canAccessSite, bootstrapUserWorkspace,
+  canAccessWorkspace, canManageWorkspace, canAccessSiteInWorkspace, bootstrapUserWorkspace,
   listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember, reassignOwnedWorkspaces,
   addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
+  workspaceRole, canUseAiCitations, updateWorkspaceMember,
+  listAllWorkspacesSummary, reassignWorkspaceOwner,
+  createWorkspaceInvite, listWorkspaceInvites, revokeWorkspaceInvite, getInviteByToken, markInviteAccepted,
 } from './auth/workspaces.js';
 import {
   beginRegistration, finishRegistration, beginAuthentication, finishAuthentication,
@@ -228,8 +233,9 @@ const AUTH_OPEN_PATHS = new Set<string>([
   '/api/auth/forgot-password', '/api/auth/reset-password',
 ]);
 // Pre-auth path prefixes (dynamic segments) — e.g. the SSO provider redirect
-// and callback which the identity provider hits with no session.
-const AUTH_OPEN_PREFIXES = ['/api/auth/sso/'];
+// and callback which the identity provider hits with no session, and the
+// workspace-invite accept flow (the invitee has no account/session yet).
+const AUTH_OPEN_PREFIXES = ['/api/auth/sso/', '/api/invites/'];
 function sessionTokenFromReq(req: { headers: Record<string, unknown> }): string | undefined {
   const raw = req.headers['cookie'];
   if (typeof raw !== 'string') return undefined;
@@ -247,6 +253,12 @@ app.addHook('preHandler', async (req, reply) => {
   const user = getSessionUser(sessionTokenFromReq(req));
   if (!user) {
     return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
+  }
+  // A super-admin-disabled account loses access everywhere, immediately —
+  // even mid-session (setUserDisabled also clears sessions, this just covers
+  // any request racing that cleanup).
+  if (user.disabled) {
+    return reply.status(403).send({ error: 'This account has been disabled.' });
   }
   // Resolve the active workspace from the X-Workspace-Id header (the UI's
   // workspace switcher sets it), validating access; fall back to the user's
@@ -286,8 +298,31 @@ app.addHook('preHandler', async (req, reply) => {
   const ctx = (req as unknown as Partial<RequestCtx>).ctx;
   if (!ctx) return; // unauthenticated request already rejected by the gate above
   const siteId = siteIdFromPath(pathOnly);
-  if (siteId && !canAccessSite(ctx.user, siteId)) {
+  // Scoped to the ACTIVE workspace, not just "any workspace this user can
+  // access" — otherwise a multi-workspace user (or a super-admin) who
+  // switches the active workspace while a stale site id is still in the UI
+  // (e.g. an open Analytics page) keeps seeing the previous tenant's data.
+  if (siteId && !canAccessSiteInWorkspace(ctx.user, siteId, ctx.workspaceId)) {
     return reply.status(404).send({ error: 'Site not found' });
+  }
+});
+
+// A workspace 'viewer' has read-only access: block mutating requests scoped to
+// the active workspace's data (self-account actions under /api/auth/* and
+// creating a brand-new workspace are always allowed).
+const VIEWER_EXEMPT_PREFIXES = ['/api/auth/'];
+const VIEWER_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
+app.addHook('preHandler', async (req, reply) => {
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+  const pathOnly = req.url.split('?')[0];
+  if (!pathOnly.startsWith('/api/')) return;
+  const ctx = (req as unknown as Partial<RequestCtx>).ctx;
+  if (!ctx || !ctx.workspaceId) return;
+  if (VIEWER_EXEMPT_EXACT.has(pathOnly) || VIEWER_EXEMPT_PREFIXES.some(p => pathOnly.startsWith(p))) return;
+  if (ctx.user.is_super_admin) return;
+  if (workspaceRole(ctx.user, ctx.workspaceId) === 'viewer') {
+    return reply.status(403).send({ error: 'Read-only access — ask a workspace admin for edit permissions.' });
   }
 });
 
@@ -317,7 +352,7 @@ function requireWorkspace(req: unknown): string {
   return ws;
 }
 function assertSiteAccess(req: unknown, siteId: string): void {
-  if (!canAccessSite(currentUser(req), siteId)) {
+  if (!canAccessSiteInWorkspace(currentUser(req), siteId, currentWorkspace(req))) {
     throw Object.assign(new Error('Site not found'), { statusCode: 404 });
   }
 }
@@ -404,6 +439,9 @@ app.post('/api/auth/login', AUTH_RATE_LIMIT, async (req, reply) => {
   // Uniform failure to avoid leaking which emails exist.
   if (!user || !password || !verifyPassword(user, password)) {
     return reply.status(401).send({ error: 'Incorrect email or password.' });
+  }
+  if (user.disabled) {
+    return reply.status(403).send({ error: 'This account has been disabled. Contact your workspace admin.' });
   }
   if (user.totp_enabled) {
     if (!totp) return reply.status(401).send({ error: 'Two-factor code required.', totpRequired: true });
@@ -594,6 +632,8 @@ app.get('/api/workspaces', async (req) => {
     created_at: w.created_at,
     is_owner: w.owner_user_id === user.id,
     is_active: w.id === active,
+    role: w.owner_user_id === user.id ? 'owner' : (user.is_super_admin ? 'admin' : workspaceRole(user, w.id)),
+    can_manage: canManageWorkspace(user, w.id),
   }));
 });
 
@@ -635,11 +675,12 @@ app.get('/api/workspaces/:id/members', async (req, reply) => {
 app.post('/api/workspaces/:id/members', async (req, reply) => {
   const { id } = req.params as { id: string };
   if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
-  const { email, role } = (req.body ?? {}) as { email?: string; role?: string };
+  const { email, role, ai_citations } = (req.body ?? {}) as { email?: string; role?: string; ai_citations?: boolean };
   if (!email?.trim()) return reply.status(400).send({ error: 'email is required.' });
   const target = getUserByEmail(email.trim().toLowerCase());
-  if (!target) return reply.status(404).send({ error: 'No user with that email. Create the user first.' });
-  addWorkspaceMember(id, target.id, role === 'admin' ? 'admin' : 'member');
+  if (!target) return reply.status(404).send({ error: 'No user with that email. Invite them instead.' });
+  const normRole: 'admin' | 'editor' | 'viewer' = role === 'admin' || role === 'viewer' ? role : 'editor';
+  addWorkspaceMember(id, target.id, normRole, ai_citations !== false);
   return { ok: true };
 });
 
@@ -681,7 +722,7 @@ app.patch('/api/users/:id', async (req, reply) => {
   const { id } = req.params as { id: string };
   const target = getUserById(id);
   if (!target) return reply.status(404).send({ error: 'User not found' });
-  const { password, superAdmin } = (req.body ?? {}) as { password?: string; superAdmin?: boolean };
+  const { password, superAdmin, disabled } = (req.body ?? {}) as { password?: string; superAdmin?: boolean; disabled?: boolean };
   if (typeof password === 'string' && password) setUserPassword(id, password);
   if (typeof superAdmin === 'boolean') {
     // Never let the last super-admin drop their own privilege and lock everyone out.
@@ -689,6 +730,13 @@ app.patch('/api/users/:id', async (req, reply) => {
       return reply.status(400).send({ error: 'At least one super-admin must remain.' });
     }
     setUserSuperAdmin(id, superAdmin);
+  }
+  if (typeof disabled === 'boolean') {
+    if (id === currentUser(req).id) return reply.status(400).send({ error: 'You cannot disable yourself.' });
+    if (disabled && target.is_super_admin && countSuperAdmins() <= 1) {
+      return reply.status(400).send({ error: 'At least one super-admin must remain.' });
+    }
+    setUserDisabled(id, disabled);
   }
   return { ok: true };
 });
@@ -708,6 +756,174 @@ app.delete('/api/users/:id', async (req, reply) => {
   const moved = reassignOwnedWorkspaces(id, currentUser(req).id);
   deleteUser(id);
   return { ok: true, reassignedWorkspaces: moved };
+});
+
+// ── Super-admin: manage every workspace in the install ───────────────────────
+
+app.get('/api/admin/workspaces', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  return listAllWorkspacesSummary();
+});
+
+app.patch('/api/admin/workspaces/:id/owner', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  if (!getWorkspace(id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const { ownerUserId } = (req.body ?? {}) as { ownerUserId?: string };
+  if (!ownerUserId || !getUserById(ownerUserId)) return reply.status(400).send({ error: 'A valid ownerUserId is required.' });
+  reassignWorkspaceOwner(id, ownerUserId);
+  return { ok: true };
+});
+
+// ── Workspace member administration (owner / workspace-admin / super-admin) ──
+// Reset a member's password, clear their 2FA, change their role/AI-citations
+// access, or disable their access to THIS workspace only.
+
+app.post('/api/workspaces/:id/members/:userId/reset-password', async (req, reply) => {
+  const { id, userId } = req.params as { id: string; userId: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const target = getUserById(userId);
+  if (!target || !listWorkspaceMembers(id).some(m => m.user_id === userId)) {
+    return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
+  }
+  const token = createPasswordReset(target.id);
+  if (!emailConfigured()) {
+    // No SMTP configured — hand the admin the link to share manually instead
+    // of silently doing nothing.
+    return { ok: true, emailed: false, resetPath: `/reset-password?token=${encodeURIComponent(token)}` };
+  }
+  const { origin } = rpInfo(req);
+  const link = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+  try {
+    await sendEmail({
+      to: target.email,
+      subject: 'Your SEO Website Indexer password was reset',
+      text: `A workspace admin reset your password.\n\nSet a new one here (valid for 1 hour):\n${link}`,
+      html: `<p>A workspace admin reset your password.</p><p><a href="${link}">Set a new password</a> (valid for 1 hour).</p>`,
+    });
+  } catch (e) {
+    logSystem('warn', `Admin-initiated password-reset email failed for ${target.email}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { ok: true, emailed: true };
+});
+
+app.post('/api/workspaces/:id/members/:userId/clear-2fa', async (req, reply) => {
+  const { id, userId } = req.params as { id: string; userId: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const target = getUserById(userId);
+  if (!target || !listWorkspaceMembers(id).some(m => m.user_id === userId)) {
+    return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
+  }
+  disableTotp(userId);
+  return { ok: true };
+});
+
+app.patch('/api/workspaces/:id/members/:userId', async (req, reply) => {
+  const { id, userId } = req.params as { id: string; userId: string };
+  const actor = currentUser(req);
+  if (!canManageWorkspace(actor, id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const ws = getWorkspace(id);
+  if (ws && ws.owner_user_id === userId) return reply.status(400).send({ error: "The owner's membership cannot be changed here." });
+  const { role, ai_citations, disabled } = (req.body ?? {}) as { role?: string; ai_citations?: boolean; disabled?: boolean };
+  if (role && !['admin', 'editor', 'viewer'].includes(role)) return reply.status(400).send({ error: 'Invalid role.' });
+  if (disabled && userId === actor.id) return reply.status(400).send({ error: 'You cannot disable your own access.' });
+  const ok = updateWorkspaceMember(id, userId, {
+    role: role as 'admin' | 'editor' | 'viewer' | undefined,
+    ai_citations: typeof ai_citations === 'boolean' ? ai_citations : undefined,
+    disabled: typeof disabled === 'boolean' ? disabled : undefined,
+  });
+  if (!ok) return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
+  return { ok: true };
+});
+
+// ── Workspace invites (email a join link) ────────────────────────────────────
+
+app.get('/api/workspaces/:id/invites', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  return listWorkspaceInvites(id).map(i => ({
+    id: i.id, email: i.email, role: i.role, ai_citations: !!i.ai_citations,
+    expires_at: i.expires_at, created_at: i.created_at,
+  }));
+});
+
+app.post('/api/workspaces/:id/invites', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const actor = currentUser(req);
+  if (!canManageWorkspace(actor, id)) return reply.status(404).send({ error: 'Workspace not found' });
+  const ws = getWorkspace(id);
+  const { email, role, ai_citations } = (req.body ?? {}) as { email?: string; role?: string; ai_citations?: boolean };
+  if (!email?.trim() || !email.includes('@')) return reply.status(400).send({ error: 'A valid email is required.' });
+  const normRole: 'admin' | 'editor' | 'viewer' = role === 'admin' || role === 'viewer' ? role : 'editor';
+  const existing = getUserByEmail(email.trim());
+  if (existing && listWorkspaceMembers(id).some(m => m.user_id === existing.id)) {
+    return reply.status(409).send({ error: 'That person is already a member of this workspace.' });
+  }
+  const token = createWorkspaceInvite(id, email.trim(), normRole, ai_citations !== false, actor.id);
+  const { origin } = rpInfo(req);
+  const link = `${origin}/accept-invite?token=${encodeURIComponent(token)}`;
+  let emailed = false;
+  if (emailConfigured()) {
+    try {
+      await sendEmail({
+        to: email.trim(),
+        subject: `You've been invited to ${ws?.name ?? 'a workspace'} on SEO Website Indexer`,
+        text: `${actor.name || actor.email} invited you to join "${ws?.name}" as a${normRole === 'admin' ? 'n' : ''} ${normRole}.\n\nAccept the invite here (valid for 7 days):\n${link}`,
+        html: `<p>${actor.name || actor.email} invited you to join <strong>${ws?.name}</strong> as a${normRole === 'admin' ? 'n' : ''} ${normRole}.</p><p><a href="${link}">Accept the invite</a> (valid for 7 days).</p>`,
+      });
+      emailed = true;
+    } catch (e) {
+      logSystem('warn', `Workspace invite email failed for ${email.trim()}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { ok: true, emailed, inviteLink: emailed ? undefined : link };
+});
+
+app.delete('/api/workspaces/:id/invites/:inviteId', async (req, reply) => {
+  const { id, inviteId } = req.params as { id: string; inviteId: string };
+  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  revokeWorkspaceInvite(id, inviteId);
+  return { ok: true };
+});
+
+// Public: look up an invite by its raw token (accept-invite page), and accept
+// it — creating the account if the invitee doesn't have one yet, or just
+// attaching the membership if they're already logged in as that email.
+app.get('/api/invites/:token', async (req, reply) => {
+  const { token } = req.params as { token: string };
+  const invite = getInviteByToken(token);
+  if (!invite) return reply.status(404).send({ error: 'This invite link is invalid or has expired.' });
+  return {
+    email: invite.email,
+    workspaceName: invite.workspace_name,
+    role: invite.role,
+    hasAccount: !!getUserByEmail(invite.email),
+  };
+});
+
+app.post('/api/invites/:token/accept', async (req, reply) => {
+  const { token } = req.params as { token: string };
+  const invite = getInviteByToken(token);
+  if (!invite) return reply.status(404).send({ error: 'This invite link is invalid or has expired.' });
+  const { password, name } = (req.body ?? {}) as { password?: string; name?: string };
+
+  let user = getUserByEmail(invite.email);
+  if (user) {
+    // Already logged in elsewhere as someone else, or the account is disabled.
+    if (user.disabled) return reply.status(403).send({ error: 'This account has been disabled.' });
+  } else {
+    if (!password || password.length < 8) return reply.status(400).send({ error: 'A password of at least 8 characters is required.' });
+    user = createUser({ email: invite.email, password, name });
+    // Deliberately no bootstrapUserWorkspace here: an invited member joins the
+    // INVITING workspace directly rather than getting their own empty one, so
+    // they never see the (Google-auth) setup wizard for a workspace that
+    // already has sites/content configured.
+  }
+  addWorkspaceMember(invite.workspace_id, user.id, invite.role as 'admin' | 'editor' | 'viewer', !!invite.ai_citations);
+  markInviteAccepted(invite.id);
+  recordLogin(user.id);
+  setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
+  return toPublic(user);
 });
 
 // ── Google Search Console auth ────────────────────────────────────────────────
@@ -1713,6 +1929,26 @@ app.post('/api/crux/:siteId/refresh', async (req, reply) => {
 
 // ── AI citation tracking ─────────────────────────────────────────────────────
 
+// Running a citation check calls out to paid LLM APIs — gate it behind the
+// per-member ai_citations permission and a daily per-user cap so one
+// click-happy member can't burn through a workspace's whole API budget.
+// Super-admins and workspace owners are never capped.
+const AI_CITATION_DAILY_LIMIT = parseInt(process.env.AI_CITATION_DAILY_LIMIT ?? '25', 10);
+function assertAiCitationAllowed(req: unknown, cost = 1): void {
+  const user = currentUser(req);
+  if (user.is_super_admin) return;
+  const wsId = requireWorkspace(req);
+  if (!canUseAiCitations(user, wsId)) {
+    throw Object.assign(new Error('AI Citations access is disabled for your account in this workspace. Ask a workspace admin.'), { statusCode: 403 });
+  }
+  if (workspaceRole(user, wsId) === 'owner') return; // owners are unrestricted in their own workspace
+  const used = getQuotaUsage('ai_citations_run', `user:${user.id}`);
+  if (used + cost > AI_CITATION_DAILY_LIMIT) {
+    throw Object.assign(new Error(`Daily AI Citation check limit reached (${AI_CITATION_DAILY_LIMIT}/day). Ask a super-admin if you need more.`), { statusCode: 429 });
+  }
+  incrementQuota('ai_citations_run', `user:${user.id}`, cost);
+}
+
 app.get('/api/ai/providers', async () => ({
   all: PROVIDERS,
   configured: configuredProviders(),
@@ -1730,10 +1966,15 @@ app.delete('/api/ai/prompts/:id', async (req) => {
 });
 
 app.get('/api/ai/results', async (req) => getResults(200, currentWorkspace(req)));
-app.post('/api/ai/run/:promptId', async (req) => ({
-  results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)),
-}));
-app.post('/api/ai/run-all', async (req) => ({ ran: await runAllPrompts(currentWorkspace(req)) }));
+app.post('/api/ai/run/:promptId', async (req) => {
+  assertAiCitationAllowed(req);
+  return { results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)) };
+});
+app.post('/api/ai/run-all', async (req) => {
+  const wsId = currentWorkspace(req);
+  assertAiCitationAllowed(req, Math.max(1, listPrompts(wsId).length));
+  return { ran: await runAllPrompts(wsId) };
+});
 
 // Probe each configured provider's live model list (version-ranked) + the
 // workspace's current selection. Used by the model picker.
@@ -1763,6 +2004,7 @@ app.post('/api/ai/prompts/:id/reply', async (req, reply) => {
   const { id } = req.params as { id: string };
   const { provider, message } = (req.body ?? {}) as { provider?: string; message?: string };
   if (!provider || !message?.trim()) return reply.code(400).send({ error: 'provider and message required' });
+  assertAiCitationAllowed(req);
   try {
     return await replyInThread(Number(id), provider as Provider, message.trim(), currentWorkspace(req));
   } catch (e) {
