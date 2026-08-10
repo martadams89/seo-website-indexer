@@ -418,7 +418,7 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify({ email, role, ai_citations: aiCitations }) }),
   removeWorkspaceMember: (id: string, userId: string) =>
     apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
-  updateWorkspaceMember: (id: string, userId: string, data: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean }) =>
+  updateWorkspaceMember: (id: string, userId: string, data: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean; permissions?: Partial<Record<WorkspaceCapability, boolean>> }) =>
     apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   resetMemberPassword: (id: string, userId: string) =>
     apiFetch<{ ok: boolean; emailed: boolean; resetPath?: string }>(`/api/workspaces/${id}/members/${userId}/reset-password`, { method: 'POST' }),
@@ -483,8 +483,14 @@ export interface Workspace {
 }
 export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
-  ai_citations: boolean; disabled: boolean;
+  ai_citations: boolean; disabled: boolean; permissions: Record<WorkspaceCapability, boolean>;
 }
+export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications';
+export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: string }> = [
+  { id: 'manage_sites', label: 'Manage sites' },
+  { id: 'manage_integrations', label: 'Manage integrations & API keys' },
+  { id: 'manage_notifications', label: 'Manage notifications' },
+];
 export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;
 }

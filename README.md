@@ -91,11 +91,36 @@ Users ─┬─ own / belong to ─▶ Workspaces ─┬─▶ Google accounts
        └─ super-admin sees all            └─▶ Sites (+ analytics, alerts)
 ```
 
-- Every site, Google/Bing account, alert and quota figure is **partitioned by workspace** — a user only ever sees data for workspaces they own or are a member of. A **super-admin** sees all.
+- Every site, Google/Bing account, alert and quota figure is **partitioned by workspace** — a user only ever sees data for the workspace that's currently **active** (picked in the sidebar switcher), not just "any workspace they can reach". Switching the active workspace never leaves a stale page (e.g. a site's Analytics) showing another tenant's data — every site-scoped request is checked against the active workspace, not just general access.
 - Switch the active workspace from the **switcher in the sidebar**; create more with **+ New workspace**.
-- Manage a workspace under **Settings → Workspace** (rename, add/remove members, add Bing keys). Add teammates (who must already have an account) as members so they can collaborate on that client.
+- The **Settings** page makes the current scope explicit: a banner at the top of each tab shows either "Managing workspace: *Name*" or "Platform setting — applies to the whole installation" so it's never ambiguous which one you're editing. Tabs are grouped the same way: *Your account* / *This workspace* / *Platform (super-admin)*.
 - **Upgrading from a single-tenant install is automatic**: the first user to sign in claims all pre-existing sites/accounts (and the legacy global Bing key) into their *Default* workspace — nothing is lost.
 - Deleting a user **reassigns their owned workspaces to you** (the acting admin) rather than orphaning that client's data.
+- **Super-admins** manage every workspace in the install from **Settings → All Workspaces**: rename, delete, or reassign the owner of any workspace, regardless of who owns it — no need to first switch into it (previously only the actual owner could manage a workspace from the UI).
+
+### Roles & granular permissions (per workspace)
+
+Every member of a workspace (besides its owner) has a **role**, which sets their default capabilities, plus optional **individual overrides**:
+
+| Role | Can do |
+| --- | --- |
+| **Owner** (implicit) | Everything, including deleting the workspace. One per workspace — whoever created it. |
+| **Admin** | Everything *except* deleting the workspace: manage sites, integrations, notifications, members, invites, password resets/2FA/disable for other members. |
+| **Editor** | Manages sites by default. **Manage integrations** (Google/Bing accounts, API keys) and **manage notifications** can each be individually granted or revoked per editor — e.g. an editor who can add/edit sites but not touch API keys. |
+| **Viewer** | Strictly read-only. Every mutating action is blocked at the API, not just hidden in the UI. |
+
+A **super-admin** always has full access to every workspace, and can additionally:
+
+- **Reset a member's password** (emails a reset link, or hands back a shareable link if SMTP isn't configured) or **clear their 2FA** — scoped to one workspace's members, or globally for any user.
+- **Disable a member's access to just one workspace** (their account and other workspaces are untouched) via that workspace's Members list, or **disable a user's account entirely** (blocks login everywhere) from **Settings → Users**.
+
+**AI Citations** access is a separate toggle per member (independent of role) — some members may be trusted to edit sites but not spend the workspace's AI-provider API budget on citation checks. On top of the toggle, non-owners are rate-limited to a configurable number of citation checks per day (`AI_CITATION_DAILY_LIMIT`, default 25) so one click-happy teammate can't exhaust the budget; owners and super-admins are never limited.
+
+### Inviting people (email)
+
+From **Settings → Workspace**, an owner/admin can **invite by email** with a preset role and AI-citations access. The invitee gets a link (`/accept-invite`) to set a password (or, if they already have an account, just add the workspace to it) — they land straight in that workspace's existing content, **never a forced setup wizard**, since they're joining an existing tenant rather than getting a brand-new empty one.
+
+The **Settings → Users** "Add a user" form (super-admin only, for accounts you need to create directly rather than invite) lets you either give the new account **its own new workspace**, or add it straight to an **existing workspace** you pick, with a role and AI-citations setting — it no longer silently creates an extra, unwanted workspace when you only meant to add someone to one you already have.
 
 ### Per-workspace settings (API keys & notifications)
 
@@ -166,6 +191,8 @@ docker exec <container> node dist/cli/admin.js reset-password you@example.com   
 docker exec <container> node dist/cli/admin.js reset-password you@example.com 'newpass' # or set your own
 docker exec <container> node dist/cli/admin.js disable-2fa you@example.com # lost your authenticator
 docker exec <container> node dist/cli/admin.js make-admin you@example.com  # grant super-admin
+docker exec <container> node dist/cli/admin.js disable-account you@example.com # lock an account out entirely
+docker exec <container> node dist/cli/admin.js enable-account you@example.com  # restore it
 
 # From source (dev): npm run admin -- reset-password you@example.com
 ```

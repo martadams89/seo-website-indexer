@@ -117,29 +117,78 @@ export function canUseAiCitations(user: User, workspaceId: string): boolean {
   return !!row && !row.disabled && !!row.ai_citations;
 }
 
+// ── Granular capabilities ─────────────────────────────────────────────────
+// The role tiers (admin/editor/viewer) are the coarse default; an editor's
+// individual capabilities can additionally be granted or revoked one at a
+// time, e.g. an editor who can manage sites but not touch integrations/API
+// keys. Admins always have every capability in their own workspace; viewers
+// never have any (read-only is absolute) — overrides only affect editors.
+export const CAPABILITIES = ['manage_sites', 'manage_integrations', 'manage_notifications'] as const;
+export type Capability = typeof CAPABILITIES[number];
+export type CapabilityMap = Record<Capability, boolean>;
+
+function roleDefaultCapability(role: 'admin' | 'editor' | 'viewer', cap: Capability): boolean {
+  if (role === 'admin') return true;
+  if (role === 'viewer') return false;
+  return cap === 'manage_sites'; // editor default: can manage sites, not integrations/notifications
+}
+
+function parsePermissions(raw: string | null): Partial<CapabilityMap> {
+  if (!raw) return {};
+  try { return JSON.parse(raw) as Partial<CapabilityMap>; } catch { return {}; }
+}
+
+/** The member's effective capability set (role defaults + any per-capability
+ *  overrides). Only meaningful for members with role 'editor' — admins are
+ *  always all-true and viewers always all-false regardless of overrides. */
+function effectiveCapabilities(role: 'admin' | 'editor' | 'viewer', permissionsJson: string | null): CapabilityMap {
+  const overrides = role === 'editor' ? parsePermissions(permissionsJson) : {};
+  const out = {} as CapabilityMap;
+  for (const cap of CAPABILITIES) out[cap] = overrides[cap] ?? roleDefaultCapability(role, cap);
+  return out;
+}
+
+/** Whether the user has a specific capability in this workspace: super-admins
+ *  and the owner always do; otherwise resolved from the member's role default
+ *  plus any per-capability override (editors only — viewers can't be granted
+ *  capabilities, admins already have them all). */
+export function hasCapability(user: User, workspaceId: string, cap: Capability): boolean {
+  if (user.is_super_admin) return true;
+  const ws = getWorkspace(workspaceId);
+  if (!ws) return false;
+  if (ws.owner_user_id === user.id) return true;
+  const row = getDb().prepare('SELECT role, disabled, permissions FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(workspaceId, user.id) as { role: string; disabled: number; permissions: string | null } | undefined;
+  if (!row || row.disabled) return false;
+  return effectiveCapabilities(normalizeRole(row.role), row.permissions)[cap];
+}
+
 // ── Membership ───────────────────────────────────────────────────────────────
 
 export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
-  ai_citations: boolean; disabled: boolean;
+  ai_citations: boolean; disabled: boolean; permissions: CapabilityMap;
 }
 
 export function listWorkspaceMembers(workspaceId: string): WorkspaceMember[] {
   const ws = getWorkspace(workspaceId);
   const rows = getDb().prepare(`
     SELECT u.id AS user_id, u.email, u.name, COALESCE(m.role, 'owner') AS role,
-           COALESCE(m.ai_citations, 1) AS ai_citations, COALESCE(m.disabled, 0) AS disabled
+           COALESCE(m.ai_citations, 1) AS ai_citations, COALESCE(m.disabled, 0) AS disabled, m.permissions
     FROM users u
     LEFT JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = @wid
     WHERE m.user_id IS NOT NULL OR u.id = @owner
     ORDER BY u.email
-  `).all({ wid: workspaceId, owner: ws?.owner_user_id ?? '' }) as Array<{ user_id: string; email: string; name: string | null; role: string; ai_citations: number; disabled: number }>;
+  `).all({ wid: workspaceId, owner: ws?.owner_user_id ?? '' }) as Array<{ user_id: string; email: string; name: string | null; role: string; ai_citations: number; disabled: number; permissions: string | null }>;
   return rows.map(r => {
     const isOwner = r.user_id === ws?.owner_user_id;
+    const role = isOwner ? 'owner' : normalizeRole(r.role);
     return {
-      user_id: r.user_id, email: r.email, name: r.name, is_owner: isOwner,
-      role: isOwner ? 'owner' : normalizeRole(r.role),
+      user_id: r.user_id, email: r.email, name: r.name, is_owner: isOwner, role,
       ai_citations: !!r.ai_citations, disabled: !!r.disabled,
+      permissions: isOwner
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true }
+        : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', r.permissions),
     };
   });
 }
@@ -153,20 +202,25 @@ export function removeWorkspaceMember(workspaceId: string, userId: string): void
   getDb().prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?').run(workspaceId, userId);
 }
 
-/** Update a member's role / AI-citations access / disabled flag within ONE
- *  workspace. Never touches the owner (not a workspace_members row) or the
- *  user's other workspace memberships — this is strictly workspace-scoped. */
+/** Update a member's role / AI-citations access / disabled flag / individual
+ *  capability overrides within ONE workspace. Never touches the owner (not a
+ *  workspace_members row) or the user's other workspace memberships. */
 export function updateWorkspaceMember(
   workspaceId: string, userId: string,
-  changes: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean },
+  changes: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean; permissions?: Partial<CapabilityMap> },
 ): boolean {
-  const existing = getDb().prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, userId);
+  const existing = getDb().prepare('SELECT permissions FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(workspaceId, userId) as { permissions: string | null } | undefined;
   if (!existing) return false;
   const sets: string[] = [];
   const params: unknown[] = [];
   if (changes.role) { sets.push('role = ?'); params.push(changes.role); }
   if (typeof changes.ai_citations === 'boolean') { sets.push('ai_citations = ?'); params.push(changes.ai_citations ? 1 : 0); }
   if (typeof changes.disabled === 'boolean') { sets.push('disabled = ?'); params.push(changes.disabled ? 1 : 0); }
+  if (changes.permissions) {
+    const merged = { ...parsePermissions(existing.permissions), ...changes.permissions };
+    sets.push('permissions = ?'); params.push(JSON.stringify(merged));
+  }
   if (sets.length === 0) return true;
   params.push(workspaceId, userId);
   getDb().prepare(`UPDATE workspace_members SET ${sets.join(', ')} WHERE workspace_id = ? AND user_id = ?`).run(...params);

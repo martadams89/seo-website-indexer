@@ -10,6 +10,8 @@
  *   docker exec <container> node dist/cli/admin.js reset-password you@example.com
  *   docker exec <container> node dist/cli/admin.js disable-2fa you@example.com
  *   docker exec <container> node dist/cli/admin.js make-admin you@example.com
+ *   docker exec <container> node dist/cli/admin.js disable-account you@example.com
+ *   docker exec <container> node dist/cli/admin.js enable-account you@example.com
  *
  * From source (dev):
  *   npx tsx src/cli/admin.ts reset-password you@example.com 'newpass123'
@@ -17,7 +19,7 @@
 import { randomBytes } from 'crypto';
 import { getDb } from '../db/database.js';
 import {
-  listUsers, getUserByEmail, setUserPassword, disableTotp, setUserSuperAdmin,
+  listUsers, getUserByEmail, setUserPassword, disableTotp, setUserSuperAdmin, setUserDisabled,
 } from '../auth/users.js';
 
 function usage(): never {
@@ -28,6 +30,8 @@ Usage:
   node dist/cli/admin.js reset-password <email> [newPassword]
   node dist/cli/admin.js disable-2fa <email>
   node dist/cli/admin.js make-admin <email>
+  node dist/cli/admin.js disable-account <email>
+  node dist/cli/admin.js enable-account <email>
 
 If newPassword is omitted, a strong random one is generated and printed.`);
   process.exit(1);
@@ -51,7 +55,7 @@ function main(): void {
       const users = listUsers();
       if (users.length === 0) { console.log('(no users yet — open the dashboard to create the first admin)'); return; }
       for (const u of users) {
-        console.log(`${u.email}\t${u.is_super_admin ? 'super-admin' : u.role}${u.totp_enabled ? '\t2FA' : ''}`);
+        console.log(`${u.email}\t${u.is_super_admin ? 'super-admin' : u.role}${u.totp_enabled ? '\t2FA' : ''}${u.disabled ? '\tDISABLED' : ''}`);
       }
       return;
     }
@@ -77,6 +81,20 @@ function main(): void {
       const user = requireUser(arg1);
       setUserSuperAdmin(user.id, true);
       console.log(`✓ ${user.email} is now a super-admin`);
+      return;
+    }
+    case 'disable-account': {
+      if (!arg1) usage();
+      const user = requireUser(arg1);
+      setUserDisabled(user.id, true);
+      console.log(`✓ ${user.email}'s account is disabled (and signed out everywhere)`);
+      return;
+    }
+    case 'enable-account': {
+      if (!arg1) usage();
+      const user = requireUser(arg1);
+      setUserDisabled(user.id, false);
+      console.log(`✓ ${user.email}'s account is enabled`);
       return;
     }
     default:

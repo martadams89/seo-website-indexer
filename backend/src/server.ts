@@ -121,7 +121,7 @@ import {
   canAccessWorkspace, canManageWorkspace, canAccessSiteInWorkspace, bootstrapUserWorkspace,
   listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember, reassignOwnedWorkspaces,
   addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
-  workspaceRole, canUseAiCitations, updateWorkspaceMember,
+  workspaceRole, canUseAiCitations, updateWorkspaceMember, hasCapability, type Capability,
   listAllWorkspacesSummary, reassignWorkspaceOwner,
   createWorkspaceInvite, listWorkspaceInvites, revokeWorkspaceInvite, getInviteByToken, markInviteAccepted,
 } from './auth/workspaces.js';
@@ -307,11 +307,38 @@ app.addHook('preHandler', async (req, reply) => {
   }
 });
 
-// A workspace 'viewer' has read-only access: block mutating requests scoped to
-// the active workspace's data (self-account actions under /api/auth/* and
-// creating a brand-new workspace are always allowed).
-const VIEWER_EXEMPT_PREFIXES = ['/api/auth/'];
-const VIEWER_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
+// Self-account actions are always allowed regardless of workspace role — a
+// viewer/editor must still be able to change their own password, 2FA or
+// passkeys. Everything else under /api/auth/* (Google account connect/
+// disconnect, credentials, etc.) is workspace integration management.
+const SELF_ACCOUNT_EXEMPT_EXACT = new Set<string>([
+  '/api/auth/logout', '/api/auth/change-password',
+  '/api/auth/totp/setup', '/api/auth/totp/enable', '/api/auth/totp/disable',
+]);
+const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/'];
+const WORKSPACE_GATE_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
+
+// Maps a mutating request's path to the workspace capability it requires (for
+// 'editor' members only — owners/admins/super-admins always pass, viewers
+// never do). Paths with no mapping (e.g. AI citations, gated separately by
+// canUseAiCitations) require no specific capability beyond "not a viewer".
+function capabilityForPath(path: string): Capability | null {
+  if (path.startsWith('/api/sites') || path.startsWith('/api/submit/') || path.startsWith('/api/runs')
+    || path.startsWith('/api/performance/') || path.startsWith('/api/crux/')
+    || path.startsWith('/api/bing/quota/') || path.startsWith('/api/bing/submit/')) {
+    return 'manage_sites';
+  }
+  if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
+    || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys') {
+    return 'manage_integrations';
+  }
+  if (path.startsWith('/api/notifications')) return 'manage_notifications';
+  return null;
+}
+
+// A workspace 'viewer' has read-only access; an 'editor' is further gated by
+// their individual capabilities (manage_sites/manage_integrations/
+// manage_notifications). Owners, workspace admins and super-admins always pass.
 app.addHook('preHandler', async (req, reply) => {
   const method = req.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
@@ -319,10 +346,18 @@ app.addHook('preHandler', async (req, reply) => {
   if (!pathOnly.startsWith('/api/')) return;
   const ctx = (req as unknown as Partial<RequestCtx>).ctx;
   if (!ctx || !ctx.workspaceId) return;
-  if (VIEWER_EXEMPT_EXACT.has(pathOnly) || VIEWER_EXEMPT_PREFIXES.some(p => pathOnly.startsWith(p))) return;
+  if (WORKSPACE_GATE_EXEMPT_EXACT.has(pathOnly)) return;
+  if (SELF_ACCOUNT_EXEMPT_EXACT.has(pathOnly) || SELF_ACCOUNT_EXEMPT_PREFIXES.some(p => pathOnly.startsWith(p))) return;
   if (ctx.user.is_super_admin) return;
-  if (workspaceRole(ctx.user, ctx.workspaceId) === 'viewer') {
+  const role = workspaceRole(ctx.user, ctx.workspaceId);
+  if (role === 'owner' || role === 'admin') return;
+  if (role === 'viewer' || role === null) {
     return reply.status(403).send({ error: 'Read-only access — ask a workspace admin for edit permissions.' });
+  }
+  // role === 'editor': gate by their individual capabilities, if this path needs one.
+  const cap = capabilityForPath(pathOnly);
+  if (cap && !hasCapability(ctx.user, ctx.workspaceId, cap)) {
+    return reply.status(403).send({ error: `You don't have "${cap.replace('_', ' ')}" permission in this workspace — ask a workspace admin.` });
   }
 });
 
@@ -832,13 +867,15 @@ app.patch('/api/workspaces/:id/members/:userId', async (req, reply) => {
   if (!canManageWorkspace(actor, id)) return reply.status(404).send({ error: 'Workspace not found' });
   const ws = getWorkspace(id);
   if (ws && ws.owner_user_id === userId) return reply.status(400).send({ error: "The owner's membership cannot be changed here." });
-  const { role, ai_citations, disabled } = (req.body ?? {}) as { role?: string; ai_citations?: boolean; disabled?: boolean };
+  const { role, ai_citations, disabled, permissions } = (req.body ?? {}) as
+    { role?: string; ai_citations?: boolean; disabled?: boolean; permissions?: Partial<Record<Capability, boolean>> };
   if (role && !['admin', 'editor', 'viewer'].includes(role)) return reply.status(400).send({ error: 'Invalid role.' });
   if (disabled && userId === actor.id) return reply.status(400).send({ error: 'You cannot disable your own access.' });
   const ok = updateWorkspaceMember(id, userId, {
     role: role as 'admin' | 'editor' | 'viewer' | undefined,
     ai_citations: typeof ai_citations === 'boolean' ? ai_citations : undefined,
     disabled: typeof disabled === 'boolean' ? disabled : undefined,
+    permissions,
   });
   if (!ok) return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
   return { ok: true };
