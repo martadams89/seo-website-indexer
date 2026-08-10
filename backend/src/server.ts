@@ -707,13 +707,21 @@ app.get('/api/users', async (req, reply) => {
 
 app.post('/api/users', async (req, reply) => {
   if (!requireSuperAdmin(req, reply)) return;
-  const { email, password, name, role, superAdmin } = (req.body ?? {}) as
-    { email?: string; password?: string; name?: string; role?: string; superAdmin?: boolean };
+  const { email, password, name, role, superAdmin, workspaceId, workspaceRole: wRole, aiCitations } = (req.body ?? {}) as
+    { email?: string; password?: string; name?: string; role?: string; superAdmin?: boolean; workspaceId?: string; workspaceRole?: string; aiCitations?: boolean };
   if (!email?.trim() || !password) return reply.status(400).send({ error: 'email and password are required.' });
   if (getUserByEmail(email.trim().toLowerCase())) return reply.status(409).send({ error: 'A user with that email already exists.' });
+  if (workspaceId && !getWorkspace(workspaceId)) return reply.status(400).send({ error: 'That workspace does not exist.' });
   const user = createUser({ email: email.trim().toLowerCase(), password, name, role: role ?? 'user', superAdmin: !!superAdmin });
-  // New users get their own default workspace so they can start immediately.
-  bootstrapUserWorkspace(user, false);
+  if (workspaceId) {
+    // Add them to the ONE workspace the admin picked — no separate workspace.
+    const normRole: 'admin' | 'editor' | 'viewer' = wRole === 'admin' || wRole === 'viewer' ? wRole : 'editor';
+    addWorkspaceMember(workspaceId, user.id, normRole, aiCitations !== false);
+  } else {
+    // No target workspace chosen — give them their own default one so they
+    // can start immediately (the original single-tenant "new client" flow).
+    bootstrapUserWorkspace(user, false);
+  }
   return toPublic(user);
 });
 
