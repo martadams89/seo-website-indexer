@@ -3,7 +3,7 @@ import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, C
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type WorkspaceInvite, type AdminWorkspaceSummary, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
@@ -92,15 +92,19 @@ const CRON_PRESETS = [
   { label: 'Every Monday', value: '0 3 * * 1' },
 ];
 
-const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boolean }> = [
-  { id: 'account',   label: 'Account & Security', icon: ShieldCheck },
-  { id: 'workspace', label: 'Workspace', icon: Building2 },
-  { id: 'keys',      label: 'API Keys',   icon: KeyRound },
-  { id: 'notify',    label: 'Notifications', icon: Bell },
-  { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
-  { id: 'all-workspaces', label: 'All Workspaces', icon: Building2, superAdmin: true },
-  { id: 'schedule',  label: 'Scheduling', icon: Clock, superAdmin: true },
-  { id: 'google',    label: 'Google Accounts', icon: User },
+type TabGroup = 'account' | 'workspace' | 'platform';
+const TAB_GROUP_LABEL: Record<TabGroup, string> = {
+  account: 'Your account', workspace: 'This workspace', platform: 'Platform (super-admin, installation-wide)',
+};
+const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boolean; group: TabGroup }> = [
+  { id: 'account',   label: 'Account & Security', icon: ShieldCheck, group: 'account' },
+  { id: 'workspace', label: 'Workspace', icon: Building2, group: 'workspace' },
+  { id: 'keys',      label: 'API Keys',   icon: KeyRound, group: 'workspace' },
+  { id: 'notify',    label: 'Notifications', icon: Bell, group: 'workspace' },
+  { id: 'google',    label: 'Google Accounts', icon: User, group: 'workspace' },
+  { id: 'users',     label: 'Users', icon: Users, superAdmin: true, group: 'platform' },
+  { id: 'all-workspaces', label: 'All Workspaces', icon: Building2, superAdmin: true, group: 'platform' },
+  { id: 'schedule',  label: 'Scheduling', icon: Clock, superAdmin: true, group: 'platform' },
 ];
 
 function AccountTab() {
@@ -345,6 +349,13 @@ function WorkspaceTab() {
     setBusyUserId(null);
     await load();
   }
+  async function toggleCapability(userId: string, cap: WorkspaceCapability, on: boolean) {
+    if (!active) return;
+    setBusyUserId(userId);
+    await api.updateWorkspaceMember(active.id, userId, { permissions: { [cap]: on } }).catch((e) => setMsg(e instanceof Error ? e.message : 'Failed'));
+    setBusyUserId(null);
+    await load();
+  }
   async function toggleDisabled(userId: string, disabled: boolean) {
     if (!active) return;
     setBusyUserId(userId);
@@ -415,7 +426,7 @@ function WorkspaceTab() {
                 </span>
               </div>
               {canManage && !m.is_owner && (
-                <div className="flex gap-1" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div className="flex gap-1" style={{ flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 340 }}>
                   <select className="input" style={{ width: 'auto', fontSize: 12, padding: '4px 6px' }}
                     value={m.role} disabled={busyUserId === m.user_id}
                     onChange={e => changeRole(m.user_id, e.target.value as 'admin' | 'editor' | 'viewer')}>
@@ -432,6 +443,17 @@ function WorkspaceTab() {
                     {m.disabled ? 'Enable' : 'Disable'}
                   </button>
                   <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeMember(m.user_id)}><Trash2 size={13} /></button>
+                  {m.role === 'editor' && (
+                    <div className="flex gap-2" style={{ width: '100%', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 2 }}>
+                      {WORKSPACE_CAPABILITIES.map(cap => (
+                        <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 11, cursor: 'pointer' }} title={cap.label}>
+                          <input type="checkbox" checked={m.permissions[cap.id]} disabled={busyUserId === m.user_id}
+                            onChange={e => toggleCapability(m.user_id, cap.id, e.target.checked)} />
+                          {cap.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1055,6 +1077,7 @@ function KeysTab() {
 export default function SettingsPage() {
   const { user } = useAuth();
   const { status, refresh } = useApp();
+  const { active } = useWorkspace();
   const [tab, setTab] = useState<Tab>(user.is_super_admin ? 'schedule' : 'account');
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -1100,13 +1123,48 @@ export default function SettingsPage() {
         <p className="page-subtitle">Scheduling, accounts, keys and notifications</p>
       </div>
 
-      {/* Tab bar */}
-      <div className="settings-tabs">
-        {TABS.filter(t => !t.superAdmin || user.is_super_admin).map(t => (
-          <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-            <t.icon size={13} /> {t.label}
-          </button>
-        ))}
+      {/* Scope banner: makes it unambiguous whether a tab affects the active
+          workspace only, or the whole installation (super-admin platform tabs). */}
+      {(() => {
+        const currentGroup = TABS.find(t => t.id === tab)?.group ?? 'workspace';
+        if (currentGroup === 'platform') {
+          return (
+            <div className="empty-note mb-3" style={{ borderLeft: '3px solid var(--warn)', paddingLeft: 10 }}>
+              <ShieldCheck size={12} /> <strong>Platform setting</strong> — applies to the whole installation, not just one workspace.
+            </div>
+          );
+        }
+        if (currentGroup === 'workspace') {
+          return (
+            <div className="empty-note mb-3" style={{ borderLeft: '3px solid var(--accent, #6366f1)', paddingLeft: 10 }}>
+              <Building2 size={12} /> Managing workspace: <strong>{active?.name ?? '—'}</strong>
+              {active?.role && active.role !== 'owner' && <span className="text-dim"> · your role here: {active.role}</span>}
+            </div>
+          );
+        }
+        return null;
+      })()}
+
+      {/* Tab bar, grouped by scope so it's clear what's workspace-local vs platform-wide */}
+      <div className="settings-tabs" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+        {(['account', 'workspace', 'platform'] as TabGroup[]).map(group => {
+          const groupTabs = TABS.filter(t => t.group === group && (!t.superAdmin || user.is_super_admin));
+          if (groupTabs.length === 0) return null;
+          return (
+            <div key={group}>
+              <div className="text-dim" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0' }}>
+                {TAB_GROUP_LABEL[group]}
+              </div>
+              <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
+                {groupTabs.map(t => (
+                  <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+                    <t.icon size={13} /> {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Account & Security ── */}

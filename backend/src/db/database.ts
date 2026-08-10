@@ -514,6 +514,13 @@ function initSchema(db: Database.Database): void {
     if (!wmCols.some(c => c.name === 'disabled')) {
       db.exec("ALTER TABLE workspace_members ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;");
     }
+    // Per-member overrides of the role's default capabilities (JSON, e.g.
+    // {"manage_sites":true,"manage_integrations":false}) — lets an editor be
+    // granted or denied individual capabilities instead of only the coarse
+    // role tiers. NULL/absent keys inherit the role's default.
+    if (!wmCols.some(c => c.name === 'permissions')) {
+      db.exec("ALTER TABLE workspace_members ADD COLUMN permissions TEXT;");
+    }
   }
 
   // Email invites to join a workspace — a pending row until accepted/revoked.
