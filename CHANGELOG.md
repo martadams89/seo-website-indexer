@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/martadams89/seo-website-indexer/compare/v1.23.1...v1.24.0) (2026-08-10)
+
+
+### ✨ Features
+
+* granular per-editor capabilities + clearer workspace/platform scope in Settings ([#237](https://github.com/martadams89/seo-website-indexer/issues/237)) ([41281e0](https://github.com/martadams89/seo-website-indexer/commit/41281e0fe4d9ec3ee01d4e8f57dd994050f5669b))
+
 ## [1.23.1](https://github.com/martadams89/seo-website-indexer/compare/v1.23.0...v1.23.1) (2026-08-10)
 
 
