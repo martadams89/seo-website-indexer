@@ -500,21 +500,34 @@ function WorkspaceTab() {
 function UsersTab() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<CurrentUser[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<AdminWorkspaceSummary[]>([]);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [superAdmin, setSuperAdmin] = useState(false);
+  const [targetWorkspace, setTargetWorkspace] = useState(''); // '' = give them their own new workspace
+  const [targetRole, setTargetRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
+  const [targetAi, setTargetAi] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  async function load() { setUsers(await api.listUsers().catch(() => [])); }
+  async function load() {
+    setUsers(await api.listUsers().catch(() => []));
+    setAllWorkspaces(await api.getAllWorkspaces().catch(() => []));
+  }
   useEffect(() => { load(); }, []);
 
   async function create() {
     setMsg(null);
     try {
-      await api.createUser({ email: email.trim(), password, name: name.trim() || undefined, superAdmin });
-      setEmail(''); setName(''); setPassword(''); setSuperAdmin(false);
-      setMsg({ ok: true, text: 'User created with their own workspace.' });
+      await api.createUser({
+        email: email.trim(), password, name: name.trim() || undefined, superAdmin,
+        workspaceId: targetWorkspace || undefined,
+        workspaceRole: targetWorkspace ? targetRole : undefined,
+        aiCitations: targetWorkspace ? targetAi : undefined,
+      });
+      const addedTo = allWorkspaces.find(w => w.id === targetWorkspace)?.name;
+      setEmail(''); setName(''); setPassword(''); setSuperAdmin(false); setTargetWorkspace('');
+      setMsg({ ok: true, text: addedTo ? `User created and added to "${addedTo}".` : 'User created with their own workspace.' });
       await load();
     } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
   }
@@ -559,6 +572,10 @@ function UsersTab() {
 
       <div className="card">
         <div className="card-title"><Plus size={13} /> Add a user</div>
+        <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+          Prefer inviting people from the <strong>Workspace</strong> tab instead — it emails them a join link and never
+          needs you to hand-set a password. Use this form for accounts you need to create directly.
+        </p>
         <div className="site-form" style={{ maxWidth: 420 }}>
           <div className="input-group mb-3">
             <label className="input-label">Email</label>
@@ -572,6 +589,25 @@ function UsersTab() {
             <label className="input-label">Temporary password</label>
             <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
           </div>
+          <div className="input-group mb-3">
+            <label className="input-label">Add them to</label>
+            <select className="input" value={targetWorkspace} onChange={e => setTargetWorkspace(e.target.value)}>
+              <option value="">— Give them their own new workspace —</option>
+              {allWorkspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+          {targetWorkspace && (
+            <div className="flex gap-2 mb-3" style={{ flexWrap: 'wrap' }}>
+              <select className="input" style={{ width: 'auto' }} value={targetRole} onChange={e => setTargetRole(e.target.value as 'admin' | 'editor' | 'viewer')}>
+                <option value="admin">Admin — manage the workspace</option>
+                <option value="editor">Editor — add/edit content</option>
+                <option value="viewer">Viewer — read only</option>
+              </select>
+              <label className="flex items-center gap-2" style={{ fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={targetAi} onChange={e => setTargetAi(e.target.checked)} /> AI Citations access
+              </label>
+            </div>
+          )}
           <label className="flex items-center gap-2 mb-3" style={{ fontSize: 12, cursor: 'pointer' }}>
             <input type="checkbox" checked={superAdmin} onChange={e => setSuperAdmin(e.target.checked)} /> Super-admin (full access to every workspace)
           </label>

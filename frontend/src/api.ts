@@ -442,7 +442,7 @@ export const api = {
 
   // ── User management (super-admin) ──
   listUsers: () => apiFetch<CurrentUser[]>('/api/users'),
-  createUser: (data: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean }) =>
+  createUser: (data: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean; workspaceId?: string; workspaceRole?: 'admin' | 'editor' | 'viewer'; aiCitations?: boolean }) =>
     apiFetch<CurrentUser>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: { password?: string; superAdmin?: boolean; disabled?: boolean }) =>
     apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
