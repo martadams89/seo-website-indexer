@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1](https://github.com/martadams89/seo-website-indexer/compare/v1.23.0...v1.23.1) (2026-08-10)
+
+
+### 🐛 Bug Fixes
+
+* creating a user no longer forces a separate default workspace ([#235](https://github.com/martadams89/seo-website-indexer/issues/235)) ([3c85803](https://github.com/martadams89/seo-website-indexer/commit/3c858037e4e0b9ad679ff8ef6eb8626f63151a6b))
+
 ## [1.23.0](https://github.com/martadams89/seo-website-indexer/compare/v1.22.43...v1.23.0) (2026-08-10)
 
 
