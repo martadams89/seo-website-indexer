@@ -15,6 +15,7 @@ import CitationsPage from './pages/Citations'
 import SettingsPage from './pages/Settings'
 import SetupPage from './pages/Setup'
 import ResetPasswordPage from './pages/ResetPassword'
+import AcceptInvitePage from './pages/AcceptInvite'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -22,6 +23,8 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         {/* Public, outside the auth gate — reached from the emailed reset link */}
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        {/* Public, outside the auth gate — reached from the emailed workspace-invite link */}
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route path="/*" element={
           <AuthGate>
           <WorkspaceProvider>

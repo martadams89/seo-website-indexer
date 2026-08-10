@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadCloud, CheckCircle2, AlertTriangle, Bot, XCircle, MinusCircle, ExternalLink } from 'lucide-react';
-import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport, type AgentReadiness } from '../api';
+import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport, type AgentReadiness, type ApiError } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
 import { useSort, SortTh } from '../components/SortableTable';
@@ -9,6 +9,7 @@ import { useApp } from '../AppContext';
 
 export default function SiteAnalyticsPage() {
   const { siteId = '' } = useParams();
+  const navigate = useNavigate();
   const { toast, status } = useApp();
   const [data, setData] = useState<SiteAnalytics | null>(null);
   const [llms, setLlms] = useState<LlmsAudit | null>(null);
@@ -26,8 +27,14 @@ export default function SiteAnalyticsPage() {
 
   const load = useCallback(async () => {
     try { setData(await api.getSiteAnalytics(siteId)); }
-    catch (e) { toast('error', e instanceof Error ? e.message : 'Failed to load'); }
-  }, [siteId, toast]);
+    catch (e) {
+      // A 404 here means this site doesn't belong to the currently active
+      // workspace (most often: the user switched workspace while this page
+      // was open) — bounce back to the list instead of showing a broken page.
+      if ((e as ApiError).status === 404) { navigate('/analytics', { replace: true }); return; }
+      toast('error', e instanceof Error ? e.message : 'Failed to load');
+    }
+  }, [siteId, toast, navigate]);
 
   useEffect(() => { load(); }, [load]);
 

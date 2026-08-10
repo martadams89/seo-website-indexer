@@ -20,6 +20,7 @@ export interface User {
   totp_enabled: number;
   role: string;
   is_super_admin: number;
+  disabled: number;
   created_at: string;
   last_login_at: string | null;
 }
@@ -31,13 +32,14 @@ export interface PublicUser {
   name: string | null;
   role: string;
   is_super_admin: boolean;
+  disabled: boolean;
   totp_enabled: boolean;
 }
 
 export function toPublic(u: User): PublicUser {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role,
-    is_super_admin: !!u.is_super_admin, totp_enabled: !!u.totp_enabled,
+    is_super_admin: !!u.is_super_admin, disabled: !!u.disabled, totp_enabled: !!u.totp_enabled,
   };
 }
 
@@ -100,6 +102,13 @@ export function countSuperAdmins(): number {
 
 export function setUserSuperAdmin(id: string, on: boolean): void {
   getDb().prepare('UPDATE users SET is_super_admin = ? WHERE id = ?').run(on ? 1 : 0, id);
+}
+
+/** Global account disable (super-admin only) — a disabled user cannot log in
+ *  or use any existing session, in any workspace. */
+export function setUserDisabled(id: string, disabled: boolean): void {
+  getDb().prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
+  if (disabled) getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
 }
 
 export function deleteUser(id: string): void {

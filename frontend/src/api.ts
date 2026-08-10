@@ -58,6 +58,7 @@ export interface CurrentUser {
   name: string | null;
   role: string;
   is_super_admin: boolean;
+  disabled: boolean;
   totp_enabled: boolean;
 }
 
@@ -413,16 +414,37 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
   getWorkspaceMembers: (id: string) =>
     apiFetch<WorkspaceMember[]>(`/api/workspaces/${id}/members`),
-  addWorkspaceMember: (id: string, email: string, role?: 'member' | 'admin') =>
-    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify({ email, role }) }),
+  addWorkspaceMember: (id: string, email: string, role?: 'admin' | 'editor' | 'viewer', aiCitations?: boolean) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify({ email, role, ai_citations: aiCitations }) }),
   removeWorkspaceMember: (id: string, userId: string) =>
     apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
+  updateWorkspaceMember: (id: string, userId: string, data: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean }) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  resetMemberPassword: (id: string, userId: string) =>
+    apiFetch<{ ok: boolean; emailed: boolean; resetPath?: string }>(`/api/workspaces/${id}/members/${userId}/reset-password`, { method: 'POST' }),
+  clearMember2fa: (id: string, userId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/members/${userId}/clear-2fa`, { method: 'POST' }),
+
+  // ── Workspace invites (email join links) ──
+  getWorkspaceInvites: (id: string) => apiFetch<WorkspaceInvite[]>(`/api/workspaces/${id}/invites`),
+  createWorkspaceInvite: (id: string, email: string, role: 'admin' | 'editor' | 'viewer', aiCitations = true) =>
+    apiFetch<{ ok: boolean; emailed: boolean; inviteLink?: string }>(`/api/workspaces/${id}/invites`, { method: 'POST', body: JSON.stringify({ email, role, ai_citations: aiCitations }) }),
+  revokeWorkspaceInvite: (id: string, inviteId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/workspaces/${id}/invites/${inviteId}`, { method: 'DELETE' }),
+  getInvite: (token: string) => apiFetch<InvitePreview>(`/api/invites/${encodeURIComponent(token)}`),
+  acceptInvite: (token: string, data: { password?: string; name?: string }) =>
+    apiFetch<CurrentUser>(`/api/invites/${encodeURIComponent(token)}/accept`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // ── Super-admin: all workspaces ──
+  getAllWorkspaces: () => apiFetch<AdminWorkspaceSummary[]>('/api/admin/workspaces'),
+  reassignWorkspaceOwner: (id: string, ownerUserId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/admin/workspaces/${id}/owner`, { method: 'PATCH', body: JSON.stringify({ ownerUserId }) }),
 
   // ── User management (super-admin) ──
   listUsers: () => apiFetch<CurrentUser[]>('/api/users'),
   createUser: (data: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean }) =>
     apiFetch<CurrentUser>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
-  updateUser: (id: string, data: { password?: string; superAdmin?: boolean }) =>
+  updateUser: (id: string, data: { password?: string; superAdmin?: boolean; disabled?: boolean }) =>
     apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteUser: (id: string) => apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'DELETE' }),
 
@@ -456,9 +478,22 @@ export interface Workspace {
   created_at?: string;
   is_owner: boolean;
   is_active?: boolean;
+  role?: 'owner' | 'admin' | 'editor' | 'viewer' | null;
+  can_manage?: boolean;
 }
 export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
+  ai_citations: boolean; disabled: boolean;
+}
+export interface WorkspaceInvite {
+  id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;
+}
+export interface InvitePreview {
+  email: string; workspaceName: string; role: string; hasAccount: boolean;
+}
+export interface AdminWorkspaceSummary {
+  id: string; name: string; owner_user_id: string | null; owner_email: string | null;
+  member_count: number; site_count: number; created_at: string;
 }
 export interface BingAccount { id: string; name: string; created_at: string }
 

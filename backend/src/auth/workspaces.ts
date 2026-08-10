@@ -5,7 +5,7 @@
  * super-admin sees all. This module centralises workspace CRUD and the
  * access-control helpers every scoped endpoint uses.
  */
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 import { getDb } from '../db/database.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import type { User } from './users.js';
@@ -45,7 +45,8 @@ export function reassignOwnedWorkspaces(fromUserId: string, toUserId: string): n
   return info.changes;
 }
 
-/** Workspaces a user can access (owned + member), or all for a super-admin. */
+/** Workspaces a user can access (owned + member with an active, non-disabled
+ *  membership), or all for a super-admin. */
 export function accessibleWorkspaces(user: User): Workspace[] {
   if (user.is_super_admin) {
     return getDb().prepare('SELECT * FROM workspaces ORDER BY created_at').all() as Workspace[];
@@ -53,7 +54,7 @@ export function accessibleWorkspaces(user: User): Workspace[] {
   return getDb().prepare(`
     SELECT DISTINCT w.* FROM workspaces w
     LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = @uid
-    WHERE w.owner_user_id = @uid OR m.user_id = @uid
+    WHERE w.owner_user_id = @uid OR (m.user_id = @uid AND m.disabled = 0)
     ORDER BY w.created_at
   `).all({ uid: user.id }) as Workspace[];
 }
@@ -63,37 +64,113 @@ export function canAccessWorkspace(user: User, workspaceId: string): boolean {
   return accessibleWorkspaces(user).some(w => w.id === workspaceId);
 }
 
-/** True if the user owns the workspace (or is a super-admin) — required for
- *  destructive/administrative actions like rename, delete and member changes. */
+// Legacy membership rows predate the admin/editor/viewer split and default to
+// the generic 'member' role — treat those as full editors (their original
+// meaning: everything except workspace-owner-only actions).
+function normalizeRole(role: string): 'admin' | 'editor' | 'viewer' {
+  if (role === 'admin' || role === 'viewer') return role;
+  return 'editor';
+}
+
+/** The caller's role within a specific workspace: 'owner' for the workspace
+ *  owner, the member's own (normalized) role otherwise, or null if they have
+ *  no access (not a member, or their membership is disabled). Super-admins
+ *  are not reflected here — check `user.is_super_admin` separately. */
+export function workspaceRole(user: User, workspaceId: string): 'owner' | 'admin' | 'editor' | 'viewer' | null {
+  const ws = getWorkspace(workspaceId);
+  if (!ws) return null;
+  if (ws.owner_user_id === user.id) return 'owner';
+  const row = getDb().prepare('SELECT role, disabled FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(workspaceId, user.id) as { role: string; disabled: number } | undefined;
+  if (!row || row.disabled) return null;
+  return normalizeRole(row.role);
+}
+
+/** True if the user owns the workspace, is a super-admin, or holds the
+ *  workspace-scoped 'admin' role there — required for destructive/admin
+ *  actions (rename, delete, invites, member role/reset-password/2FA/disable). */
 export function canManageWorkspace(user: User, workspaceId: string): boolean {
   if (user.is_super_admin) return !!getWorkspace(workspaceId);
   const ws = getWorkspace(workspaceId);
-  return !!ws && ws.owner_user_id === user.id;
+  if (!ws) return false;
+  return ws.owner_user_id === user.id || workspaceRole(user, workspaceId) === 'admin';
+}
+
+/** True if the user may create/edit/delete content (sites, prompts, keys...)
+ *  in the workspace — owner/admin/editor, but not a read-only 'viewer'. */
+export function canEditWorkspace(user: User, workspaceId: string): boolean {
+  if (user.is_super_admin) return !!getWorkspace(workspaceId);
+  const role = workspaceRole(user, workspaceId);
+  return role === 'owner' || role === 'admin' || role === 'editor';
+}
+
+/** Whether the user may use the AI Citations feature (and spend its API
+ *  budget) in this workspace: super-admins and owners always can; members
+ *  need their per-membership ai_citations flag left on. */
+export function canUseAiCitations(user: User, workspaceId: string): boolean {
+  if (user.is_super_admin) return true;
+  const ws = getWorkspace(workspaceId);
+  if (!ws) return false;
+  if (ws.owner_user_id === user.id) return true;
+  const row = getDb().prepare('SELECT ai_citations, disabled FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+    .get(workspaceId, user.id) as { ai_citations: number; disabled: number } | undefined;
+  return !!row && !row.disabled && !!row.ai_citations;
 }
 
 // ── Membership ───────────────────────────────────────────────────────────────
 
-export interface WorkspaceMember { user_id: string; email: string; name: string | null; role: string; is_owner: boolean }
+export interface WorkspaceMember {
+  user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
+  ai_citations: boolean; disabled: boolean;
+}
 
 export function listWorkspaceMembers(workspaceId: string): WorkspaceMember[] {
   const ws = getWorkspace(workspaceId);
   const rows = getDb().prepare(`
-    SELECT u.id AS user_id, u.email, u.name, COALESCE(m.role, 'owner') AS role
+    SELECT u.id AS user_id, u.email, u.name, COALESCE(m.role, 'owner') AS role,
+           COALESCE(m.ai_citations, 1) AS ai_citations, COALESCE(m.disabled, 0) AS disabled
     FROM users u
     LEFT JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = @wid
     WHERE m.user_id IS NOT NULL OR u.id = @owner
     ORDER BY u.email
-  `).all({ wid: workspaceId, owner: ws?.owner_user_id ?? '' }) as Array<{ user_id: string; email: string; name: string | null; role: string }>;
-  return rows.map(r => ({ ...r, is_owner: r.user_id === ws?.owner_user_id }));
+  `).all({ wid: workspaceId, owner: ws?.owner_user_id ?? '' }) as Array<{ user_id: string; email: string; name: string | null; role: string; ai_citations: number; disabled: number }>;
+  return rows.map(r => {
+    const isOwner = r.user_id === ws?.owner_user_id;
+    return {
+      user_id: r.user_id, email: r.email, name: r.name, is_owner: isOwner,
+      role: isOwner ? 'owner' : normalizeRole(r.role),
+      ai_citations: !!r.ai_citations, disabled: !!r.disabled,
+    };
+  });
 }
 
-export function addWorkspaceMember(workspaceId: string, userId: string, role = 'member'): void {
-  getDb().prepare('INSERT OR REPLACE INTO workspace_members(workspace_id, user_id, role) VALUES(?,?,?)')
-    .run(workspaceId, userId, role);
+export function addWorkspaceMember(workspaceId: string, userId: string, role: 'admin' | 'editor' | 'viewer' = 'editor', aiCitations = true): void {
+  getDb().prepare('INSERT OR REPLACE INTO workspace_members(workspace_id, user_id, role, ai_citations) VALUES(?,?,?,?)')
+    .run(workspaceId, userId, role, aiCitations ? 1 : 0);
 }
 
 export function removeWorkspaceMember(workspaceId: string, userId: string): void {
   getDb().prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?').run(workspaceId, userId);
+}
+
+/** Update a member's role / AI-citations access / disabled flag within ONE
+ *  workspace. Never touches the owner (not a workspace_members row) or the
+ *  user's other workspace memberships — this is strictly workspace-scoped. */
+export function updateWorkspaceMember(
+  workspaceId: string, userId: string,
+  changes: { role?: 'admin' | 'editor' | 'viewer'; ai_citations?: boolean; disabled?: boolean },
+): boolean {
+  const existing = getDb().prepare('SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?').get(workspaceId, userId);
+  if (!existing) return false;
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (changes.role) { sets.push('role = ?'); params.push(changes.role); }
+  if (typeof changes.ai_citations === 'boolean') { sets.push('ai_citations = ?'); params.push(changes.ai_citations ? 1 : 0); }
+  if (typeof changes.disabled === 'boolean') { sets.push('disabled = ?'); params.push(changes.disabled ? 1 : 0); }
+  if (sets.length === 0) return true;
+  params.push(workspaceId, userId);
+  getDb().prepare(`UPDATE workspace_members SET ${sets.join(', ')} WHERE workspace_id = ? AND user_id = ?`).run(...params);
+  return true;
 }
 
 /** The set of site IDs inside a workspace (for authorization checks). */
@@ -106,10 +183,24 @@ export function siteWorkspaceId(siteId: string): string | null {
   return r?.workspace_id ?? null;
 }
 
-/** True if the user may touch this site (its workspace is accessible). */
+/** True if the user may touch this site (its workspace is accessible to them
+ *  at all — used for cross-workspace administrative operations). */
 export function canAccessSite(user: User, siteId: string): boolean {
   const ws = siteWorkspaceId(siteId);
   if (!ws) return !!user.is_super_admin; // unassigned sites: super-admin only
+  return canAccessWorkspace(user, ws);
+}
+
+/** True if the user may access this site AND it belongs to the workspace
+ *  currently active in their session. A multi-workspace user (or a
+ *  super-admin) may be able to access a site "in general" via canAccessSite,
+ *  but the dashboard must only ever surface a site's data while its OWNING
+ *  workspace is the active one — otherwise switching workspace while viewing
+ *  a site (e.g. its Analytics page) keeps leaking the previous tenant's data. */
+export function canAccessSiteInWorkspace(user: User, siteId: string, activeWorkspaceId: string | null): boolean {
+  const ws = siteWorkspaceId(siteId);
+  if (ws === null) return !!user.is_super_admin && activeWorkspaceId === null;
+  if (ws !== activeWorkspaceId) return false;
   return canAccessWorkspace(user, ws);
 }
 
@@ -196,4 +287,92 @@ export function bingKeyForSite(siteId: string): string | null {
   }
   const legacy = db.prepare("SELECT value FROM settings WHERE key = 'bing_api_key'").get() as { value: string } | undefined;
   return legacy?.value ?? null;
+}
+
+// ── Super-admin: all workspaces at a glance ──────────────────────────────────
+
+export interface WorkspaceSummary extends Workspace {
+  owner_email: string | null;
+  member_count: number;
+  site_count: number;
+}
+
+/** Every workspace in the install with owner/member/site counts, for the
+ *  super-admin "all workspaces" management view. */
+export function listAllWorkspacesSummary(): WorkspaceSummary[] {
+  return getDb().prepare(`
+    SELECT w.*, u.email AS owner_email,
+      (SELECT COUNT(*) FROM workspace_members m WHERE m.workspace_id = w.id) AS member_count,
+      (SELECT COUNT(*) FROM sites s WHERE s.workspace_id = w.id) AS site_count
+    FROM workspaces w
+    LEFT JOIN users u ON u.id = w.owner_user_id
+    ORDER BY w.created_at
+  `).all() as WorkspaceSummary[];
+}
+
+/** Reassign a workspace to a different owner (super-admin action, e.g. when
+ *  the original owner has left). The new owner must already exist. */
+export function reassignWorkspaceOwner(workspaceId: string, newOwnerUserId: string): void {
+  getDb().prepare('UPDATE workspaces SET owner_user_id = ? WHERE id = ?').run(newOwnerUserId, workspaceId);
+  // The new owner no longer needs (or should have) a separate membership row.
+  getDb().prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?').run(workspaceId, newOwnerUserId);
+}
+
+// ── Invites (email a join link scoped to one workspace) ──────────────────────
+
+export interface WorkspaceInvite {
+  id: string; workspace_id: string; email: string; role: string; ai_citations: number;
+  invited_by: string | null; expires_at: string; accepted_at: string | null; created_at: string;
+}
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60_000; // 7 days
+
+function sha256Hex(s: string): string { return createHash('sha256').update(s).digest('hex'); }
+
+/** Create a pending invite and return the RAW token (emailed) — only its hash
+ *  is stored. Any prior unaccepted invite for the same email+workspace is
+ *  replaced so re-inviting doesn't leave stale live tokens around. */
+export function createWorkspaceInvite(
+  workspaceId: string, email: string, role: 'admin' | 'editor' | 'viewer', aiCitations: boolean, invitedBy: string,
+): string {
+  const db = getDb();
+  const normEmail = email.trim().toLowerCase();
+  db.prepare('DELETE FROM workspace_invites WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL')
+    .run(workspaceId, normEmail);
+  const token = randomBytes(32).toString('base64url');
+  const id = randomUUID();
+  const expires = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+  db.prepare(`
+    INSERT INTO workspace_invites(id, workspace_id, email, role, ai_citations, token_hash, invited_by, expires_at)
+    VALUES(?,?,?,?,?,?,?,?)
+  `).run(id, workspaceId, normEmail, role, aiCitations ? 1 : 0, sha256Hex(token), invitedBy, expires);
+  return token;
+}
+
+export function listWorkspaceInvites(workspaceId: string): WorkspaceInvite[] {
+  return getDb().prepare(`
+    SELECT * FROM workspace_invites WHERE workspace_id = ? AND accepted_at IS NULL ORDER BY created_at DESC
+  `).all(workspaceId) as WorkspaceInvite[];
+}
+
+export function revokeWorkspaceInvite(workspaceId: string, inviteId: string): void {
+  getDb().prepare('DELETE FROM workspace_invites WHERE workspace_id = ? AND id = ?').run(workspaceId, inviteId);
+}
+
+/** Resolve a raw invite token to its still-valid invite (unexpired, unused),
+ *  including the workspace name for the accept-invite page to display. */
+export function getInviteByToken(token: string): (WorkspaceInvite & { workspace_name: string }) | null {
+  const row = getDb().prepare(`
+    SELECT i.*, w.name AS workspace_name FROM workspace_invites i
+    JOIN workspaces w ON w.id = i.workspace_id
+    WHERE i.token_hash = ?
+  `).get(sha256Hex(token)) as (WorkspaceInvite & { workspace_name: string }) | undefined;
+  if (!row) return null;
+  if (row.accepted_at || new Date(row.expires_at).getTime() < Date.now()) return null;
+  return row;
+}
+
+/** Mark an invite consumed once its target user has been added as a member. */
+export function markInviteAccepted(inviteId: string): void {
+  getDb().prepare("UPDATE workspace_invites SET accepted_at = datetime('now') WHERE id = ?").run(inviteId);
 }

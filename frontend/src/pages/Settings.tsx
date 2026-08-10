@@ -3,12 +3,12 @@ import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, C
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { api, type WorkspaceMember, type WorkspaceInvite, type AdminWorkspaceSummary, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
 
-type Tab = 'account' | 'workspace' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
+type Tab = 'account' | 'workspace' | 'all-workspaces' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
 
 interface KeyGuide {
   key: string;
@@ -98,6 +98,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boo
   { id: 'keys',      label: 'API Keys',   icon: KeyRound },
   { id: 'notify',    label: 'Notifications', icon: Bell },
   { id: 'users',     label: 'Users', icon: Users, superAdmin: true },
+  { id: 'all-workspaces', label: 'All Workspaces', icon: Building2, superAdmin: true },
   { id: 'schedule',  label: 'Scheduling', icon: Clock, superAdmin: true },
   { id: 'google',    label: 'Google Accounts', icon: User },
 ];
@@ -277,19 +278,29 @@ function AccountTab() {
   );
 }
 
-// ── Workspace tab: rename, members, Bing accounts ────────────────────────────
+// ── Workspace tab: rename, members, invites, delete ──────────────────────────
+const ROLE_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', editor: 'Editor', viewer: 'Viewer (read-only)' };
+
 function WorkspaceTab() {
-  const { active, refreshWorkspaces } = useWorkspace();
+  const { user: me } = useAuth();
+  const { active, workspaces, refreshWorkspaces, switchWorkspace } = useWorkspace();
   const [name, setName] = useState(active?.name ?? '');
   const [msg, setMsg] = useState<string | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
   const [memberEmail, setMemberEmail] = useState('');
+  const [memberRole, setMemberRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
+  const [memberAi, setMemberAi] = useState(true);
+  const [inviting, setInviting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
-  const canManage = !!active?.is_owner;
+  const canManage = !!active?.is_owner || !!active?.can_manage;
 
   async function load() {
     if (!active) return;
     setMembers(await api.getWorkspaceMembers(active.id).catch(() => []));
+    if (canManage) setInvites(await api.getWorkspaceInvites(active.id).catch(() => []));
   }
   useEffect(() => { setName(active?.name ?? ''); load(); }, [active?.id]);
 
@@ -299,16 +310,75 @@ function WorkspaceTab() {
     try { await api.renameWorkspace(active.id, name.trim()); await refreshWorkspaces(); setMsg('Saved.'); }
     catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
   }
-  async function addMember() {
+  async function invite() {
     if (!active || !memberEmail.trim()) return;
-    setMsg(null);
-    try { await api.addWorkspaceMember(active.id, memberEmail.trim()); setMemberEmail(''); await load(); }
-    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+    setMsg(null); setInviting(true);
+    try {
+      const r = await api.createWorkspaceInvite(active.id, memberEmail.trim(), memberRole, memberAi);
+      setMemberEmail('');
+      setMsg(r.emailed ? `Invite emailed to ${memberEmail}.` : `Email isn't configured — share this link: ${r.inviteLink}`);
+      await load();
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+    setInviting(false);
   }
   async function removeMember(userId: string) {
     if (!active) return;
     await api.removeWorkspaceMember(active.id, userId).catch(() => null);
     await load();
+  }
+  async function revokeInvite(inviteId: string) {
+    if (!active) return;
+    await api.revokeWorkspaceInvite(active.id, inviteId).catch(() => null);
+    await load();
+  }
+  async function changeRole(userId: string, role: 'admin' | 'editor' | 'viewer') {
+    if (!active) return;
+    setBusyUserId(userId);
+    await api.updateWorkspaceMember(active.id, userId, { role }).catch((e) => setMsg(e instanceof Error ? e.message : 'Failed'));
+    setBusyUserId(null);
+    await load();
+  }
+  async function toggleAi(userId: string, on: boolean) {
+    if (!active) return;
+    setBusyUserId(userId);
+    await api.updateWorkspaceMember(active.id, userId, { ai_citations: on }).catch((e) => setMsg(e instanceof Error ? e.message : 'Failed'));
+    setBusyUserId(null);
+    await load();
+  }
+  async function toggleDisabled(userId: string, disabled: boolean) {
+    if (!active) return;
+    setBusyUserId(userId);
+    await api.updateWorkspaceMember(active.id, userId, { disabled }).catch((e) => setMsg(e instanceof Error ? e.message : 'Failed'));
+    setBusyUserId(null);
+    await load();
+  }
+  async function resetPassword(userId: string) {
+    if (!active) return;
+    setBusyUserId(userId);
+    try {
+      const r = await api.resetMemberPassword(active.id, userId);
+      setMsg(r.emailed ? 'Password-reset email sent.' : `Email isn't configured — share this link: ${window.location.origin}${r.resetPath}`);
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+    setBusyUserId(null);
+  }
+  async function clear2fa(userId: string) {
+    if (!active) return;
+    if (!confirm('Clear this member\u2019s two-factor authentication?')) return;
+    setBusyUserId(userId);
+    await api.clearMember2fa(active.id, userId).catch((e) => setMsg(e instanceof Error ? e.message : 'Failed'));
+    setBusyUserId(null);
+  }
+  async function removeWorkspace() {
+    if (!active) return;
+    if (!confirm(`Delete the workspace "${active.name}"? This permanently removes its sites, accounts and history. This cannot be undone.`)) return;
+    setDeleting(true); setMsg(null);
+    try {
+      await api.deleteWorkspace(active.id);
+      await refreshWorkspaces();
+      const next = workspaces.find(w => w.id !== active.id);
+      if (next) switchWorkspace(next.id);
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+    setDeleting(false);
   }
 
   if (!active) return <div className="card"><div className="empty-note">No workspace selected.</div></div>;
@@ -327,8 +397,8 @@ function WorkspaceTab() {
               <Save size={13} /> Save name
             </button>
           )}
-          {!canManage && <p className="text-dim" style={{ fontSize: 12 }}>You're a member of this workspace. Only the owner can change its settings.</p>}
-          {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg === 'Saved.' ? 'var(--ok)' : 'var(--error)' }}>{msg}</div>}
+          {!canManage && <p className="text-dim" style={{ fontSize: 12 }}>{active.role === 'viewer' ? 'You have read-only access to this workspace.' : "You're a member of this workspace. Only an owner or workspace admin can change its settings."}</p>}
+          {msg && <div style={{ fontSize: 12, marginTop: 8, wordBreak: 'break-all', color: msg.startsWith('Failed') || msg === 'Failed' ? 'var(--error)' : 'var(--ok)' }}>{msg}</div>}
         </div>
       </div>
 
@@ -338,25 +408,90 @@ function WorkspaceTab() {
           {members.map(m => (
             <div key={m.user_id} className="member-row">
               <div className="member-info">
-                <span className="member-name">{m.name || m.email}</span>
-                <span className="member-role">{m.is_owner ? 'Owner' : m.role}</span>
+                <span className="member-name">{m.name || m.email}{m.disabled && <span className="badge badge-warn" style={{ marginLeft: 6 }}>disabled</span>}</span>
+                <span className="member-role">
+                  {m.is_owner ? 'Owner' : (ROLE_LABEL[m.role] ?? m.role)}
+                  {!m.is_owner && ` · AI Citations ${m.ai_citations ? 'on' : 'off'}`}
+                </span>
               </div>
               {canManage && !m.is_owner && (
-                <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeMember(m.user_id)}><Trash2 size={13} /></button>
+                <div className="flex gap-1" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <select className="input" style={{ width: 'auto', fontSize: 12, padding: '4px 6px' }}
+                    value={m.role} disabled={busyUserId === m.user_id}
+                    onChange={e => changeRole(m.user_id, e.target.value as 'admin' | 'editor' | 'viewer')}>
+                    <option value="admin">Admin</option>
+                    <option value="editor">Editor</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => toggleAi(m.user_id, !m.ai_citations)}>
+                    AI: {m.ai_citations ? 'On' : 'Off'}
+                  </button>
+                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => resetPassword(m.user_id)}>Reset pw</button>
+                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => clear2fa(m.user_id)}>Clear 2FA</button>
+                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => toggleDisabled(m.user_id, !m.disabled)}>
+                    {m.disabled ? 'Enable' : 'Disable'}
+                  </button>
+                  <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeMember(m.user_id)}><Trash2 size={13} /></button>
+                </div>
               )}
             </div>
           ))}
           {members.length === 0 && <div className="empty-note">Just you so far.</div>}
         </div>
-        {canManage && (
-          <div className="flex gap-2 mt-3" style={{ maxWidth: 420 }}>
-            <input className="input" placeholder="teammate@example.com" value={memberEmail}
-              onChange={e => setMemberEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addMember(); }} />
-            <button className="btn btn-secondary btn-sm" disabled={!memberEmail.trim()} onClick={addMember}><Plus size={13} /> Add</button>
+
+        {canManage && invites.length > 0 && (
+          <div className="member-list mt-3">
+            <div className="text-dim" style={{ fontSize: 11, marginBottom: 4 }}>Pending invites</div>
+            {invites.map(i => (
+              <div key={i.id} className="member-row">
+                <div className="member-info">
+                  <span className="member-name">{i.email}</span>
+                  <span className="member-role">{ROLE_LABEL[i.role] ?? i.role} · expires {new Date(i.expires_at).toLocaleDateString()}</span>
+                </div>
+                <button className="btn-icon btn-icon-ghost" title="Revoke" onClick={() => revokeInvite(i.id)}><Trash2 size={13} /></button>
+              </div>
+            ))}
           </div>
         )}
-        {canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>The user must already have an account (create them under the Users tab).</p>}
+
+        {canManage && (
+          <div className="site-form mt-3" style={{ maxWidth: 420 }}>
+            <div className="input-group mb-2">
+              <label className="input-label">Invite by email</label>
+              <input className="input" placeholder="teammate@example.com" value={memberEmail}
+                onChange={e => setMemberEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') invite(); }} />
+            </div>
+            <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
+              <select className="input" style={{ width: 'auto' }} value={memberRole} onChange={e => setMemberRole(e.target.value as 'admin' | 'editor' | 'viewer')}>
+                <option value="admin">Admin — manage the workspace</option>
+                <option value="editor">Editor — add/edit content</option>
+                <option value="viewer">Viewer — read only</option>
+              </select>
+              <label className="flex items-center gap-2" style={{ fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={memberAi} onChange={e => setMemberAi(e.target.checked)} /> AI Citations access
+              </label>
+            </div>
+            <button className="btn btn-secondary btn-sm" disabled={!memberEmail.trim() || inviting} onClick={invite}>
+              <Send size={13} /> {inviting ? 'Sending…' : 'Send invite'}
+            </button>
+            <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>
+              They'll get an email with a join link. If they already have sites/content here, they'll land straight on the dashboard — no setup wizard.
+            </p>
+          </div>
+        )}
       </div>
+
+      {(active.is_owner || me.is_super_admin) && (
+        <div className="card">
+          <div className="card-title" style={{ color: 'var(--error)' }}><Trash2 size={13} /> Danger zone</div>
+          <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+            Permanently delete this workspace and everything in it — sites, connected accounts, run history and members.
+          </p>
+          <button className="btn btn-danger btn-sm" disabled={deleting} onClick={removeWorkspace}>
+            {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />} Delete this workspace
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -392,6 +527,10 @@ function UsersTab() {
     await api.updateUser(u.id, { superAdmin: !u.is_super_admin }).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
     await load();
   }
+  async function toggleDisabled(u: CurrentUser) {
+    await api.updateUser(u.id, { disabled: !u.disabled }).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    await load();
+  }
 
   return (
     <>
@@ -401,12 +540,15 @@ function UsersTab() {
           {users.map(u => (
             <div key={u.id} className="member-row">
               <div className="member-info">
-                <span className="member-name">{u.name || u.email}{u.id === me.id && <span className="text-dim"> (you)</span>}</span>
+                <span className="member-name">{u.name || u.email}{u.id === me.id && <span className="text-dim"> (you)</span>}{u.disabled && <span className="badge badge-warn" style={{ marginLeft: 6 }}>disabled</span>}</span>
                 <span className="member-role">{u.is_super_admin ? 'Super-admin' : u.role}{u.totp_enabled ? ' · 2FA' : ''}</span>
               </div>
               <div className="flex gap-1">
                 <button className="btn btn-secondary btn-sm" onClick={() => toggleAdmin(u)} disabled={u.id === me.id}>
                   {u.is_super_admin ? 'Revoke admin' : 'Make admin'}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => toggleDisabled(u)} disabled={u.id === me.id}>
+                  {u.disabled ? 'Enable' : 'Disable'}
                 </button>
                 <button className="btn-icon btn-icon-ghost" title="Delete" onClick={() => remove(u.id)} disabled={u.id === me.id}><Trash2 size={13} /></button>
               </div>
@@ -440,6 +582,90 @@ function UsersTab() {
         </div>
       </div>
     </>
+  );
+}
+
+// ── All Workspaces tab (super-admin): see and manage every tenant ────────────
+function AllWorkspacesTab() {
+  const { refreshWorkspaces, switchWorkspace } = useWorkspace();
+  const [rows, setRows] = useState<AdminWorkspaceSummary[]>([]);
+  const [users, setUsers] = useState<CurrentUser[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [reassignFor, setReassignFor] = useState<string | null>(null);
+  const [reassignTo, setReassignTo] = useState('');
+
+  async function load() {
+    setRows(await api.getAllWorkspaces().catch(() => []));
+    setUsers(await api.listUsers().catch(() => []));
+  }
+  useEffect(() => { load(); }, []);
+
+  async function rename(id: string, current: string) {
+    const next = prompt('Rename workspace', current);
+    if (!next?.trim() || next.trim() === current) return;
+    setBusyId(id);
+    await api.renameWorkspace(id, next.trim()).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    setBusyId(null);
+    await load();
+  }
+  async function remove(id: string, name: string) {
+    if (!confirm(`Delete the workspace "${name}"? This permanently removes its sites, accounts and history.`)) return;
+    setBusyId(id);
+    try { await api.deleteWorkspace(id); await refreshWorkspaces(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setBusyId(null);
+    await load();
+  }
+  async function reassign(id: string) {
+    if (!reassignTo) return;
+    setBusyId(id);
+    try { await api.reassignWorkspaceOwner(id, reassignTo); setReassignFor(null); setReassignTo(''); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setBusyId(null);
+    await load();
+  }
+  function open(id: string) {
+    switchWorkspace(id);
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title"><Building2 size={13} /> All workspaces ({rows.length})</div>
+      <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>
+        Every workspace in this install, regardless of who owns it. As a super-admin you can rename, delete or reassign the owner of any of them.
+      </p>
+      <div className="member-list">
+        {rows.map(w => (
+          <div key={w.id} className="member-row">
+            <div className="member-info">
+              <span className="member-name">{w.name}</span>
+              <span className="member-role">
+                Owner: {w.owner_email ?? '—'} · {w.member_count} member{w.member_count === 1 ? '' : 's'} · {w.site_count} site{w.site_count === 1 ? '' : 's'}
+              </span>
+              {reassignFor === w.id && (
+                <div className="flex gap-2 mt-2" style={{ maxWidth: 340 }}>
+                  <select className="input" value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
+                    <option value="">Choose new owner…</option>
+                    {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+                  </select>
+                  <button className="btn btn-primary btn-sm" disabled={!reassignTo || busyId === w.id} onClick={() => reassign(w.id)}>Save</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setReassignFor(null); setReassignTo(''); }}>Cancel</button>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-1" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => open(w.id)}>Open</button>
+              <button className="btn btn-secondary btn-sm" disabled={busyId === w.id} onClick={() => rename(w.id, w.name)}>Rename</button>
+              <button className="btn btn-secondary btn-sm" disabled={busyId === w.id} onClick={() => setReassignFor(w.id)}>Reassign owner</button>
+              <button className="btn-icon btn-icon-ghost" title="Delete" disabled={busyId === w.id} onClick={() => remove(w.id, w.name)}><Trash2 size={13} /></button>
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 && <div className="empty-note">No workspaces yet.</div>}
+      </div>
+      {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? 'var(--ok)' : 'var(--error)' }}>{msg.text}</div>}
+    </div>
   );
 }
 
@@ -507,7 +733,7 @@ const NOTIFY_PROVIDERS: NotifyProvider[] = [
 
 function NotificationsTab() {
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner;
+  const canManage = !!active?.is_owner || !!active?.can_manage;
   const [vals, setVals] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -627,7 +853,7 @@ function NotificationsTab() {
 // pick which to use). Lives in the API Keys tab alongside the other credentials.
 function BingAccounts() {
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner;
+  const canManage = !!active?.is_owner || !!active?.can_manage;
   const [bing, setBing] = useState<BingAccount[]>([]);
   const [bingName, setBingName] = useState('');
   const [bingKey, setBingKey] = useState('');
@@ -674,7 +900,7 @@ function BingAccounts() {
 function KeysTab() {
   const { user } = useAuth();
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner;
+  const canManage = !!active?.is_owner || !!active?.can_manage;
   const isAdmin = user.is_super_admin;
   const [keyStatus, setKeyStatus] = useState<Record<string, { override: boolean; platform: boolean }>>({});
   const [wsVals, setWsVals] = useState<Record<string, string>>({});      // workspace override inputs
@@ -855,6 +1081,8 @@ export default function SettingsPage() {
 
       {/* ── Users (super-admin) ── */}
       {tab === 'users' && user.is_super_admin && <UsersTab />}
+
+      {tab === 'all-workspaces' && user.is_super_admin && <AllWorkspacesTab />}
 
       {/* ── Scheduling ── */}
       {tab === 'schedule' && (
