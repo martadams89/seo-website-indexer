@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.23.0](https://github.com/martadams89/seo-website-indexer/compare/v1.22.43...v1.23.0) (2026-08-10)
+
+
+### ✨ Features
+
+* per-workspace roles, permissions and admin tooling ([d1f06f5](https://github.com/martadams89/seo-website-indexer/commit/d1f06f5ee874cc56ddc131495ca8d1719300534a))
+* per-workspace roles, permissions and admin tooling ([#233](https://github.com/martadams89/seo-website-indexer/issues/233)) ([d1f06f5](https://github.com/martadams89/seo-website-indexer/commit/d1f06f5ee874cc56ddc131495ca8d1719300534a))
+
+
+### 🐛 Bug Fixes
+
+* site data leaking across workspaces after switching the active tenant ([d1f06f5](https://github.com/martadams89/seo-website-indexer/commit/d1f06f5ee874cc56ddc131495ca8d1719300534a))
+
 ## [1.22.43](https://github.com/martadams89/seo-website-indexer/compare/v1.22.42...v1.22.43) (2026-08-10)
 
 
