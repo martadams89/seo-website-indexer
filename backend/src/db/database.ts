@@ -149,6 +149,7 @@ function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS alerts (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       site_id    TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
       kind       TEXT NOT NULL,      -- index_drop | schema_drop | hygiene | llms_drift | quota | bing | citation
       severity   TEXT NOT NULL DEFAULT 'warn',
       message    TEXT NOT NULL,
@@ -162,7 +163,9 @@ function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS ai_prompts (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       site_id    TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
       prompt     TEXT NOT NULL,
+      category   TEXT NOT NULL DEFAULT 'discovery',
       enabled    INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -380,6 +383,22 @@ function initSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_events_target ON audit_events(target_user_id, created_at);
+
+    -- Delivery-level notification history. Payload bodies and secrets are
+    -- deliberately not retained: operators get useful health/audit data
+    -- without creating another store of potentially sensitive content.
+    CREATE TABLE IF NOT EXISTS notification_deliveries (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      event_type    TEXT NOT NULL,
+      channel       TEXT NOT NULL,
+      status        TEXT NOT NULL,
+      title         TEXT NOT NULL,
+      error         TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_notification_deliveries_ws
+      ON notification_deliveries(workspace_id, created_at DESC);
   `);
 
   // Backwards compatibility migrations
@@ -497,11 +516,27 @@ function initSchema(db: Database.Database): void {
   const apCols = db.prepare("PRAGMA table_info(ai_prompts)").all() as { name: string }[];
   if (apCols.length > 0 && !apCols.some(c => c.name === 'workspace_id')) {
     db.exec("ALTER TABLE ai_prompts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_ai_prompts_ws ON ai_prompts(workspace_id);");
     // Backfill site-linked prompts from their site's workspace.
     db.exec(`UPDATE ai_prompts SET workspace_id = (
       SELECT s.workspace_id FROM sites s WHERE s.id = ai_prompts.site_id
     ) WHERE workspace_id IS NULL AND site_id IS NOT NULL;`);
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'category')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN category TEXT NOT NULL DEFAULT 'discovery';");
+  }
+  if (apCols.length > 0) db.exec("CREATE INDEX IF NOT EXISTS idx_ai_prompts_ws ON ai_prompts(workspace_id);");
+
+  // Site-less workspace alerts are used by portfolio-level features such as
+  // AI visibility. Existing site alerts are backfilled to their tenant.
+  const alertCols = db.prepare("PRAGMA table_info(alerts)").all() as { name: string }[];
+  if (alertCols.length > 0 && !alertCols.some(c => c.name === 'workspace_id')) {
+    db.exec("ALTER TABLE alerts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
+    db.exec(`UPDATE alerts SET workspace_id = (
+      SELECT s.workspace_id FROM sites s WHERE s.id = alerts.site_id
+    ) WHERE workspace_id IS NULL AND site_id IS NOT NULL;`);
+  }
+  if (alertCols.length > 0) {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_alerts_ws ON alerts(workspace_id, created_at DESC);");
   }
   // agent_readiness gained isitagentready level/source columns.
   const arCols = db.prepare("PRAGMA table_info(agent_readiness)").all() as { name: string }[];

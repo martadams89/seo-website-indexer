@@ -101,6 +101,7 @@ import {
 } from './scheduler.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
+import { getCommandCenter } from './analytics/command-center.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
 import { snapshotSiteAgentReadiness, getAgentReadinessHistory } from './analytics/agent-readiness-store.js';
 import { generateLlmsTxt, llmsGenerationProvider } from './ai/generate-llms.js';
@@ -109,7 +110,7 @@ import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexe
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
-import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, getThread, replyInThread, type Provider } from './ai/citations.js';
+import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, type Provider, type PromptCategory } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
@@ -123,7 +124,7 @@ import {
   createPasswordReset, consumePasswordReset, recordAuditEvent, listAuditEvents, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
-import { sendTestNotification, configuredChannels, NOTIFY_KEYS } from './utils/notify.js';
+import { sendTestNotification, configuredChannels, listNotificationDeliveries, NOTIFY_KEYS } from './utils/notify.js';
 import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSiteInWorkspace, bootstrapUserWorkspace,
@@ -346,7 +347,8 @@ function capabilityForPath(path: string): Capability | null {
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
     || path.startsWith('/api/auth/google/start')
-    || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys') {
+    || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys'
+    || path === '/api/ai/models' || path.startsWith('/api/ai/provision/')) {
     return 'manage_integrations';
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
@@ -367,10 +369,14 @@ app.addHook('preHandler', async (req, reply) => {
   if (SELF_ACCOUNT_EXEMPT_EXACT.has(pathOnly) || SELF_ACCOUNT_EXEMPT_PREFIXES.some(p => pathOnly.startsWith(p))) return;
   if (ctx.user.is_super_admin) return;
   const role = workspaceRole(ctx.user, ctx.workspaceId);
-  if (role === 'owner' || role === 'admin') return;
   if (role === 'viewer' || role === null) {
     return reply.status(403).send({ error: 'Read-only access — ask a workspace admin for edit permissions.' });
   }
+  const isAiOperation = pathOnly.startsWith('/api/ai/prompts') || pathOnly.startsWith('/api/ai/run') || pathOnly === '/api/ai/config';
+  if (isAiOperation && !canUseAiCitations(ctx.user, ctx.workspaceId)) {
+    return reply.status(403).send({ error: 'AI Citations access is disabled for your account in this workspace. Ask a workspace admin.' });
+  }
+  if (role === 'owner' || role === 'admin') return;
   // role === 'editor': gate by their individual capabilities, if this path needs one.
   const cap = capabilityForPath(pathOnly);
   if (cap && !hasCapability(ctx.user, ctx.workspaceId, cap)) {
@@ -1787,7 +1793,7 @@ app.get('/api/workspace/keys', async (req) => {
 
 app.put('/api/workspace/keys', async (req, reply) => {
   const wsId = requireWorkspace(req);
-  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change its keys.' });
+  if (!hasCapability(currentUser(req), wsId, 'manage_integrations')) return reply.status(403).send({ error: 'You do not have permission to manage workspace integrations.' });
   const body = (req.body ?? {}) as Record<string, string>;
   for (const key of WORKSPACE_KEYS) {
     if (body[key] === undefined) continue;
@@ -1815,7 +1821,7 @@ app.get('/api/notifications/config', async (req) => {
 
 app.put('/api/notifications/config', async (req, reply) => {
   const wsId = requireWorkspace(req);
-  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change notifications.' });
+  if (!hasCapability(currentUser(req), wsId, 'manage_notifications')) return reply.status(403).send({ error: 'You do not have permission to manage workspace notifications.' });
   const body = (req.body ?? {}) as Record<string, string>;
   for (const key of NOTIFY_KEYS) {
     if (body[key] !== undefined) setWorkspaceSetting(wsId, key, String(body[key]));
@@ -1828,6 +1834,11 @@ app.post('/api/notifications/test', async (req) => {
   const wsId = currentWorkspace(req);
   const results = wsId ? await sendTestNotification(wsId) : [];
   return { results };
+});
+
+app.get('/api/notifications/deliveries', async (req) => {
+  const wsId = currentWorkspace(req);
+  return wsId ? listNotificationDeliveries(wsId) : [];
 });
 
 // ── Quota Usage ───────────────────────────────────────────────────────────────
@@ -2022,6 +2033,8 @@ try {
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 
+app.get('/api/command-center', async (req) => getCommandCenter(currentWorkspace(req)));
+
 app.get('/api/analytics/overview', async (req) => getOverview(currentWorkspace(req)));
 
 app.get('/api/analytics/site/:id', async (req, reply) => {
@@ -2030,7 +2043,7 @@ app.get('/api/analytics/site/:id', async (req, reply) => {
   return detail;
 });
 
-app.post('/api/analytics/snapshot', async () => ({ snapshots: snapshotAllSites().length }));
+app.post('/api/analytics/snapshot', async (req) => ({ snapshots: snapshotAllSites(currentWorkspace(req)).length }));
 
 app.get('/api/analytics/alerts', async (req) => getAlerts(currentWorkspace(req)));
 
@@ -2315,16 +2328,19 @@ function assertAiCitationAllowed(req: unknown, cost = 1): void {
   incrementQuota('ai_citations_run', `user:${user.id}`, cost);
 }
 
-app.get('/api/ai/providers', async () => ({
+app.get('/api/ai/providers', async (req) => ({
   all: PROVIDERS,
-  configured: configuredProviders(),
+  configured: configuredProviders(currentWorkspace(req)),
 }));
 
 app.get('/api/ai/prompts', async (req) => listPrompts(currentWorkspace(req)));
 app.post('/api/ai/prompts', async (req, reply) => {
-  const { prompt, site_id } = (req.body ?? {}) as { prompt?: string; site_id?: string };
+  const wsId = currentWorkspace(req);
+  const { prompt, site_id, category } = (req.body ?? {}) as { prompt?: string; site_id?: string; category?: PromptCategory };
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt required' });
-  return addPrompt(prompt.trim(), site_id ?? null, currentWorkspace(req));
+  if (site_id && !canAccessSiteInWorkspace(currentUser(req), site_id, wsId)) return reply.code(404).send({ error: 'Site not found' });
+  if (category && !PROMPT_CATEGORIES.includes(category)) return reply.code(400).send({ error: 'Invalid prompt category' });
+  return addPrompt(prompt.trim(), site_id ?? null, wsId, category ?? 'discovery');
 });
 app.delete('/api/ai/prompts/:id', async (req) => {
   deletePrompt(Number((req.params as { id: string }).id), currentWorkspace(req));
@@ -2332,9 +2348,29 @@ app.delete('/api/ai/prompts/:id', async (req) => {
 });
 
 app.get('/api/ai/results', async (req) => getResults(200, currentWorkspace(req)));
-app.post('/api/ai/run/:promptId', async (req) => {
+app.get('/api/ai/insights', async (req) => getAiInsights(currentWorkspace(req)));
+app.get('/api/ai/config', async (req) => {
+  const wsId = currentWorkspace(req);
+  return { competitorDomains: wsId ? (getWorkspaceSettings(wsId).ai_competitor_domains ?? '') : '' };
+});
+app.put('/api/ai/config', async (req) => {
+  const wsId = requireWorkspace(req);
+  const { competitorDomains = '' } = (req.body ?? {}) as { competitorDomains?: string };
+  const clean = String(competitorDomains).split(/[\s,]+/).map(domain => domain.trim()).filter(Boolean).slice(0, 100).join(', ');
+  setWorkspaceSetting(wsId, 'ai_competitor_domains', clean);
+  return { ok: true };
+});
+app.post('/api/ai/run/:promptId', async (req, reply) => {
+  const promptId = Number((req.params as { promptId: string }).promptId);
+  const wsId = currentWorkspace(req);
+  if (!listPrompts(wsId).some(prompt => prompt.id === promptId)) return reply.code(404).send({ error: 'Prompt not found' });
   assertAiCitationAllowed(req);
-  return { results: await runPrompt(Number((req.params as { promptId: string }).promptId), currentWorkspace(req)) };
+  try {
+    return { results: await runPrompt(promptId, wsId) };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Prompt not found') return reply.code(404).send({ error: 'Prompt not found' });
+    throw error;
+  }
 });
 app.post('/api/ai/run-all', async (req) => {
   const wsId = currentWorkspace(req);
@@ -2350,7 +2386,7 @@ app.get('/api/ai/models', async (req) => ({ providers: await probeModels(current
 // Body: { model_openai?: string, model_anthropic?: string, ... }; empty clears.
 app.put('/api/ai/models', async (req, reply) => {
   const wsId = requireWorkspace(req);
-  if (!canManageWorkspace(currentUser(req), wsId)) return reply.status(403).send({ error: 'Only the workspace owner can change model selection.' });
+  if (!hasCapability(currentUser(req), wsId, 'manage_integrations')) return reply.status(403).send({ error: 'You do not have permission to manage AI integrations.' });
   const body = (req.body ?? {}) as Record<string, string>;
   for (const p of MODEL_PROVIDERS) {
     const k = `model_${p}`;
@@ -2362,7 +2398,7 @@ app.put('/api/ai/models', async (req, reply) => {
 // Conversation thread for one prompt × provider (root run + follow-ups).
 app.get('/api/ai/prompts/:id/thread/:provider', async (req) => {
   const { id, provider } = req.params as { id: string; provider: string };
-  return getThread(Number(id), provider);
+  return getThread(Number(id), provider, currentWorkspace(req));
 });
 
 // Follow-up question in an existing thread — same provider, full context.
@@ -2370,9 +2406,12 @@ app.post('/api/ai/prompts/:id/reply', async (req, reply) => {
   const { id } = req.params as { id: string };
   const { provider, message } = (req.body ?? {}) as { provider?: string; message?: string };
   if (!provider || !message?.trim()) return reply.code(400).send({ error: 'provider and message required' });
+  if (!PROVIDERS.includes(provider as Provider)) return reply.code(400).send({ error: 'Unknown provider' });
+  const wsId = currentWorkspace(req);
+  if (!listPrompts(wsId).some(prompt => prompt.id === Number(id))) return reply.code(404).send({ error: 'Prompt not found' });
   assertAiCitationAllowed(req);
   try {
-    return await replyInThread(Number(id), provider as Provider, message.trim(), currentWorkspace(req));
+    return await replyInThread(Number(id), provider as Provider, message.trim(), wsId);
   } catch (e) {
     return reply.code(422).send({ error: e instanceof Error ? e.message : 'reply failed' });
   }

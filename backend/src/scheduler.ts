@@ -56,7 +56,7 @@ import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
 import { snapshotAllPerformance } from './analytics/perf-store.js';
 import { snapshotAllAgentReadiness } from './analytics/agent-readiness-store.js';
-import { sendWorkspaceNotification, configuredChannels } from './utils/notify.js';
+import { sendWorkspaceNotification, configuredChannels, notificationEventEnabled } from './utils/notify.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -723,7 +723,7 @@ async function _doRun(
   // Analytics: snapshot every site's daily stats (also raises regression alerts),
   // then push the run summary to the configured webhook, if any.
   try {
-    snapshotAllSites();
+    snapshotAllSites(activeRun.workspaceId);
   } catch (e) {
     log(runId, 'warn', `Stats snapshot failed: ${e instanceof Error ? e.message : e}`);
   }
@@ -731,7 +731,7 @@ async function _doRun(
   // trends, and drives per-query drop alerts. Network-bound, so awaited but
   // never allowed to fail the run.
   try {
-    const n = await snapshotAllPerformance();
+    const n = await snapshotAllPerformance(activeRun.workspaceId);
     if (n > 0) log(runId, 'dim', `Search-performance rollups refreshed for ${n} site(s)`);
   } catch (e) {
     log(runId, 'warn', `Perf snapshot failed: ${e instanceof Error ? e.message : e}`);
@@ -739,7 +739,7 @@ async function _doRun(
   // Agent-readiness re-score (isitagentready-style): discovery/protocol/identity
   // surfaces per site. Network-bound, best-effort, never fails the run.
   try {
-    const n = await snapshotAllAgentReadiness();
+    const n = await snapshotAllAgentReadiness(activeRun.workspaceId);
     if (n > 0) log(runId, 'dim', `Agent-readiness re-scored for ${n} site(s)`);
   } catch (e) {
     log(runId, 'warn', `Agent-readiness snapshot failed: ${e instanceof Error ? e.message : e}`);
@@ -760,8 +760,10 @@ async function _doRun(
     const title = isStopped ? 'Indexing run stopped' : 'Indexing run complete';
     for (const [wsId, agg] of byWs) {
       if (configuredChannels(wsId).length === 0) continue;
+      const event = status === 'failed' ? 'run_failed' : 'run_complete';
+      if (!notificationEventEnabled(wsId, event)) continue;
       const body = `${agg.sites} site${agg.sites === 1 ? '' : 's'} processed — ${agg.urls} new/changed URL${agg.urls === 1 ? '' : 's'}${agg.errors ? `, ${agg.errors} with errors` : ''}.`;
-      sendWorkspaceNotification(wsId, title, body).catch(() => null);
+      sendWorkspaceNotification(wsId, title, body, event).catch(() => null);
     }
   } catch (e) {
     log(runId, 'warn', `Notification dispatch failed: ${e instanceof Error ? e.message : e}`);

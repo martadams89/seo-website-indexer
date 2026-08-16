@@ -6,7 +6,7 @@
  * GSC data is revised for ~2 days after the fact, so each snapshot re-fetches
  * a short trailing window and upserts (idempotent overwrite).
  */
-import { getDb, getAllSites, type Site } from '../db/database.js';
+import { getDb, getAllSites, getEnabledSitesForWorkspace, type Site } from '../db/database.js';
 import { getGooglePerformance, getBingPerformance, getGoogleDailyQueries } from '../indexer/performance.js';
 import { recordAlert } from './stats.js';
 import { logSystem } from '../utils/logger.js';
@@ -54,10 +54,11 @@ export async function snapshotSitePerformance(site: Site): Promise<void> {
   checkQueryAlerts(site);
 }
 
-/** Snapshot every site (called after each indexing run). Best-effort per site. */
-export async function snapshotAllPerformance(): Promise<number> {
+/** Snapshot one workspace (or every site for explicit maintenance jobs). */
+export async function snapshotAllPerformance(workspaceId: string | null = null): Promise<number> {
   let n = 0;
-  for (const site of getAllSites()) {
+  const targetSites = workspaceId ? getEnabledSitesForWorkspace(workspaceId) : getAllSites();
+  for (const site of targetSites) {
     try { await snapshotSitePerformance(site); n++; }
     catch (e) { logSystem('warn', `Perf snapshot failed for ${site.domain}: ${e instanceof Error ? e.message : e}`); }
   }

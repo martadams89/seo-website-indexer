@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2 } from 'lucide-react';
-import { api, type AiPrompt, type AiResult } from '../api';
+import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2, Sparkles, Target, TrendingUp, Trophy, Save, Globe2, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { api, type AiInsights, type AiPrompt, type AiPromptCategory, type AiResult } from '../api';
 import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
 
@@ -11,6 +11,14 @@ const PROVIDER_LABEL: Record<string, string> = {
   perplexity: 'Perplexity',
   xai: 'Grok',
   brave: 'Brave Search',
+};
+const CATEGORY_LABEL: Record<AiPromptCategory, string> = {
+  discovery: 'Discovery', comparison: 'Comparison', commercial: 'Commercial', brand: 'Brand', support: 'Support',
+};
+
+const EMPTY_INSIGHTS: AiInsights = {
+  overview: { prompts: 0, configuredProviders: 0, checks: 0, cited: 0, visibility: 0, previousVisibility: null, change: null, sourceDomains: 0 },
+  providers: [], trend: [], sources: [], opportunities: [], movements: [],
 };
 
 function parseJson<T>(s: string | null | undefined, fallback: T): T {
@@ -145,17 +153,24 @@ export default function CitationsPage() {
   const [providers, setProviders] = useState<{ all: string[]; configured: string[] }>({ all: [], configured: [] });
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
   const [results, setResults] = useState<AiResult[]>([]);
+  const [insights, setInsights] = useState<AiInsights>(EMPTY_INSIGHTS);
   const [newPrompt, setNewPrompt] = useState('');
+  const [newSiteId, setNewSiteId] = useState('');
+  const [newCategory, setNewCategory] = useState<AiPromptCategory>('discovery');
+  const [competitorDomains, setCompetitorDomains] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
   const [running, setRunning] = useState<number | 'all' | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [activeProvider, setActiveProvider] = useState<string>('');
 
   const load = useCallback(async () => {
     try {
-      const [prov, pr, res] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults()]);
+      const [prov, pr, res, nextInsights, config] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults(), api.getAiInsights(), api.getAiConfig()]);
       setProviders(prov);
       setPrompts(pr);
       setResults(res);
+      setInsights(nextInsights);
+      setCompetitorDomains(config.competitorDomains);
       setActiveProvider(prev => prev || prov.configured[0] || prov.all[0] || '');
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Failed to load');
@@ -167,10 +182,17 @@ export default function CitationsPage() {
   async function add() {
     if (!newPrompt.trim()) return;
     try {
-      await api.addAiPrompt(newPrompt.trim());
+      await api.addAiPrompt(newPrompt.trim(), newSiteId || null, newCategory);
       setNewPrompt('');
       load();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Failed to add'); }
+  }
+
+  async function saveCompetitors() {
+    setSavingConfig(true);
+    try { await api.saveAiConfig(competitorDomains); toast('success', 'Competitor set saved'); await load(); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not save competitors'); }
+    setSavingConfig(false);
   }
 
   async function run(id: number | 'all') {
@@ -192,7 +214,7 @@ export default function CitationsPage() {
 
   // Latest result per prompt × provider for the matrix ticks
   const latest = new Map<string, AiResult>();
-  for (const r of results) {
+  for (const r of results.filter(result => result.parent_id == null)) {
     const k = `${r.prompt_id}:${r.provider}`;
     if (!latest.has(k)) latest.set(k, r);
   }
@@ -204,8 +226,9 @@ export default function CitationsPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">AI Citations</h1>
-          <p className="page-subtitle">Do the answer engines cite your sites? Click a prompt to open its conversations.</p>
+          <div className="eyebrow"><Sparkles size={13} /> Generative engine intelligence</div>
+          <h1 className="page-title">AI Visibility</h1>
+          <p className="page-subtitle">Measure where answer engines mention you, who earns the sources, and which buyer questions to win next.</p>
         </div>
         <button className="btn btn-primary btn-sm" disabled={running !== null || noKeys || prompts.length === 0} onClick={() => run('all')}>
           {running === 'all' ? <><Loader2 size={12} className="spin" /> Running…</> : <><Play size={12} /> Run all</>}
@@ -234,16 +257,84 @@ export default function CitationsPage() {
         </div>
       )}
 
+      <section className="geo-overview">
+        <div className="geo-kpi primary">
+          <span><Target size={17} /> Portfolio visibility</span>
+          <strong>{insights.overview.checks ? `${insights.overview.visibility}%` : '—'}</strong>
+          <small>
+            {insights.overview.change == null ? 'Run twice to establish movement' : insights.overview.change >= 0
+              ? <><ArrowUpRight size={12} /> {insights.overview.change} points vs previous checks</>
+              : <><ArrowDownRight size={12} /> {Math.abs(insights.overview.change)} points vs previous checks</>}
+          </small>
+        </div>
+        <div className="geo-kpi"><span><MessageSquare size={16} /> Prompt set</span><strong>{insights.overview.prompts}</strong><small>buyer questions tracked</small></div>
+        <div className="geo-kpi"><span><CheckCircle2 size={16} /> Citations won</span><strong>{insights.overview.cited}<em>/{insights.overview.checks}</em></strong><small>latest successful checks</small></div>
+        <div className="geo-kpi"><span><Globe2 size={16} /> Source landscape</span><strong>{insights.overview.sourceDomains}</strong><small>domains shaping answers</small></div>
+      </section>
 
-      <div className="flex gap-2" style={{ marginBottom: 18 }}>
+      <section className="geo-grid">
+        <div className="command-panel geo-provider-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Answer engines</span><h2>Visibility by provider</h2></div><TrendingUp size={16} /></div>
+          <div className="geo-provider-list">
+            {providers.all.map(provider => {
+              const item = insights.providers.find(row => row.provider === provider);
+              const configured = providers.configured.includes(provider);
+              return <div key={provider} className={!configured ? 'disabled' : ''}>
+                <span><Bot size={14} /><strong>{PROVIDER_LABEL[provider] ?? provider}</strong><small>{configured ? `${item?.cited ?? 0} of ${item?.checks ?? 0} prompts` : 'API key needed'}</small></span>
+                <div className="geo-progress"><i style={{ width: `${item?.visibility ?? 0}%` }} /></div>
+                <b>{configured ? `${item?.visibility ?? 0}%` : '—'}</b>
+              </div>;
+            })}
+          </div>
+        </div>
+
+        <div className="command-panel geo-sources-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Citation graph</span><h2>Sources winning answers</h2></div><Trophy size={16} /></div>
+          <div className="source-list">
+            {insights.sources.slice(0, 8).map((source, index) => <div key={source.domain} className={source.owned ? 'owned' : source.competitor ? 'competitor' : ''}>
+              <span className="source-rank">{index + 1}</span><span><strong>{source.domain}</strong><small>{source.providers.map(provider => PROVIDER_LABEL[provider] ?? provider).join(' · ')}</small></span>
+              {source.owned && <em>your site</em>}{source.competitor && <em>competitor</em>}<b>{source.citations}</b>
+            </div>)}
+            {!insights.sources.length && <div className="command-empty compact"><Globe2 size={22} /><strong>No citation graph yet</strong><span>Run your prompt set to map the domains that ground AI answers.</span></div>}
+          </div>
+        </div>
+      </section>
+
+      <section className="geo-grid geo-opportunity-grid">
+        <div className="command-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Gaps to close</span><h2>Prompt opportunities</h2></div><span className="signal-count">{insights.opportunities.length}</span></div>
+          <div className="opportunity-list">
+            {insights.opportunities.slice(0, 6).map(item => <button key={item.promptId} onClick={() => setExpanded(item.promptId)}>
+              <span className={`category-chip category-${item.category}`}>{CATEGORY_LABEL[item.category]}</span>
+              <span><strong>{item.prompt}</strong><small>Missing from {item.missingProviders.map(provider => PROVIDER_LABEL[provider] ?? provider).join(', ')}</small></span><span>{item.citedProviders.length}/{providers.configured.length}</span>
+            </button>)}
+            {!insights.opportunities.length && <div className="command-empty compact"><CheckCircle2 size={22} /><strong>No current gaps</strong><span>Add more prompts or providers to broaden coverage.</span></div>}
+          </div>
+        </div>
+        <div className="command-panel competitor-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Competitive context</span><h2>Watchlist</h2></div><Target size={16} /></div>
+          <p>Flag known competitors inside the source graph. Use domains separated by commas or spaces.</p>
+          <textarea className="input" rows={4} placeholder="competitor.com, another-rival.co.uk" value={competitorDomains} onChange={event => setCompetitorDomains(event.target.value)} />
+          <button className="btn btn-secondary btn-sm" onClick={saveCompetitors} disabled={savingConfig}>{savingConfig ? <Loader2 size={12} className="spin" /> : <Save size={12} />} Save watchlist</button>
+        </div>
+      </section>
+
+
+      <div className="prompt-composer">
         <input
           className="input"
-          style={{ flex: 1 }}
           placeholder='e.g. "What is the best damp survey app for UK surveyors?"'
           value={newPrompt}
           onChange={e => setNewPrompt(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
         />
+        <select className="input" value={newCategory} onChange={event => setNewCategory(event.target.value as AiPromptCategory)}>
+          {Object.entries(CATEGORY_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <select className="input" value={newSiteId} onChange={event => setNewSiteId(event.target.value)}>
+          <option value="">Whole workspace</option>
+          {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+        </select>
         <button className="btn btn-primary btn-sm" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
 
@@ -262,7 +353,7 @@ export default function CitationsPage() {
             <tbody>
               {prompts.map(p => (
                 <tr key={p.id} className={expanded === p.id ? 'row-active' : ''} onClick={() => setExpanded(expanded === p.id ? null : p.id)} style={{ cursor: 'pointer' }}>
-                  <td><MessageSquare size={11} style={{ opacity: 0.5, marginRight: 6 }} />{p.prompt}</td>
+                  <td><span className={`category-chip category-${p.category}`}>{CATEGORY_LABEL[p.category] ?? p.category}</span><span className="prompt-table-text"><MessageSquare size={11} />{p.prompt}</span></td>
                   {providers.all.map(prov => {
                     const r = latest.get(`${p.id}:${prov}`);
                     return (

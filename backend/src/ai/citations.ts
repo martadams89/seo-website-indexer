@@ -6,12 +6,18 @@
  * Every provider is optional: configure its API key in Settings and it joins
  * the panel; unconfigured providers are skipped silently.
  */
-import { getDb, effectiveSetting, getAllSites, getSitesForWorkspace } from '../db/database.js';
+import { getDb, effectiveSetting, getAllSites, getSitesForWorkspace, getWorkspaceSetting } from '../db/database.js';
 import { resolveModel, type ModelProvider } from './models.js';
 import { logSystem } from '../utils/logger.js';
+import { recordAlert } from '../analytics/stats.js';
+import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
 export type Provider = typeof PROVIDERS[number];
+const PROVIDER_LABELS: Record<Provider, string> = {
+  openai: 'ChatGPT', anthropic: 'Claude', gemini: 'Gemini',
+  perplexity: 'Perplexity', xai: 'Grok', brave: 'Brave Search',
+};
 
 const KEY_SETTING: Record<Provider, string> = {
   openai: 'openai_api_key',
@@ -208,7 +214,13 @@ function findDomains(answer: ProviderAnswer, domains: string[]): string[] {
   return domains.filter(d => hay.includes(d.toLowerCase()));
 }
 
-export interface PromptRow { id: number; workspace_id: string | null; site_id: string | null; prompt: string; enabled: number; created_at: string }
+export const PROMPT_CATEGORIES = ['discovery', 'comparison', 'commercial', 'brand', 'support'] as const;
+export type PromptCategory = typeof PROMPT_CATEGORIES[number];
+
+export interface PromptRow {
+  id: number; workspace_id: string | null; site_id: string | null; prompt: string;
+  category: PromptCategory; enabled: number; created_at: string;
+}
 
 /** Prompts for one workspace (the tenant boundary). */
 export function listPrompts(workspaceId: string | null = null): PromptRow[] {
@@ -218,9 +230,24 @@ export function listPrompts(workspaceId: string | null = null): PromptRow[] {
   return getDb().prepare('SELECT * FROM ai_prompts ORDER BY created_at DESC').all() as PromptRow[];
 }
 
-export function addPrompt(prompt: string, siteId?: string | null, workspaceId: string | null = null): PromptRow {
-  const r = getDb().prepare('INSERT INTO ai_prompts(site_id, prompt, workspace_id) VALUES(?, ?, ?)').run(siteId ?? null, prompt, workspaceId);
+export function addPrompt(
+  prompt: string,
+  siteId?: string | null,
+  workspaceId: string | null = null,
+  category: PromptCategory = 'discovery',
+): PromptRow {
+  const safeCategory = PROMPT_CATEGORIES.includes(category) ? category : 'discovery';
+  const r = getDb().prepare('INSERT INTO ai_prompts(site_id, prompt, workspace_id, category) VALUES(?, ?, ?, ?)')
+    .run(siteId ?? null, prompt, workspaceId, safeCategory);
   return getDb().prepare('SELECT * FROM ai_prompts WHERE id = ?').get(r.lastInsertRowid) as PromptRow;
+}
+
+function getPrompt(promptId: number, workspaceId: string | null): PromptRow | undefined {
+  if (workspaceId) {
+    return getDb().prepare('SELECT * FROM ai_prompts WHERE id = ? AND workspace_id = ?')
+      .get(promptId, workspaceId) as PromptRow | undefined;
+  }
+  return getDb().prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
 }
 
 /** Delete a prompt, but only if it belongs to the caller's workspace. */
@@ -252,7 +279,7 @@ export function getResults(limit = 200, workspaceId: string | null = null): Arra
 /** Run one prompt against every configured provider; persist + return results. */
 export async function runPrompt(promptId: number, workspaceId: string | null = null): Promise<Array<Record<string, unknown>>> {
   const db = getDb();
-  const row = db.prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
+  const row = getPrompt(promptId, workspaceId);
   if (!row) throw new Error('Prompt not found');
   const domains = trackedDomains(workspaceId);
   const providers = configuredProviders(workspaceId);
@@ -263,8 +290,14 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
     VALUES(?,?,?,?,?,?,?,?,?,?)
   `);
 
+  const movements: Array<{ provider: Provider; cited: boolean }> = [];
   const results = await Promise.all(providers.map(async provider => {
     const key = effectiveSetting(workspaceId, KEY_SETTING[provider])!;
+    const previous = db.prepare(`
+      SELECT cited FROM ai_results
+      WHERE prompt_id = ? AND provider = ? AND parent_id IS NULL
+      ORDER BY created_at DESC, id DESC LIMIT 1
+    `).get(promptId, provider) as { cited: number } | undefined;
     try {
       const modelId = provider === 'brave' ? undefined : resolveModel(workspaceId, provider as ModelProvider);
       const answer = await ASK[provider]([{ role: 'user', content: row.prompt }], key, modelId);
@@ -273,6 +306,19 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
       const text = answer.text.trim().slice(0, 12_000);
       insert.run(promptId, provider, answer.model, found.length ? 1 : 0, JSON.stringify(found), text, null,
         null, JSON.stringify(answer.citations.slice(0, 40)), null);
+      if (previous && Boolean(previous.cited) !== Boolean(found.length)) {
+        const gained = found.length > 0;
+        const label = PROVIDER_LABELS[provider] ?? provider;
+        recordAlert(
+          row.site_id,
+          'citation',
+          `${gained ? 'Citation gained' : 'Citation lost'} on ${label}: “${row.prompt.slice(0, 90)}”`,
+          gained ? 'info' : 'warn',
+          gained ? `Now cites ${found.join(', ')}` : 'The latest answer no longer cites a tracked domain.',
+          workspaceId,
+        );
+        movements.push({ provider, cited: gained });
+      }
       logSystem(found.length ? 'ok' : 'info',
         `AI citation [${provider}] ${found.length ? `cited: ${found.join(', ')}` : 'not cited'} — "${row.prompt.slice(0, 60)}"`);
       return { provider, model: answer.model, cited: found.length > 0, domains: found, excerpt: text };
@@ -283,6 +329,12 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
       return { provider, model: null, cited: false, domains: [], error: msg };
     }
   }));
+  if (workspaceId && movements.length > 0 && notificationEventEnabled(workspaceId, 'citation_changes')) {
+    const gained = movements.filter(m => m.cited).length;
+    const lost = movements.length - gained;
+    const body = `${gained} citation${gained === 1 ? '' : 's'} gained, ${lost} lost for “${row.prompt.slice(0, 100)}”.`;
+    sendWorkspaceNotification(workspaceId, 'AI visibility changed', body, 'citation_changes').catch(() => null);
+  }
   return results;
 }
 
@@ -303,12 +355,18 @@ export interface AiResultRow {
   created_at: string;
 }
 
-/** Root result + all follow-ups for one prompt × provider, oldest first. */
-export function getThread(promptId: number, provider: string): AiResultRow[] {
-  return getDb().prepare(`
-    SELECT * FROM ai_results WHERE prompt_id = ? AND provider = ?
-    ORDER BY id ASC
-  `).all(promptId, provider) as AiResultRow[];
+/** Root result + follow-ups for one workspace-scoped prompt × provider. */
+export function getThread(promptId: number, provider: string, workspaceId: string | null = null): AiResultRow[] {
+  if (workspaceId) {
+    return getDb().prepare(`
+      SELECT r.* FROM ai_results r
+      JOIN ai_prompts p ON p.id = r.prompt_id
+      WHERE r.prompt_id = ? AND r.provider = ? AND p.workspace_id = ?
+      ORDER BY r.id ASC
+    `).all(promptId, provider, workspaceId) as AiResultRow[];
+  }
+  return getDb().prepare('SELECT * FROM ai_results WHERE prompt_id = ? AND provider = ? ORDER BY id ASC')
+    .all(promptId, provider) as AiResultRow[];
 }
 
 /**
@@ -317,14 +375,14 @@ export function getThread(promptId: number, provider: string): AiResultRow[] {
  */
 export async function replyInThread(promptId: number, provider: Provider, followUp: string, workspaceId: string | null = null): Promise<AiResultRow> {
   const db = getDb();
-  const promptRow = db.prepare('SELECT * FROM ai_prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
+  const promptRow = getPrompt(promptId, workspaceId);
   if (!promptRow) throw new Error('Prompt not found');
   if (provider === 'brave') throw new Error('Brave Search is a retrieval check — it has no conversation to continue.');
   const key = effectiveSetting(workspaceId, KEY_SETTING[provider]);
   if (!key) throw new Error(`${provider} API key not configured`);
 
   const turns: ChatTurn[] = [];
-  for (const r of getThread(promptId, provider)) {
+  for (const r of getThread(promptId, provider, workspaceId)) {
     if (r.error) continue; // failed calls contribute nothing to the context
     turns.push({ role: 'user', content: r.user_prompt ?? promptRow.prompt });
     if (r.excerpt) turns.push({ role: 'assistant', content: r.excerpt });
@@ -333,7 +391,7 @@ export async function replyInThread(promptId: number, provider: Provider, follow
   turns.push({ role: 'user', content: followUp });
 
   const domains = trackedDomains(workspaceId);
-  const parent = getThread(promptId, provider).at(-1);
+  const parent = getThread(promptId, provider, workspaceId).at(-1);
   const modelId = resolveModel(workspaceId, provider as ModelProvider);
   const answer = await ASK[provider](turns, key, modelId);
   const found = findDomains(answer, domains);
@@ -345,4 +403,151 @@ export async function replyInThread(promptId: number, provider: Provider, follow
     parent?.id ?? null, JSON.stringify(answer.citations.slice(0, 40)), followUp);
   logSystem(found.length ? 'ok' : 'info', `AI follow-up [${provider}] ${found.length ? `cited: ${found.join(', ')}` : 'not cited'}`);
   return db.prepare('SELECT * FROM ai_results WHERE id = ?').get(res.lastInsertRowid) as AiResultRow;
+}
+
+interface InsightResult extends AiResultRow {
+  prompt: string;
+  category: PromptCategory;
+  site_id: string | null;
+}
+
+export interface AiInsights {
+  overview: {
+    prompts: number;
+    configuredProviders: number;
+    checks: number;
+    cited: number;
+    visibility: number;
+    previousVisibility: number | null;
+    change: number | null;
+    sourceDomains: number;
+  };
+  providers: Array<{ provider: Provider; checks: number; cited: number; visibility: number }>;
+  trend: Array<{ day: string; checks: number; cited: number; visibility: number }>;
+  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; providers: Provider[] }>;
+  opportunities: Array<{
+    promptId: number; prompt: string; category: PromptCategory; siteId: string | null;
+    citedProviders: Provider[]; missingProviders: Provider[];
+  }>;
+  movements: Array<{
+    promptId: number; prompt: string; provider: Provider; cited: boolean; previousCited: boolean; createdAt: string;
+  }>;
+}
+
+function safeArray(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter(v => typeof v === 'string') : [];
+  } catch { return []; }
+}
+
+function sourceDomain(value: string): string | null {
+  try {
+    const normalized = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    return new URL(normalized).hostname.toLowerCase().replace(/^www\./, '');
+  } catch { return null; }
+}
+
+/** Portfolio-level GEO intelligence derived from root runs only. */
+export function getAiInsights(workspaceId: string | null): AiInsights {
+  const empty: AiInsights = {
+    overview: { prompts: 0, configuredProviders: 0, checks: 0, cited: 0, visibility: 0, previousVisibility: null, change: null, sourceDomains: 0 },
+    providers: [], trend: [], sources: [], opportunities: [], movements: [],
+  };
+  if (!workspaceId) return empty;
+
+  const prompts = listPrompts(workspaceId);
+  const configured = configuredProviders(workspaceId);
+  const rows = getDb().prepare(`
+    SELECT r.*, p.prompt, p.category, p.site_id
+    FROM ai_results r JOIN ai_prompts p ON p.id = r.prompt_id
+    WHERE p.workspace_id = ? AND r.parent_id IS NULL
+    ORDER BY r.created_at DESC, r.id DESC
+  `).all(workspaceId) as InsightResult[];
+
+  const latest = new Map<string, InsightResult>();
+  const previous = new Map<string, InsightResult>();
+  for (const row of rows) {
+    const key = `${row.prompt_id}:${row.provider}`;
+    if (!latest.has(key)) latest.set(key, row);
+    else if (!previous.has(key)) previous.set(key, row);
+  }
+  const current = [...latest.values()].filter(row => configured.includes(row.provider));
+  const cited = current.filter(r => r.cited && !r.error).length;
+  const checks = current.filter(r => !r.error).length;
+  const prior = [...previous.values()].filter(r => configured.includes(r.provider) && !r.error);
+  const previousVisibility = prior.length ? Math.round((prior.filter(r => r.cited).length / prior.length) * 100) : null;
+  const visibility = checks ? Math.round((cited / checks) * 100) : 0;
+
+  const providerInsights = configured.map(provider => {
+    const providerRows = current.filter(r => r.provider === provider && !r.error);
+    const providerCited = providerRows.filter(r => r.cited).length;
+    return { provider, checks: providerRows.length, cited: providerCited, visibility: providerRows.length ? Math.round(providerCited / providerRows.length * 100) : 0 };
+  });
+
+  const days = new Map<string, { checks: number; cited: number }>();
+  for (const row of [...rows].reverse()) {
+    if (row.error || !configured.includes(row.provider)) continue;
+    const day = row.created_at.slice(0, 10);
+    const item = days.get(day) ?? { checks: 0, cited: 0 };
+    item.checks += 1;
+    if (row.cited) item.cited += 1;
+    days.set(day, item);
+  }
+  const trend = [...days.entries()].slice(-30).map(([day, item]) => ({
+    day, ...item, visibility: item.checks ? Math.round(item.cited / item.checks * 100) : 0,
+  }));
+
+  const owned = trackedDomains(workspaceId);
+  const competitors = (getWorkspaceSetting(workspaceId, 'ai_competitor_domains') ?? '')
+    .split(/[\s,]+/).map(d => d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
+  const domainMap = new Map<string, { citations: number; providers: Set<Provider> }>();
+  for (const row of current) {
+    for (const raw of safeArray(row.citations)) {
+      const domain = sourceDomain(raw);
+      if (!domain) continue;
+      const entry = domainMap.get(domain) ?? { citations: 0, providers: new Set<Provider>() };
+      entry.citations += 1;
+      entry.providers.add(row.provider);
+      domainMap.set(domain, entry);
+    }
+  }
+  const matches = (domain: string, candidates: string[]) => candidates.some(candidate => domain === candidate || domain.endsWith(`.${candidate}`));
+  const sources = [...domainMap.entries()].map(([domain, item]) => ({
+    domain,
+    citations: item.citations,
+    owned: matches(domain, owned),
+    competitor: matches(domain, competitors),
+    providers: [...item.providers],
+  })).sort((a, b) => b.citations - a.citations || a.domain.localeCompare(b.domain)).slice(0, 50);
+
+  const opportunities = prompts.map(prompt => {
+    const promptRows = configured.map(provider => latest.get(`${prompt.id}:${provider}`)).filter(Boolean) as InsightResult[];
+    const citedProviders = promptRows.filter(r => r.cited && !r.error).map(r => r.provider);
+    return {
+      promptId: prompt.id, prompt: prompt.prompt, category: prompt.category, siteId: prompt.site_id,
+      citedProviders,
+      missingProviders: configured.filter(provider => !citedProviders.includes(provider)),
+    };
+  }).filter(item => item.missingProviders.length > 0)
+    .sort((a, b) => b.missingProviders.length - a.missingProviders.length);
+
+  const movements = current.flatMap(row => {
+    const priorRow = previous.get(`${row.prompt_id}:${row.provider}`);
+    if (!priorRow || Boolean(priorRow.cited) === Boolean(row.cited)) return [];
+    return [{
+      promptId: row.prompt_id, prompt: row.prompt, provider: row.provider,
+      cited: Boolean(row.cited), previousCited: Boolean(priorRow.cited), createdAt: row.created_at,
+    }];
+  }).slice(0, 20);
+
+  return {
+    overview: {
+      prompts: prompts.length, configuredProviders: configured.length, checks, cited, visibility,
+      previousVisibility,
+      change: previousVisibility === null ? null : visibility - previousVisibility,
+      sourceDomains: domainMap.size,
+    },
+    providers: providerInsights, trend, sources, opportunities, movements,
+  };
 }

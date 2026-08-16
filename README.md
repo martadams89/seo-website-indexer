@@ -40,15 +40,16 @@ Search engines only recrawl what they can discover, and AI answer engines only c
 - **lastmod change detection** — fetches your live sitemap and only queues URLs whose `<lastmod>` has changed since the last run
 - **SQLite persistence** — URL state, submission history, and credentials survive container restarts
 - **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
+- **Organic-search command centre** — a responsive daily operating view that joins workspace health, index coverage, organic momentum, AI visibility, connection health and a prioritized action centre; includes a global keyboard quick-switcher and full dark/light themes
 - **Analytics engine** — daily per-site rollups with a portfolio dashboard: coverage funnel (sitemap → submitted → indexed), 60-day trends, GSC indexing-state breakdown, and day-over-day regression **alerts** (index drops, structured-data loss)
 - **Freshness radar** — every page whose sitemap `lastmod` moved *after* Google's last crawl, surfaced as a resubmission worklist
-- **AI citation tracking (GEO)** — run tracked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search** and record whether the answers cite your domains; per-prompt × provider matrix with answer excerpts. Providers are optional — add whichever keys you have
+- **AI visibility intelligence (GEO)** — run categorized, site-linked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search**; track portfolio/provider visibility, gains and losses, source-domain leaders, a competitor watchlist, prompt opportunities, full answer excerpts and follow-up conversations
 - **One-click Gemini key** — provisions a service-restricted Gemini API key on *your* Google Cloud project using the already-linked account; no console visit, no copy-paste, free tier
 - **Bing Webmaster API** — URL batch submission + quota on Bing's own (separate) submission allowance, alongside IndexNow
 - **llms.txt lifecycle** — live-fetch, structural lint, drift detection, one-click deploy (webhook/FTP), plus **AI generation**: a configured LLM writes a comprehensive, spec-compliant `llms.txt` from your site's real pages (with an auto-built `llms-sitemap.xml`)
 - **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
 - **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
-- **Notifications** — run summaries and alerts to Slack, Discord, ntfy, Telegram, email or any generic webhook; each is a first-class channel and fires in parallel
+- **Notifications** — event-controlled run summaries, failures and AI citation movement to Slack, Discord, ntfy, Telegram, email or any generic webhook; each delivery is recorded per workspace for audit and troubleshooting
 - **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
 - **Full user administration** — super-admin profile editing, cross-workspace membership and permission management, generated one-time passwords, reset email, 2FA recovery, global disable, audited impersonation and security history
 - **Submission-failure recovery** — inspect persistent IndexNow/Bing failures on the dashboard, check live URL reachability, then clear one or all backoff records so the next run can retry
@@ -135,7 +136,7 @@ Settings are **layered** so one install can serve many clients with full flexibi
 - Resolution is always *workspace override → platform default*. So you can run entirely on shared platform keys, entirely on per-client keys, or any mix — the foundation for reselling, add-on services or per-client billback.
 - Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; workspace owners/admins and editors with the relevant capability manage that workspace's integrations and notifications.
 
-Planning to sell managed or self-hosted access? See the [commercialisation and product roadmap](docs/COMMERCIALIZATION.md) for the recommended entitlement, metering, billback and optional Stripe sequence.
+See the [organic-search command-centre product strategy](docs/PRODUCT_STRATEGY.md) for the prioritized data, integration, workflow and UX roadmap. Planning to sell managed or self-hosted access? The [commercialisation roadmap](docs/COMMERCIALIZATION.md) covers the recommended entitlement, metering, billback and optional Stripe sequence.
 
 ### Sign-in methods
 
