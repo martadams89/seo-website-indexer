@@ -57,4 +57,41 @@ describe('password reset tokens', () => {
     users.consumePasswordReset(reset, 'freshpass123');
     expect(users.getSessionUser(sessionToken)).toBeNull();
   });
+
+  it('admin-generated passwords are one-time and revoke sessions', () => {
+    const u = users.createUser({ email: `tmp-${randomUUID()}@x.com`, password: 'origpass123' });
+    const sessionToken = users.createSession(u.id);
+    const supersededReset = users.createPasswordReset(u.id);
+    const temporary = users.generateTemporaryPassword();
+    expect(temporary.length).toBeGreaterThanOrEqual(20);
+
+    users.setTemporaryPassword(u.id, temporary);
+    const changed = users.getUserById(u.id)!;
+    expect(changed.must_change_password).toBe(1);
+    expect(users.verifyPassword(changed, temporary)).toBe(true);
+    expect(users.getSessionUser(sessionToken)).toBeNull();
+    expect(users.consumePasswordReset(supersededReset, 'stale-reset-pass')).toBeNull();
+
+    users.setUserPassword(u.id, 'permanent-pass-123');
+    expect(users.getUserById(u.id)!.must_change_password).toBe(0);
+  });
+
+  it('tracks the super-admin behind an impersonated session', () => {
+    const admin = users.createUser({ email: `imp-admin-${randomUUID()}@x.com`, password: 'password123', superAdmin: true });
+    const target = users.createUser({ email: `imp-target-${randomUUID()}@x.com`, password: 'password123' });
+    const token = users.createSession(target.id, 'test', admin.id);
+    const session = users.getSessionContext(token)!;
+    expect(session.user.id).toBe(target.id);
+    expect(session.impersonator?.id).toBe(admin.id);
+  });
+
+  it('keeps administration events queryable for a user', () => {
+    const actor = users.createUser({ email: `audit-a-${randomUUID()}@x.com`, password: 'password123', superAdmin: true });
+    const target = users.createUser({ email: `audit-t-${randomUUID()}@x.com`, password: 'password123' });
+    users.recordAuditEvent({ actorUserId: actor.id, targetUserId: target.id, action: 'user.tested', detail: { ok: true } });
+    const event = users.listAuditEvents(10, target.id).find(e => e.action === 'user.tested');
+    expect(event?.actor_email).toBe(actor.email);
+    expect(event?.target_email).toBe(target.email);
+    expect(JSON.parse(event?.detail ?? '{}')).toEqual({ ok: true });
+  });
 });

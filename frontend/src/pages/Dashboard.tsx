@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp, Unlock } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp, Unlock, Search, Trash2 } from 'lucide-react';
 import { useApp, useToast } from '../AppContext';
 import { formatDistanceToNow } from 'date-fns';
 import { QuotaWidget } from '../components/QuotaWidget';
 import { Link } from 'react-router-dom';
-import { api, type AnalyticsOverview, type AlertRow } from '../api';
+import { api, type AnalyticsOverview, type AlertRow, type UrlFailureRecord, type UrlFailureCheck } from '../api';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 
 export default function Dashboard() {
   const { status, sites, runs, logs, refresh } = useApp();
+  const { active } = useWorkspace();
+  const canOperate = !!active?.permissions?.manage_sites;
   const toast = useToast();
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -15,11 +18,39 @@ export default function Dashboard() {
   const [runError, setRunError] = useState('');
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [failures, setFailures] = useState<UrlFailureRecord[]>([]);
+  const [failureChecks, setFailureChecks] = useState<Record<string, UrlFailureCheck>>({});
+  const [failureBusy, setFailureBusy] = useState<string | null>(null);
 
   useEffect(() => {
     api.getAnalyticsOverview().then(setOverview).catch(() => null);
     api.getAlerts().then(a => setAlerts(a.filter(x => !x.acked).slice(0, 5))).catch(() => null);
+    api.getUrlFailures().then(setFailures).catch(() => null);
   }, []);
+
+  const failureKey = (f: UrlFailureRecord) => `${f.site_id}\n${f.api}\n${f.url}`;
+
+  async function checkFailure(f: UrlFailureRecord) {
+    const key = failureKey(f); setFailureBusy(key);
+    try {
+      const result = await api.checkUrlFailure(f);
+      setFailureChecks(v => ({ ...v, [key]: result }));
+    }
+    catch (e) { toast('error', String(e).replace('Error: ', '')); }
+    setFailureBusy(null);
+  }
+
+  async function clearFailure(f?: UrlFailureRecord) {
+    if (!confirm(f ? 'Clear this failure so the next indexing run can retry it?' : `Clear all ${failures.length} failure records in this workspace?`)) return;
+    const key = f ? failureKey(f) : 'all'; setFailureBusy(key);
+    try {
+      const result = await api.clearUrlFailures(f ? { siteId: f.site_id, url: f.url, api: f.api } : {});
+      toast('success', `${result.cleared} failure record${result.cleared === 1 ? '' : 's'} cleared; the next run can retry them.`);
+      setFailures(await api.getUrlFailures());
+      setFailureChecks({});
+    } catch (e) { toast('error', String(e).replace('Error: ', '')); }
+    setFailureBusy(null);
+  }
 
   const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
   const totalSubmitted = todayRuns.reduce((s, r) => s + r.total_submitted, 0);
@@ -94,7 +125,7 @@ export default function Dashboard() {
           {showReleaseLock && (
             <button
               className="btn btn-secondary btn-sm"
-              disabled={unlocking}
+              disabled={unlocking || !canOperate}
               onClick={releaseLock}
               title={`Persistent lock held by run ${persistentLock?.runId ?? '?'}${persistentLock?.acquiredAt ? ` since ${persistentLock.acquiredAt}` : ''}`}
             >
@@ -104,7 +135,7 @@ export default function Dashboard() {
           {isCurrentlyRunning ? (
             <button
               className="btn btn-danger"
-              disabled={stopping}
+              disabled={stopping || !canOperate}
               onClick={stopRun}
             >
               {stopping ? <><span className="spinner" /> Stopping…</> : <><XCircle size={13} /> Stop Run</>}
@@ -113,14 +144,14 @@ export default function Dashboard() {
             <div className="flex gap-2">
               <button
                 className="btn btn-secondary"
-                disabled={running || sites.length === 0}
+                disabled={running || sites.length === 0 || !canOperate}
                 onClick={() => triggerRun(true)}
               >
                 <Zap size={13} /> Dry Run (Audits Only)
               </button>
               <button
                 className="btn btn-primary"
-                disabled={running || !status?.auth.authenticated || sites.length === 0}
+                disabled={running || !status?.auth.authenticated || sites.length === 0 || !canOperate}
                 onClick={() => triggerRun(false)}
               >
                 <Play size={13} /> Run Now
@@ -231,6 +262,40 @@ export default function Dashboard() {
             </div>
           ))}
           <Link to="/analytics" className="text-dim" style={{ fontSize: 11 }}>Manage in Analytics →</Link>
+        </div>
+      )}
+
+      {failures.length > 0 && (
+        <div className="card mb-4" style={{ borderColor: 'var(--error)' }}>
+          <div className="card-title flex items-center justify-between">
+            <span><XCircle size={13} /> Submission failures ({failures.length})</span>
+            <button className="btn btn-secondary btn-sm" disabled={failureBusy === 'all' || !canOperate} onClick={() => clearFailure()}>
+              <Trash2 size={12} /> Clear all
+            </button>
+          </div>
+          <p className="text-dim" style={{ fontSize: 11, marginBottom: 10 }}>
+            Repeated failures are held in backoff to protect API quota. Check that a URL is reachable, then clear its record to make it eligible on the next run.
+          </p>
+          <div className="member-list">
+            {failures.slice(0, 12).map(f => {
+              const key = failureKey(f); const result = failureChecks[key];
+              return (
+                <div className="member-row" key={key}>
+                  <div className="member-info" style={{ flex: 1 }}>
+                    <span className="member-name" title={f.url}>{f.url}</span>
+                    <span className="member-role">
+                      {siteNames[f.site_id] ?? f.site_id} · {f.api.replaceAll('_', ' ')} · {f.fail_count} attempt{f.fail_count === 1 ? '' : 's'}
+                      {result && <> · <strong style={{ color: result.ok ? 'var(--ok)' : 'var(--error)' }}>{result.ok ? `${result.status} reachable` : (result.status ? `${result.status} ${result.statusText ?? ''}` : result.error ?? 'unreachable')}</strong></>}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    <button className="btn btn-secondary btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => checkFailure(f)}><Search size={12} /> Check</button>
+                    <button className="btn btn-secondary btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => clearFailure(f)}><Trash2 size={12} /> Clear</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

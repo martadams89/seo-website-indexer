@@ -1760,6 +1760,14 @@ body {
 .member-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .member-role { font-size: 11px; color: var(--text-dim); text-transform: capitalize; }
 
+.impersonation-banner {
+  position: fixed; z-index: 100; left: 50%; top: 10px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 24px);
+  padding: 8px 10px 8px 14px; border-radius: var(--radius-md);
+  color: var(--text-primary); background: var(--warn-dim); border: 1px solid var(--warn);
+  box-shadow: 0 8px 28px rgba(0,0,0,.3); font-size: 12px;
+}
+
 /* ── TOTP QR code ── */
 .totp-qr {
   display: inline-flex; padding: 10px; margin-bottom: 12px;

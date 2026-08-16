@@ -3,7 +3,7 @@ import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, C
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type AdminUserDetail, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
@@ -437,8 +437,8 @@ function WorkspaceTab() {
                   <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => toggleAi(m.user_id, !m.ai_citations)}>
                     AI: {m.ai_citations ? 'On' : 'Off'}
                   </button>
-                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => resetPassword(m.user_id)}>Reset pw</button>
-                  <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => clear2fa(m.user_id)}>Clear 2FA</button>
+                  {me.is_super_admin && <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => resetPassword(m.user_id)}>Reset pw</button>}
+                  {me.is_super_admin && <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => clear2fa(m.user_id)}>Clear 2FA</button>}
                   <button className="btn btn-secondary btn-sm" disabled={busyUserId === m.user_id} onClick={() => toggleDisabled(m.user_id, !m.disabled)}>
                     {m.disabled ? 'Enable' : 'Disable'}
                   </button>
@@ -486,7 +486,7 @@ function WorkspaceTab() {
             <div className="flex gap-2 mb-2" style={{ flexWrap: 'wrap' }}>
               <select className="input" style={{ width: 'auto' }} value={memberRole} onChange={e => setMemberRole(e.target.value as 'admin' | 'editor' | 'viewer')}>
                 <option value="admin">Admin — manage the workspace</option>
-                <option value="editor">Editor — add/edit content</option>
+                <option value="editor">Editor — operate workspace features</option>
                 <option value="viewer">Viewer — read only</option>
               </select>
               <label className="flex items-center gap-2" style={{ fontSize: 12, cursor: 'pointer' }}>
@@ -523,6 +523,14 @@ function UsersTab() {
   const { user: me } = useAuth();
   const [users, setUsers] = useState<CurrentUser[]>([]);
   const [allWorkspaces, setAllWorkspaces] = useState<AdminWorkspaceSummary[]>([]);
+  const [detail, setDetail] = useState<AdminUserDetail | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editName, setEditName] = useState('');
+  const [addWorkspaceId, setAddWorkspaceId] = useState('');
+  const [addWorkspaceRole, setAddWorkspaceRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
+  const [generatedPassword, setGeneratedPassword] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -533,10 +541,23 @@ function UsersTab() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function load() {
-    setUsers(await api.listUsers().catch(() => []));
-    setAllWorkspaces(await api.getAllWorkspaces().catch(() => []));
+    const [nextUsers, nextWorkspaces] = await Promise.all([api.listUsers(), api.getAllWorkspaces()]);
+    setUsers(nextUsers); setAllWorkspaces(nextWorkspaces);
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().catch(() => null); }, []);
+
+  async function openUser(id: string) {
+    setDetailBusy(true);
+    try {
+      const next = await api.getAdminUser(id);
+      setDetail(next); setEditEmail(next.user.email); setEditName(next.user.name ?? '');
+    } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setDetailBusy(false);
+  }
+  async function reloadDetail() {
+    if (detail) await openUser(detail.user.id);
+    await load();
+  }
 
   async function create() {
     setMsg(null);
@@ -554,23 +575,86 @@ function UsersTab() {
     } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
   }
   async function remove(id: string) {
-    if (!confirm('Delete this user? Their owned workspaces and data are removed.')) return;
-    await api.deleteUser(id).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
-    await load();
+    if (!confirm('Delete this user? Owned workspaces and Google credentials will be transferred to your administrator account so tenant data is preserved.')) return;
+    setActionBusy('delete');
+    try { await api.deleteUser(id); setDetail(null); await load(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
   }
   async function toggleAdmin(u: CurrentUser) {
     await api.updateUser(u.id, { superAdmin: !u.is_super_admin }).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    if (detail?.user.id === u.id) await openUser(u.id);
     await load();
   }
   async function toggleDisabled(u: CurrentUser) {
     await api.updateUser(u.id, { disabled: !u.disabled }).catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }));
+    if (detail?.user.id === u.id) await openUser(u.id);
     await load();
+  }
+
+  async function saveProfile() {
+    if (!detail) return; setActionBusy('profile'); setMsg(null);
+    try {
+      await api.updateUser(detail.user.id, { email: editEmail.trim(), name: editName.trim() || null });
+      setMsg({ ok: true, text: 'User properties saved.' }); await reloadDetail();
+    } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function generatePassword() {
+    if (!detail || !confirm('Generate a new temporary password and sign this user out everywhere?')) return;
+    setActionBusy('password');
+    try { const r = await api.generateUserPassword(detail.user.id); setGeneratedPassword(r.temporaryPassword); setMsg({ ok: true, text: 'Temporary password generated. Copy it now; it is not stored in readable form.' }); await reloadDetail(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function sendReset() {
+    if (!detail) return; setActionBusy('reset');
+    try {
+      const r = await api.sendUserPasswordReset(detail.user.id);
+      setMsg({ ok: true, text: r.emailed ? 'Password-reset email sent.' : `Email is not configured — share this link: ${window.location.origin}${r.resetPath}` });
+      await reloadDetail();
+    } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function clear2fa() {
+    if (!detail || !confirm('Clear this user’s two-factor authentication?')) return;
+    setActionBusy('2fa');
+    try { await api.clearUser2fa(detail.user.id); setMsg({ ok: true, text: 'Two-factor authentication cleared.' }); await reloadDetail(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function impersonate() {
+    if (!detail || !confirm(`View the application as ${detail.user.email}? Administration actions remain attributed to your account.`)) return;
+    setActionBusy('impersonate');
+    try { await api.impersonateUser(detail.user.id); window.location.assign('/'); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); setActionBusy(''); }
+  }
+  async function addToWorkspace() {
+    if (!detail || !addWorkspaceId) return;
+    setActionBusy('workspace-add');
+    try { await api.addWorkspaceMember(addWorkspaceId, detail.user.email, addWorkspaceRole, true); setAddWorkspaceId(''); await reloadDetail(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function changeMembership(workspaceId: string, changes: Parameters<typeof api.updateWorkspaceMember>[2]) {
+    if (!detail) return; setActionBusy(`membership-${workspaceId}`);
+    try { await api.updateWorkspaceMember(workspaceId, detail.user.id, changes); await reloadDetail(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
+  }
+  async function removeMembership(workspaceId: string) {
+    if (!detail || !confirm('Remove this user from the workspace?')) return;
+    setActionBusy(`membership-${workspaceId}`);
+    try { await api.removeWorkspaceMember(workspaceId, detail.user.id); await reloadDetail(); }
+    catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed' }); }
+    setActionBusy('');
   }
 
   return (
     <>
       <div className="card mb-4">
         <div className="card-title"><Users size={13} /> Users</div>
+        <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>Select a user to edit their profile, security, workspace access, permissions, Google connections, or impersonate their account.</p>
         <div className="member-list">
           {users.map(u => (
             <div key={u.id} className="member-row">
@@ -578,19 +662,94 @@ function UsersTab() {
                 <span className="member-name">{u.name || u.email}{u.id === me.id && <span className="text-dim"> (you)</span>}{u.disabled && <span className="badge badge-warn" style={{ marginLeft: 6 }}>disabled</span>}</span>
                 <span className="member-role">{u.is_super_admin ? 'Super-admin' : u.role}{u.totp_enabled ? ' · 2FA' : ''}</span>
               </div>
-              <div className="flex gap-1">
-                <button className="btn btn-secondary btn-sm" onClick={() => toggleAdmin(u)} disabled={u.id === me.id}>
-                  {u.is_super_admin ? 'Revoke admin' : 'Make admin'}
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => toggleDisabled(u)} disabled={u.id === me.id}>
-                  {u.disabled ? 'Enable' : 'Disable'}
-                </button>
-                <button className="btn-icon btn-icon-ghost" title="Delete" onClick={() => remove(u.id)} disabled={u.id === me.id}><Trash2 size={13} /></button>
-              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setGeneratedPassword(''); setMsg(null); openUser(u.id); }} disabled={detailBusy && detail?.user.id === u.id}>Manage</button>
             </div>
           ))}
         </div>
       </div>
+
+      {detail && (
+        <div className="card mb-4">
+          <div className="card-title flex items-center justify-between">
+            <span><ShieldCheck size={13} /> Manage {detail.user.name || detail.user.email}</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => setDetail(null)}>Close</button>
+          </div>
+          <div className="grid-2 mb-3">
+            <div className="input-group"><label className="input-label">Name</label><input className="input" value={editName} onChange={e => setEditName(e.target.value)} /></div>
+            <div className="input-group"><label className="input-label">Email</label><input className="input" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} /></div>
+          </div>
+          <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-primary btn-sm" disabled={actionBusy === 'profile'} onClick={saveProfile}><Save size={12} /> Save profile</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => toggleAdmin(detail.user)} disabled={detail.user.id === me.id}>{detail.user.is_super_admin ? 'Revoke super-admin' : 'Make super-admin'}</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => toggleDisabled(detail.user)} disabled={detail.user.id === me.id}>{detail.user.disabled ? 'Enable globally' : 'Disable globally'}</button>
+            <button className="btn btn-secondary btn-sm" disabled={actionBusy === 'password'} onClick={generatePassword}>Generate password</button>
+            <button className="btn btn-secondary btn-sm" disabled={actionBusy === 'reset'} onClick={sendReset}><Send size={12} /> Send reset email</button>
+            <button className="btn btn-secondary btn-sm" disabled={!detail.user.totp_enabled || actionBusy === '2fa'} onClick={clear2fa}>Clear 2FA</button>
+            <button className="btn btn-secondary btn-sm" disabled={detail.user.id === me.id || actionBusy === 'impersonate'} onClick={impersonate}>Impersonate</button>
+            <button className="btn btn-danger btn-sm" disabled={detail.user.id === me.id || actionBusy === 'delete'} onClick={() => remove(detail.user.id)}><Trash2 size={12} /> Delete</button>
+          </div>
+          <div className="text-dim mb-3" style={{ fontSize: 11 }}>
+            Created {new Date(detail.user.created_at).toLocaleString()} · Last login {detail.user.last_login_at ? new Date(detail.user.last_login_at).toLocaleString() : 'never'} · {detail.user.totp_enabled ? '2FA enabled' : '2FA off'}
+          </div>
+          {generatedPassword && (
+            <div className="alert alert-warn mb-4"><div className="alert-content">
+              Temporary password: <code>{generatedPassword}</code>
+              <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8 }} onClick={() => navigator.clipboard.writeText(generatedPassword)}><Copy size={12} /> Copy</button>
+              <div style={{ fontSize: 11, marginTop: 5 }}>The user is signed out everywhere and must replace this password after login.</div>
+            </div></div>
+          )}
+
+          <div className="card-title"><Building2 size={13} /> Workspace access</div>
+          <div className="member-list mb-3">
+            {detail.workspaces.map(access => (
+              <div className="member-row" key={access.workspace_id}>
+                <div className="member-info"><span className="member-name">{access.workspace_name}</span><span className="member-role">{access.role}{access.disabled ? ' · disabled here' : ''}</span></div>
+                {!access.is_owner && (
+                  <div className="flex gap-1" style={{ flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 470 }}>
+                    <select className="input" style={{ width: 'auto', fontSize: 12 }} value={access.role} disabled={actionBusy === `membership-${access.workspace_id}`}
+                      onChange={e => changeMembership(access.workspace_id, { role: e.target.value as 'admin' | 'editor' | 'viewer' })}>
+                      <option value="admin">Admin</option><option value="editor">Editor</option><option value="viewer">Viewer</option>
+                    </select>
+                    <button className="btn btn-secondary btn-sm" onClick={() => changeMembership(access.workspace_id, { ai_citations: !access.ai_citations })}>AI: {access.ai_citations ? 'On' : 'Off'}</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => changeMembership(access.workspace_id, { disabled: !access.disabled })}>{access.disabled ? 'Enable' : 'Disable'}</button>
+                    <button className="btn-icon btn-icon-ghost" title="Remove from workspace" onClick={() => removeMembership(access.workspace_id)}><Trash2 size={13} /></button>
+                    {access.role === 'editor' && <div className="flex gap-2" style={{ width: '100%', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      {WORKSPACE_CAPABILITIES.map(cap => <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 11 }}>
+                        <input type="checkbox" checked={access.permissions[cap.id]} onChange={e => changeMembership(access.workspace_id, { permissions: { [cap.id]: e.target.checked } })} /> {cap.label}
+                      </label>)}
+                    </div>}
+                  </div>
+                )}
+                {access.is_owner && <span className="badge badge-info">Owner — reassign in All Workspaces</span>}
+              </div>
+            ))}
+            {detail.workspaces.length === 0 && <div className="empty-note">No workspace access.</div>}
+          </div>
+          <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+            <select className="input" style={{ maxWidth: 280 }} value={addWorkspaceId} onChange={e => setAddWorkspaceId(e.target.value)}>
+              <option value="">Add to another workspace…</option>
+              {allWorkspaces.filter(w => !detail.workspaces.some(a => a.workspace_id === w.id)).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+            <select className="input" style={{ width: 'auto' }} value={addWorkspaceRole} onChange={e => setAddWorkspaceRole(e.target.value as 'admin' | 'editor' | 'viewer')}>
+              <option value="admin">Admin</option><option value="editor">Editor</option><option value="viewer">Viewer</option>
+            </select>
+            <button className="btn btn-secondary btn-sm" disabled={!addWorkspaceId || actionBusy === 'workspace-add'} onClick={addToWorkspace}><Plus size={12} /> Add access</button>
+          </div>
+
+          <div className="card-title"><KeyRound size={13} /> Google credentials owned ({detail.google_accounts.length})</div>
+          <div className="member-list mb-4">
+            {detail.google_accounts.map(account => <div className="member-row" key={account.id}><div className="member-info"><span className="member-name">{account.email || account.id}</span><span className="member-role">Shared with {account.workspace_ids.length} workspace{account.workspace_ids.length === 1 ? '' : 's'}{account.needs_reauth ? ' · reconnect required' : ''}</span></div></div>)}
+            {detail.google_accounts.length === 0 && <div className="empty-note">No personal Google credentials.</div>}
+          </div>
+
+          <div className="card-title"><Clock size={13} /> Recent security activity</div>
+          <div className="member-list">
+            {detail.audit.slice(0, 10).map(event => <div className="member-row" key={event.id}><div className="member-info"><span className="member-name">{event.action.replaceAll('.', ' ')}</span><span className="member-role">{event.actor_email ?? 'system'} · {new Date(event.created_at).toLocaleString()}</span></div></div>)}
+            {detail.audit.length === 0 && <div className="empty-note">No audited administration events yet.</div>}
+          </div>
+          {msg && <div style={{ fontSize: 12, marginTop: 10, wordBreak: 'break-all', color: msg.ok ? 'var(--ok)' : 'var(--error)' }}>{msg.text}</div>}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-title"><Plus size={13} /> Add a user</div>
@@ -622,7 +781,7 @@ function UsersTab() {
             <div className="flex gap-2 mb-3" style={{ flexWrap: 'wrap' }}>
               <select className="input" style={{ width: 'auto' }} value={targetRole} onChange={e => setTargetRole(e.target.value as 'admin' | 'editor' | 'viewer')}>
                 <option value="admin">Admin — manage the workspace</option>
-                <option value="editor">Editor — add/edit content</option>
+                <option value="editor">Editor — operate workspace features</option>
                 <option value="viewer">Viewer — read only</option>
               </select>
               <label className="flex items-center gap-2" style={{ fontSize: 12, cursor: 'pointer' }}>
@@ -791,7 +950,7 @@ const NOTIFY_PROVIDERS: NotifyProvider[] = [
 
 function NotificationsTab() {
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner || !!active?.can_manage;
+  const canManage = !!active?.permissions?.manage_notifications;
   const [vals, setVals] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -835,7 +994,7 @@ function NotificationsTab() {
         <p className="text-dim" style={{ fontSize: 12 }}>
           These channels belong to the <strong>{active?.name ?? 'current'}</strong> workspace — each workspace notifies its own places.
           Run summaries and alerts for this workspace's sites are pushed after every run; a notification is sent to <strong>all</strong> configured channels.
-          {!canManage && <> <em>You can view these, but only the workspace owner can change them.</em></>}
+          {!canManage && <> <em>You can view these, but a workspace admin has revoked notification management for your role.</em></>}
         </p>
       </div>
 
@@ -911,7 +1070,7 @@ function NotificationsTab() {
 // pick which to use). Lives in the API Keys tab alongside the other credentials.
 function BingAccounts() {
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner || !!active?.can_manage;
+  const canManage = !!active?.permissions?.manage_integrations;
   const [bing, setBing] = useState<BingAccount[]>([]);
   const [bingName, setBingName] = useState('');
   const [bingKey, setBingKey] = useState('');
@@ -958,7 +1117,7 @@ function BingAccounts() {
 function KeysTab() {
   const { user } = useAuth();
   const { active } = useWorkspace();
-  const canManage = !!active?.is_owner || !!active?.can_manage;
+  const canManage = !!active?.permissions?.manage_integrations;
   const isAdmin = user.is_super_admin;
   const [keyStatus, setKeyStatus] = useState<Record<string, { override: boolean; platform: boolean }>>({});
   const [wsVals, setWsVals] = useState<Record<string, string>>({});      // workspace override inputs
@@ -1066,7 +1225,7 @@ function KeysTab() {
       <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={saving || !canManage} onClick={save}>
         <Save size={13} /> {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save keys'}
       </button>
-      {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>Only the workspace owner can set keys for {active?.name}.</p>}
+      {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>A workspace admin has revoked integration management for your access to {active?.name}.</p>}
     </div>
     <BingAccounts />
     <ModelPicker />

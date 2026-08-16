@@ -60,6 +60,10 @@ export interface CurrentUser {
   is_super_admin: boolean;
   disabled: boolean;
   totp_enabled: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  impersonation?: { actor: CurrentUser } | null;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -74,6 +78,11 @@ export interface GoogleAccount {
   last_refreshed_at?: string | null;
   last_refresh_error?: string | null;
   granted_scopes?: string | null;
+  owner_email?: string | null;
+  is_mine?: boolean;
+  can_disconnect?: boolean;
+  can_unshare?: boolean;
+  available_in_workspace?: boolean;
 }
 
 export interface Site {
@@ -150,6 +159,16 @@ export interface UrlFailureRecord {
   last_failed_at: string;
   first_failed_at: string;
 }
+export interface UrlFailureCheck {
+  ok: boolean;
+  status: number | null;
+  statusText?: string;
+  finalUrl?: string;
+  redirected?: boolean;
+  contentType?: string | null;
+  error?: string;
+  checkedAt: string;
+}
 
 export interface BackupInfo {
   name: string;
@@ -225,6 +244,9 @@ export const api = {
   logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) =>
     apiFetch<{ ok: boolean }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  setRequiredPassword: (newPassword: string) =>
+    apiFetch<{ ok: boolean }>('/api/auth/set-required-password', { method: 'POST', body: JSON.stringify({ newPassword }) }),
+  stopImpersonating: () => apiFetch<CurrentUser>('/api/auth/impersonation/stop', { method: 'POST' }),
   totpSetup: () => apiFetch<{ secret: string; uri: string; qr: string }>('/api/auth/totp/setup', { method: 'POST' }),
   totpEnable: (totp: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/enable', { method: 'POST', body: JSON.stringify({ totp }) }),
   totpDisable: (password: string) => apiFetch<{ ok: boolean }>('/api/auth/totp/disable', { method: 'POST', body: JSON.stringify({ password }) }),
@@ -234,6 +256,8 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string } = {}) =>
+    apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   startDeviceFlow: (clientId?: string, clientSecret?: string) =>
     apiFetch<DeviceFlowState>('/api/auth/device-flow/start', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
@@ -246,6 +270,11 @@ export const api = {
   listGSCSites: (accountId?: string) => 
     apiFetch<GSCSite[]>(`/api/auth/gsc-sites${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''}`),
   getAccounts: () => apiFetch<GoogleAccount[]>('/api/auth/accounts'),
+  getMyAccounts: () => apiFetch<GoogleAccount[]>('/api/auth/accounts/mine'),
+  shareAccountWithWorkspace: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/auth/accounts/${encodeURIComponent(id)}/share`, { method: 'POST' }),
+  unshareAccountFromWorkspace: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/auth/accounts/${encodeURIComponent(id)}/workspace`, { method: 'DELETE' }),
   disconnectAccount: (id: string) =>
     apiFetch<{ ok: boolean }>(`/api/auth/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   reconnectAccount: (id: string) =>
@@ -316,6 +345,10 @@ export const api = {
   // Quota & failures
   getQuotaToday: () => apiFetch<QuotaSummary>('/api/quota/today'),
   getUrlFailures: () => apiFetch<UrlFailureRecord[]>('/api/url-failures'),
+  checkUrlFailure: (failure: Pick<UrlFailureRecord, 'site_id' | 'url' | 'api'>) =>
+    apiFetch<UrlFailureCheck>('/api/url-failures/check', { method: 'POST', body: JSON.stringify({ siteId: failure.site_id, url: failure.url, api: failure.api }) }),
+  clearUrlFailures: (filters: { siteId?: string; url?: string; api?: string } = {}) =>
+    apiFetch<{ ok: boolean; cleared: number }>('/api/url-failures', { method: 'DELETE', body: JSON.stringify(filters) }),
 
   // Backups
   listBackups: () => apiFetch<BackupInfo[]>('/api/backups'),
@@ -444,9 +477,17 @@ export const api = {
   listUsers: () => apiFetch<CurrentUser[]>('/api/users'),
   createUser: (data: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean; workspaceId?: string; workspaceRole?: 'admin' | 'editor' | 'viewer'; aiCitations?: boolean }) =>
     apiFetch<CurrentUser>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
-  updateUser: (id: string, data: { password?: string; superAdmin?: boolean; disabled?: boolean }) =>
+  updateUser: (id: string, data: { password?: string; superAdmin?: boolean; disabled?: boolean; email?: string; name?: string | null; role?: string }) =>
     apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteUser: (id: string) => apiFetch<{ ok: boolean }>(`/api/users/${id}`, { method: 'DELETE' }),
+  getAdminUser: (id: string) => apiFetch<AdminUserDetail>(`/api/admin/users/${id}`),
+  generateUserPassword: (id: string) =>
+    apiFetch<{ ok: boolean; temporaryPassword: string; mustChangePassword: boolean }>(`/api/admin/users/${id}/generate-password`, { method: 'POST' }),
+  sendUserPasswordReset: (id: string) =>
+    apiFetch<{ ok: boolean; emailed: boolean; resetPath?: string }>(`/api/admin/users/${id}/send-password-reset`, { method: 'POST' }),
+  clearUser2fa: (id: string) => apiFetch<{ ok: boolean }>(`/api/admin/users/${id}/clear-2fa`, { method: 'POST' }),
+  impersonateUser: (id: string) => apiFetch<CurrentUser>(`/api/admin/users/${id}/impersonate`, { method: 'POST' }),
+  getAuditEvents: (limit = 100) => apiFetch<AuditEvent[]>(`/api/admin/audit-events?limit=${limit}`),
 
   // ── Bing accounts (multiple per workspace) ──
   getBingAccounts: () => apiFetch<BingAccount[]>('/api/bing/accounts'),
@@ -480,6 +521,7 @@ export interface Workspace {
   is_active?: boolean;
   role?: 'owner' | 'admin' | 'editor' | 'viewer' | null;
   can_manage?: boolean;
+  permissions?: Record<WorkspaceCapability, boolean>;
 }
 export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
@@ -500,6 +542,22 @@ export interface InvitePreview {
 export interface AdminWorkspaceSummary {
   id: string; name: string; owner_user_id: string | null; owner_email: string | null;
   member_count: number; site_count: number; created_at: string;
+}
+export interface UserWorkspaceAccess {
+  workspace_id: string; workspace_name: string; role: 'owner' | 'admin' | 'editor' | 'viewer';
+  is_owner: boolean; ai_citations: boolean; disabled: boolean;
+  permissions: Record<WorkspaceCapability, boolean>;
+}
+export interface AuditEvent {
+  id: number; actor_user_id: string | null; actor_email?: string | null;
+  target_user_id: string | null; target_email?: string | null; workspace_id: string | null;
+  action: string; detail: string | null; ip_address: string | null; created_at: string;
+}
+export interface AdminUserDetail {
+  user: CurrentUser;
+  workspaces: UserWorkspaceAccess[];
+  google_accounts: Array<{ id: string; email: string | null; needs_reauth: boolean; workspace_ids: string[]; created_at?: string }>;
+  audit: AuditEvent[];
 }
 export interface BingAccount { id: string; name: string; created_at: string }
 

@@ -50,6 +50,8 @@ Search engines only recrawl what they can discover, and AI answer engines only c
 - **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
 - **Notifications** — run summaries and alerts to Slack, Discord, ntfy, Telegram, email or any generic webhook; each is a first-class channel and fires in parallel
 - **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
+- **Full user administration** — super-admin profile editing, cross-workspace membership and permission management, generated one-time passwords, reset email, 2FA recovery, global disable, audited impersonation and security history
+- **Submission-failure recovery** — inspect persistent IndexNow/Bing failures on the dashboard, check live URL reachability, then clear one or all backoff records so the next run can retry
 - **Modern auth** — email + password with **TOTP 2FA**, passwordless **passkeys (WebAuthn)**, and optional **SSO / OpenID Connect** (Google or any OIDC provider); DB-backed sessions, scrypt hashing, per-route brute-force limits
 - **Layered per-workspace settings** — every API key (AI providers, CrUX, Bing) and notification channel can be set **per workspace**, overriding an optional **platform default** a super-admin sets for the whole install (or allocates to specific workspaces). True segregation with the flexibility for shared or per-client billing
 - **Single container** — no external database, no Redis, no separate workers
@@ -105,14 +107,16 @@ Every member of a workspace (besides its owner) has a **role**, which sets their
 | Role | Can do |
 | --- | --- |
 | **Owner** (implicit) | Everything, including deleting the workspace. One per workspace — whoever created it. |
-| **Admin** | Everything *except* deleting the workspace: manage sites, integrations, notifications, members, invites, password resets/2FA/disable for other members. |
-| **Editor** | Manages sites by default. **Manage integrations** (Google/Bing accounts, API keys) and **manage notifications** can each be individually granted or revoked per editor — e.g. an editor who can add/edit sites but not touch API keys. |
+| **Admin** | Everything operational in that workspace plus members, invitations and workspace-local access disable. Global identity recovery (password/2FA) stays super-admin-only; ownership and deletion remain owner/super-admin actions. |
+| **Editor** | Operates workspace features by default: sites, submissions, Google/Bing accounts, API keys and notifications. Each capability can be individually revoked for a constrained editor. Membership/security administration remains admin-only. |
 | **Viewer** | Strictly read-only. Every mutating action is blocked at the API, not just hidden in the UI. |
 
 A **super-admin** always has full access to every workspace, and can additionally:
 
 - **Reset a member's password** (emails a reset link, or hands back a shareable link if SMTP isn't configured) or **clear their 2FA** — scoped to one workspace's members, or globally for any user.
 - **Disable a member's access to just one workspace** (their account and other workspaces are untouched) via that workspace's Members list, or **disable a user's account entirely** (blocks login everywhere) from **Settings → Users**.
+- **Edit user properties**, add/remove access across any workspace, change every per-workspace role/capability, generate a one-time password that forces replacement, and inspect the user's owned Google credentials and recent audit events.
+- **Impersonate a user** through a dedicated, visibly-bannered session, then return to the administrator without either person's password. Start/stop events and subsequent administration actions are retained in the audit trail.
 
 **AI Citations** access is a separate toggle per member (independent of role) — some members may be trusted to edit sites but not spend the workspace's AI-provider API budget on citation checks. On top of the toggle, non-owners are rate-limited to a configurable number of citation checks per day (`AI_CITATION_DAILY_LIMIT`, default 25) so one click-happy teammate can't exhaust the budget; owners and super-admins are never limited.
 
@@ -120,7 +124,7 @@ A **super-admin** always has full access to every workspace, and can additionall
 
 From **Settings → Workspace**, an owner/admin can **invite by email** with a preset role and AI-citations access. The invitee gets a link (`/accept-invite`) to set a password (or, if they already have an account, just add the workspace to it) — they land straight in that workspace's existing content, **never a forced setup wizard**, since they're joining an existing tenant rather than getting a brand-new empty one.
 
-The **Settings → Users** "Add a user" form (super-admin only, for accounts you need to create directly rather than invite) lets you either give the new account **its own new workspace**, or add it straight to an **existing workspace** you pick, with a role and AI-citations setting — it no longer silently creates an extra, unwanted workspace when you only meant to add someone to one you already have.
+The **Settings → Users** area (super-admin only) now includes a complete user inspector. The creation form can either give the new account **its own workspace** or add it straight to an **existing workspace**; created passwords are temporary and must be replaced at first login. Select any existing user to edit their profile/security, manage all workspace memberships and granular capabilities, or impersonate them for support.
 
 ### Per-workspace settings (API keys & notifications)
 
@@ -129,7 +133,9 @@ Settings are **layered** so one install can serve many clients with full flexibi
 - Each **workspace** can set its own AI-provider keys (OpenAI/Anthropic/Gemini/xAI/Perplexity), CrUX key, Bing key and notification channels under **Settings → API Keys / Notifications**. These apply only to that workspace.
 - A **super-admin** can set a **platform default** for any key (Settings → API Keys, "Platform default" field) that every workspace inherits unless it overrides — or "allocate" a key to a specific client by editing that workspace's override.
 - Resolution is always *workspace override → platform default*. So you can run entirely on shared platform keys, entirely on per-client keys, or any mix — the foundation for reselling, add-on services or per-client billback.
-- Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; notifications and per-workspace keys are managed by each **workspace owner**.
+- Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; workspace owners/admins and editors with the relevant capability manage that workspace's integrations and notifications.
+
+Planning to sell managed or self-hosted access? See the [commercialisation and product roadmap](docs/COMMERCIALIZATION.md) for the recommended entitlement, metering, billback and optional Stripe sequence.
 
 ### Sign-in methods
 
@@ -182,7 +188,7 @@ Works with any SMTP provider (SendGrid, Mailgun, SES, Postmark, Gmail app-passwo
 
 ### Locked out? Recover from the command line
 
-There is no email-based reset yet, and the in-app *Change password* form needs your **current** password. If you're locked out, reset your account directly against the database with the bundled admin CLI (it respects `DATA_DIR`):
+If SMTP reset mail is unavailable and no other super-admin can recover the account, reset it directly against the database with the bundled admin CLI (it respects `DATA_DIR`):
 
 ```bash
 # Docker
@@ -201,7 +207,9 @@ docker exec <container> node dist/cli/admin.js enable-account you@example.com  #
 
 ## Connecting Google Search Console
 
-> This is about linking a **Google account to a workspace** so the tool can call the Search Console API on its behalf — separate from how *you* sign in to the dashboard (above). The account is attached to whichever workspace is active when you connect it.
+> This is about linking a **Google account to a workspace** so the tool can call the Search Console API on its behalf — separate from how *you* sign in to the dashboard (above).
+
+Google credentials are **owned by the user who connects them** and explicitly delegated to workspaces. Any editor with integration permission can connect their own Google account to the active workspace, while every member can use accounts already shared there. A credential owner can reuse the same connection in another accessible workspace without another Google login. Removing it from one workspace unlinks only that tenant; deleting the credential everywhere remains limited to its owner or a super-admin. OAuth handshakes use encrypted, single-use state bound to the initiating user and workspace, so simultaneous account connections cannot collide.
 
 This application uses the standard **Google OAuth 2.0 Web Application Flow** with offline access, so ordinary one-hour access tokens are renewed automatically from a stored refresh token. Google can still time-limit or revoke the refresh grant according to the OAuth project's publishing status and Workspace policy.
 
@@ -639,7 +647,7 @@ All channel config lives in the dashboard (stored in SQLite) — no env vars nee
 | `PORT`         | `3000`      | HTTP port                     |
 | `HOST`         | `0.0.0.0`   | Bind address                  |
 | `DATA_DIR`     | `/data`     | SQLite database directory     |
-| `APP_SECRET`   | *(auto)*    | Encryption key for secrets at rest (FTP passwords, Bing keys). Auto-generated into `DATA_DIR/.key` if unset; **set explicitly in production** so backups/restores stay portable. |
+| `APP_SECRET`   | *(auto)*    | Encryption key for secrets at rest (Google OAuth secrets/tokens, FTP passwords, Bing keys and pending OAuth state). Auto-generated into `DATA_DIR/.key` if unset; **set explicitly in production** so backups/restores stay portable. |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `300` / `1 minute` | Global per-IP API rate limit |
 | `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW` | `10` / `1 minute` | Tighter per-IP limit on credential endpoints (login, signup, passkey login) |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*`, `SSO_AUTO_PROVISION` | — | Optional SSO / OpenID Connect — see [Sign-in methods](#sso--oidc-environment-variables) |

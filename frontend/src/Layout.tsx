@@ -26,7 +26,7 @@ const NAV = [
 
 export default function Layout() {
   const { status, sites, appendLog, theme, toggleTheme, sseConnected, setSseConnected, markSseAlive } = useApp();
-  const { user, logout } = useAuth();
+  const { user, logout, stopImpersonating } = useAuth();
   const { active } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,6 +75,12 @@ export default function Layout() {
 
   return (
     <div className={shellClass}>
+      {user.impersonation && (
+        <div className="impersonation-banner" role="status">
+          <span>You are viewing the app as <strong>{user.name || user.email}</strong>. Actions use this user's permissions and are audited.</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => stopImpersonating()}>Return to {user.impersonation.actor.name || user.impersonation.actor.email}</button>
+        </div>
+      )}
       {/* ── Mobile overlay ── */}
       <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
 

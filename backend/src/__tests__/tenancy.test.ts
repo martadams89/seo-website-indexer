@@ -74,18 +74,21 @@ describe('workspace tenant isolation', () => {
   const mkAcct = (workspaceId: string, ownerUserId: string) => {
     const id = `ga-${randomUUID().slice(0, 8)}`;
     db.upsertGoogleAccount({ id, email: `${id}@x.com`, client_id: 'c', client_secret: 's', access_token: null, refresh_token: 'r', token_expiry: null, workspace_id: workspaceId, owner_user_id: ownerUserId });
+    db.shareGoogleAccountWithWorkspace(id, workspaceId, ownerUserId);
     return id;
   };
 
-  it('Google accounts are shared across all of one owner’s workspaces (account-level)', () => {
+  it('Google accounts can be explicitly delegated across one owner’s workspaces', () => {
     const owner = users.createUser({ email: `owner-${randomUUID()}@x.com`, password: 'password123' });
     const wsOne = ws.bootstrapUserWorkspace(owner, false);
     const wsTwo = ws.createWorkspace('Client B', owner.id); // same owner, second workspace
     const acctId = mkAcct(wsOne.id, owner.id); // connected while in wsOne
 
-    // The one account is available in BOTH of the owner's workspaces — so it's
-    // selectable for a site in either, and never "no accounts connected".
+    // A connection starts in the active workspace and can then be deliberately
+    // shared into another workspace without reconnecting.
     expect(db.getGoogleAccountsForWorkspace(wsOne.id)).toHaveLength(1);
+    expect(db.getGoogleAccountsForWorkspace(wsTwo.id)).toHaveLength(0);
+    db.shareGoogleAccountWithWorkspace(acctId, wsTwo.id, owner.id);
     expect(db.getGoogleAccountsForWorkspace(wsTwo.id)).toHaveLength(1);
 
     // And it's actually usable (not just listed) in both — the check used to
@@ -115,6 +118,25 @@ describe('workspace tenant isolation', () => {
     expect(db.canOwnGoogleAccount(`ga-${randomUUID()}@x.com`, other.id)).toBe(true);
   });
 
+  it('encrypts Google secrets and tokens at rest while returning usable values', () => {
+    const owner = users.createUser({ email: `enc-${randomUUID()}@x.com`, password: 'password123' });
+    const workspace = ws.bootstrapUserWorkspace(owner, false);
+    const id = `enc-${randomUUID()}@x.com`;
+    db.upsertGoogleAccount({
+      id, email: id, client_id: 'client-id', client_secret: 'client-secret',
+      access_token: 'access-token', refresh_token: 'refresh-token', token_expiry: null,
+      workspace_id: workspace.id, owner_user_id: owner.id,
+    });
+    const raw = db.getDb().prepare('SELECT client_secret, access_token, refresh_token FROM google_accounts WHERE id = ?')
+      .get(id) as { client_secret: string; access_token: string; refresh_token: string };
+    expect(raw.client_secret).toMatch(/^enc:v1:/);
+    expect(raw.access_token).toMatch(/^enc:v1:/);
+    expect(raw.refresh_token).toMatch(/^enc:v1:/);
+    expect(db.getGoogleAccountById(id)?.client_secret).toBe('client-secret');
+    expect(db.getGoogleAccountById(id)?.access_token).toBe('access-token');
+    expect(db.getGoogleAccountById(id)?.refresh_token).toBe('refresh-token');
+  });
+
   it('auth status is scoped to the workspace, not leaked from other tenants', () => {
     const connected = users.createUser({ email: `conn-${randomUUID()}@x.com`, password: 'password123' });
     const bare = users.createUser({ email: `bare-${randomUUID()}@x.com`, password: 'password123' });
@@ -129,7 +151,7 @@ describe('workspace tenant isolation', () => {
     expect(googleAuth.getAuthStatus(wsBare.id).authenticated).toBe(false);
   });
 
-  it('clearAuthForWorkspace only clears the calling owner’s Google accounts', () => {
+  it('clearAuthForWorkspace only removes the calling workspace’s delegations', () => {
     const eve = users.createUser({ email: `eve-${randomUUID()}@x.com`, password: 'password123' });
     const frank = users.createUser({ email: `frank-${randomUUID()}@x.com`, password: 'password123' });
     const wsE = ws.bootstrapUserWorkspace(eve, false);
@@ -142,6 +164,7 @@ describe('workspace tenant isolation', () => {
     googleAuth.clearAuthForWorkspace(wsE.id);
     expect(db.getGoogleAccountsForWorkspace(wsE.id)).toHaveLength(0);
     expect(db.getGoogleAccountsForWorkspace(wsF.id)).toHaveLength(1); // Frank untouched
+    expect(db.getGoogleAccountsForOwner(eve.id)).toHaveLength(2); // credentials remain reusable
   });
 
   it('run locks + run history are per-workspace (concurrent tenant runs)', () => {
@@ -230,5 +253,50 @@ describe('workspace tenant isolation', () => {
 
     ws.removeWorkspaceMember(shared.id, guest.id);
     expect(ws.canAccessSite(guest, site)).toBe(false);
+  });
+
+  it('ordinary editors can operate workspace features unless explicitly restricted', () => {
+    const owner = users.createUser({ email: `cap-owner-${randomUUID()}@x.com`, password: 'password123' });
+    const editor = users.createUser({ email: `cap-editor-${randomUUID()}@x.com`, password: 'password123' });
+    const workspace = ws.bootstrapUserWorkspace(owner, false);
+    ws.addWorkspaceMember(workspace.id, editor.id, 'editor');
+    expect(ws.hasCapability(editor, workspace.id, 'manage_sites')).toBe(true);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_integrations')).toBe(true);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_notifications')).toBe(true);
+
+    ws.updateWorkspaceMember(workspace.id, editor.id, { permissions: { manage_integrations: false } });
+    expect(ws.hasCapability(editor, workspace.id, 'manage_integrations')).toBe(false);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_sites')).toBe(true);
+  });
+
+  it('a member can contribute their own Google account to a shared workspace', () => {
+    const owner = users.createUser({ email: `ga-owner-${randomUUID()}@x.com`, password: 'password123' });
+    const member = users.createUser({ email: `ga-member-${randomUUID()}@x.com`, password: 'password123' });
+    const outsider = users.createUser({ email: `ga-out-${randomUUID()}@x.com`, password: 'password123' });
+    const shared = ws.bootstrapUserWorkspace(owner, false);
+    const outside = ws.bootstrapUserWorkspace(outsider, false);
+    ws.addWorkspaceMember(shared.id, member.id, 'editor');
+
+    const accountId = mkAcct(shared.id, member.id);
+    expect(db.getGoogleAccountsForWorkspace(shared.id).map(a => a.id)).toContain(accountId);
+    expect(db.getGoogleAccountsForOwner(member.id).map(a => a.id)).toContain(accountId);
+    expect(db.getGoogleAccountsForWorkspace(outside.id).map(a => a.id)).not.toContain(accountId);
+  });
+
+  it('clears URL failures only for sites in the selected workspace', () => {
+    const a = users.createUser({ email: `fail-a-${randomUUID()}@x.com`, password: 'password123' });
+    const b = users.createUser({ email: `fail-b-${randomUUID()}@x.com`, password: 'password123' });
+    const wsA = ws.bootstrapUserWorkspace(a, false);
+    const wsB = ws.bootstrapUserWorkspace(b, false);
+    const siteA = `fail-a-${randomUUID().slice(0, 8)}`;
+    const siteB = `fail-b-${randomUUID().slice(0, 8)}`;
+    makeSite(siteA, wsA.id); makeSite(siteB, wsB.id);
+    db.recordUrlFailure('https://a.example/fail', siteA, 'indexnow');
+    db.recordUrlFailure('https://b.example/fail', siteB, 'indexnow');
+
+    expect(db.clearUrlFailuresForSites([siteA])).toBe(1);
+    const remaining = db.getAllUrlFailures();
+    expect(remaining.some(f => f.site_id === siteA)).toBe(false);
+    expect(remaining.some(f => f.site_id === siteB)).toBe(true);
   });
 });
