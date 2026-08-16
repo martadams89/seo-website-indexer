@@ -303,6 +303,9 @@ describe('workspace tenant isolation', () => {
     expect(ws.hasCapability(editor, workspace.id, 'manage_sites')).toBe(true);
     expect(ws.hasCapability(editor, workspace.id, 'manage_integrations')).toBe(true);
     expect(ws.hasCapability(editor, workspace.id, 'manage_notifications')).toBe(true);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_content')).toBe(true);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_reports')).toBe(true);
+    expect(ws.hasCapability(editor, workspace.id, 'manage_governance')).toBe(true);
 
     ws.updateWorkspaceMember(workspace.id, editor.id, { permissions: { manage_integrations: false } });
     expect(ws.hasCapability(editor, workspace.id, 'manage_integrations')).toBe(false);

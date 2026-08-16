@@ -224,6 +224,50 @@ export interface GSCSite {
   googleAccountId?: string;
 }
 
+export type IntegrationProvider = 'ga4' | 'pagespeed' | 'cloudflare' | 'plausible' | 'matomo' | 'wordpress' | 'shopify' | 'webflow' | 'log_ingest' | 'rank_feed';
+export interface PlatformIntegration {
+  id: string; workspace_id: string; site_id: string | null; provider: IntegrationProvider; name: string;
+  config: Record<string, unknown>; configured_secrets: string[]; enabled: boolean;
+  status: 'pending' | 'connected' | 'error' | 'disabled'; cadence_minutes: number;
+  next_sync_at: string | null; last_sync_at: string | null; last_error: string | null; created_at: string;
+}
+export interface MetricObservation {
+  id: number; workspace_id: string; site_id: string | null; source: string; metric: string;
+  dimension: string; value: number; unit: string | null; observed_at: string;
+  provenance: Record<string, unknown>; created_at: string;
+}
+export interface WorkItem {
+  id: string; workspace_id: string; site_id: string | null; source: string; source_ref: string | null;
+  title: string; description: string | null; evidence: Record<string, unknown>; severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'in_progress' | 'done' | 'dismissed'; assignee_user_id: string | null;
+  assignee_name?: string | null; assignee_email?: string | null; due_at: string | null; snoozed_until: string | null;
+  deep_link: string | null; created_at: string; updated_at: string; resolved_at: string | null;
+}
+export interface ReportTemplate {
+  id: string; workspace_id: string; name: string; sections: string[];
+  branding: { title?: string; logo_url?: string; accent?: string; footer?: string };
+  recipients: string[]; cadence: 'manual' | 'daily' | 'weekly' | 'monthly'; next_run_at: string | null;
+  enabled: boolean; created_at: string; updated_at: string;
+}
+export interface ReportRun { id: string; template_id: string | null; status: string; period_start: string; period_end: string; error: string | null; created_at: string; finished_at: string | null }
+export interface UsageRow { id: string; provider: string; operation: string; user_id: string | null; quantity: number; unit: string; estimated_cost: number; metadata: Record<string, unknown>; occurred_at: string }
+export interface BudgetStatus { id: string; user_id: string | null; provider: string | null; period: string; limit_value: number; limit_unit: string; warning_pct: number; hard_limit: number; used: number; percentage: number; exceeded: boolean; warning: boolean }
+export interface ContentAction {
+  id: string; site_id: string | null; integration_id: string | null; kind: string; title: string; rationale: string | null;
+  evidence: Record<string, unknown>; payload: Record<string, unknown>; rollback_payload: Record<string, unknown>; remote_id: string | null; preview_url: string | null;
+  status: 'proposed' | 'approved' | 'staged' | 'published' | 'verified' | 'failed' | 'rolled_back'; last_error: string | null;
+  created_at: string; updated_at: string; published_at: string | null; verified_at: string | null;
+}
+export interface LocalEntity { id: string; site_id: string | null; name: string; market: string; locale: string; entity_type: string; primary_url: string | null; address: string | null; phone: string | null; identifiers: Record<string,string>; listings: Array<{provider:string;url?:string;status?:string;rating?:number;review_count?:number}>; knowledge: Record<string,unknown>; review_rating: number | null; review_count: number | null; consistency_score: number; created_at: string; updated_at: string }
+export interface PlatformOverview {
+  generated_at: string; integrations: Array<{ provider: string; status: string; count: number; last_sync_at: string | null }>;
+  work_items: Array<{ status: string; severity: string; count: number }>;
+  freshness: Array<{ source: string; observed_at: string; observations: number }>;
+  content_actions: Array<{ status: string; count: number }>;
+  budgets: BudgetStatus[]; usage: { total_cost: number; rows: Array<Record<string, unknown>> };
+  forecasts: Array<{ source: string; metric: string; history_days: number; horizon_days: number; current: number; forecast: number; lower: number; upper: number; daily_slope: number; method: string; generated_at: string }>;
+}
+
 // ── API Functions ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -371,6 +415,58 @@ export const api = {
   ackAlert: (id: number) => apiFetch<{ ok: boolean }>(`/api/analytics/alerts/${id}/ack`, { method: 'POST' }),
   getMovers: () => apiFetch<SiteMover[]>('/api/analytics/movers'),
 
+  // ── Organic operations platform ──
+  getPlatformOverview: () => apiFetch<PlatformOverview>('/api/platform/overview'),
+  getIntegrations: () => apiFetch<PlatformIntegration[]>('/api/platform/integrations'),
+  createIntegration: (data: { provider: IntegrationProvider; site_id?: string | null; name?: string; config?: Record<string, unknown>; cadence_minutes?: number }) =>
+    apiFetch<PlatformIntegration>('/api/platform/integrations', { method: 'POST', body: JSON.stringify(data) }),
+  updateIntegration: (id: string, data: { site_id?: string | null; name?: string; config?: Record<string, unknown>; enabled?: boolean; cadence_minutes?: number }) =>
+    apiFetch<PlatformIntegration>(`/api/platform/integrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteIntegration: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/integrations/${id}`, { method: 'DELETE' }),
+  syncIntegration: (id: string) => apiFetch<{ ok: boolean; observations: number; message: string }>(`/api/platform/integrations/${id}/sync`, { method: 'POST' }),
+  getMetrics: (filters: { source?: string; metric?: string; site_id?: string; from?: string; to?: string; limit?: number } = {}) =>
+    apiFetch<MetricObservation[]>(`/api/platform/metrics?${new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)]))}`),
+  getWorkItems: (filters: { status?: string; assignee?: string; include_snoozed?: boolean; limit?: number } = {}) =>
+    apiFetch<WorkItem[]>(`/api/platform/work-items?${new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)]))}`),
+  createWorkItem: (data: Partial<WorkItem> & { title: string }) => apiFetch<WorkItem>('/api/platform/work-items', { method: 'POST', body: JSON.stringify(data) }),
+  updateWorkItem: (id: string, data: { status?: string; assignee_user_id?: string | null; due_at?: string | null; snoozed_until?: string | null; severity?: string }) =>
+    apiFetch<WorkItem>(`/api/platform/work-items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bulkWorkItems: (ids: string[], changes: Record<string, unknown>, preview = false) =>
+    apiFetch<{ preview?: boolean; affected?: number; items?: WorkItem[]; updated?: WorkItem[] }>('/api/platform/work-items/bulk', { method: 'POST', body: JSON.stringify({ ids, changes, preview }) }),
+  getTimeline: () => apiFetch<Array<{ id: string; site_id: string | null; kind: string; title: string; note: string | null; event_at: string; metadata: Record<string, unknown> }>>('/api/platform/timeline'),
+  addAnnotation: (data: { site_id?: string; kind?: string; title: string; note?: string; event_at?: string; metadata?: Record<string, unknown> }) =>
+    apiFetch<{ id: string }>('/api/platform/annotations', { method: 'POST', body: JSON.stringify(data) }),
+  getSavedViews: () => apiFetch<Array<{ id: string; name: string; config: Record<string, unknown>; is_default: number }>>('/api/platform/views'),
+  saveView: (data: { id?: string; name: string; config: Record<string, unknown>; is_default?: boolean }) => apiFetch<{ id: string }>('/api/platform/views', { method: 'POST', body: JSON.stringify(data) }),
+  deleteView: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/views/${id}`, { method: 'DELETE' }),
+  getReportTemplates: () => apiFetch<ReportTemplate[]>('/api/platform/reports/templates'),
+  createReportTemplate: (data: { name: string; sections?: string[]; branding?: ReportTemplate['branding']; recipients?: string[]; cadence?: string }) => apiFetch<ReportTemplate>('/api/platform/reports/templates', { method: 'POST', body: JSON.stringify(data) }),
+  updateReportTemplate: (id: string, data: Partial<ReportTemplate>) => apiFetch<ReportTemplate>(`/api/platform/reports/templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteReportTemplate: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/reports/templates/${id}`, { method: 'DELETE' }),
+  getReportRuns: () => apiFetch<ReportRun[]>('/api/platform/reports/runs'),
+  generateReport: (data: { template_id?: string; period_start?: string; period_end?: string; email?: boolean }) => apiFetch<{ id: string; snapshot: Record<string, unknown>; emailed: number }>('/api/platform/reports/generate', { method: 'POST', body: JSON.stringify(data) }),
+  sendDigest: () => apiFetch<{ sent: boolean }>('/api/platform/digest/send', { method: 'POST' }),
+  getUsage: () => apiFetch<{ summary: { total_cost: number; rows: Array<Record<string, unknown>> }; ledger: UsageRow[]; budgets: BudgetStatus[] }>('/api/platform/usage'),
+  getBudgets: () => apiFetch<{ policies: Array<Record<string, unknown>>; status: BudgetStatus[] }>('/api/platform/budgets'),
+  saveBudget: (data: { id?: string; user_id?: string; provider?: string; period?: string; limit_value: number; limit_unit?: string; warning_pct?: number; hard_limit?: boolean }) => apiFetch<{ id: string }>('/api/platform/budgets', { method: 'POST', body: JSON.stringify(data) }),
+  deleteBudget: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/budgets/${id}`, { method: 'DELETE' }),
+  getWebhooks: () => apiFetch<Array<{ id: string; name: string; url: string; events: string[]; enabled: boolean; failure_count: number; last_error: string | null }>>('/api/platform/webhooks'),
+  createWebhook: (data: { name: string; url: string; events: string[] }) => apiFetch<{ id: string; signingSecret: string }>('/api/platform/webhooks', { method: 'POST', body: JSON.stringify(data) }),
+  deleteWebhook: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/webhooks/${id}`, { method: 'DELETE' }),
+  getServiceTokens: () => apiFetch<Array<{ id: string; name: string; scopes: string[]; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }>>('/api/platform/tokens'),
+  createServiceToken: (data: { name: string; scopes: string[]; expires_at?: string }) => apiFetch<{ id: string; token: string }>('/api/platform/tokens', { method: 'POST', body: JSON.stringify(data) }),
+  revokeServiceToken: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/tokens/${id}`, { method: 'DELETE' }),
+  getContentActions: () => apiFetch<ContentAction[]>('/api/platform/content/actions'),
+  createContentAction: (data: { site_id?: string; integration_id?: string; kind: string; title: string; rationale?: string; evidence?: Record<string, unknown>; payload: Record<string, unknown> }) => apiFetch<ContentAction>('/api/platform/content/actions', { method: 'POST', body: JSON.stringify(data) }),
+  advanceContentAction: (id: string, step: 'approve' | 'stage' | 'publish' | 'verify' | 'rollback') => apiFetch<ContentAction>(`/api/platform/content/actions/${id}/${step}`, { method: 'POST' }),
+  auditContent: (site_id?: string) => apiFetch<{ sites: number; pages: number; issues: number }>('/api/platform/content/audit', { method: 'POST', body: JSON.stringify({ site_id, force: true }) }),
+  getLocalEntities: () => apiFetch<LocalEntity[]>('/api/platform/entities'),
+  saveLocalEntity: (data: Partial<LocalEntity> & {name:string;market:string}) => apiFetch<LocalEntity>('/api/platform/entities', { method: 'POST', body: JSON.stringify(data) }),
+  deleteLocalEntity: (id:string) => apiFetch<{ok:boolean}>(`/api/platform/entities/${id}`, { method: 'DELETE' }),
+  runPlatformAutomation: () => apiFetch<Record<string, number>>('/api/platform/automation/run', { method: 'POST' }),
+  getGovernance: () => apiFetch<Record<string, string>>('/api/platform/governance'),
+  saveGovernance: (data: Record<string, unknown>) => apiFetch<{ ok: boolean }>('/api/platform/governance', { method: 'PUT', body: JSON.stringify(data) }),
+
   // ── llms.txt lifecycle ──
   getLlmsAudit: (siteId: string) => apiFetch<LlmsAudit>(`/api/sites/${siteId}/llms-audit`),
   generateLlms: (siteId: string) =>
@@ -391,7 +487,7 @@ export const api = {
   submitCombined: (siteId: string, engines: Array<'google' | 'bing'>) =>
     apiFetch<{ google?: { runId?: string; error?: string }; bing?: { submitted?: number; error?: string } }>(
       `/api/submit/${siteId}`, { method: 'POST', body: JSON.stringify({ engines }) }),
-  getPerfDimension: (siteId: string, days: number, dimension: 'country' | 'device') =>
+  getPerfDimension: (siteId: string, days: number, dimension: 'country' | 'device' | 'searchAppearance') =>
     apiFetch<{ available: boolean; reason?: string; rows: Array<{ key: string; clicks: number; impressions: number; ctr: number; position: number }> }>(
       `/api/performance/${siteId}/dimension?days=${days}&dimension=${dimension}`),
   getPerfDeltas: (siteId: string, engine: 'google' | 'bing') =>
@@ -421,8 +517,9 @@ export const api = {
   // ── AI citations ──
   getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
   getAiPrompts: () => apiFetch<AiPrompt[]>('/api/ai/prompts'),
-  addAiPrompt: (prompt: string, site_id?: string | null, category: AiPromptCategory = 'discovery') =>
-    apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id, category }) }),
+  addAiPrompt: (prompt: string, site_id?: string | null, category: AiPromptCategory = 'discovery', schedule: Partial<Pick<AiPrompt, 'group_name' | 'locale' | 'device' | 'persona' | 'cadence'>> = {}) =>
+    apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id, category, ...schedule }) }),
+  updateAiPrompt: (id: number, data: Partial<AiPrompt>) => apiFetch<AiPrompt>(`/api/ai/prompts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteAiPrompt: (id: number) => apiFetch<{ ok: boolean }>(`/api/ai/prompts/${id}`, { method: 'DELETE' }),
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
   getAiInsights: () => apiFetch<AiInsights>('/api/ai/insights'),
@@ -496,6 +593,7 @@ export const api = {
 
   // ── Bing accounts (multiple per workspace) ──
   getBingAccounts: () => apiFetch<BingAccount[]>('/api/bing/accounts'),
+  startBingOAuth: (name?: string) => apiFetch<{ authorizationUrl: string }>('/api/auth/bing/start', { method: 'POST', body: JSON.stringify({ name }) }),
   addBingAccount: (name: string, apiKey: string) =>
     apiFetch<BingAccount>('/api/bing/accounts', { method: 'POST', body: JSON.stringify({ name, apiKey }) }),
   removeBingAccount: (id: string) =>
@@ -532,11 +630,14 @@ export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
   ai_citations: boolean; disabled: boolean; permissions: Record<WorkspaceCapability, boolean>;
 }
-export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications';
+export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications' | 'manage_content' | 'manage_reports' | 'manage_governance';
 export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: string }> = [
   { id: 'manage_sites', label: 'Manage sites' },
   { id: 'manage_integrations', label: 'Manage integrations & API keys' },
   { id: 'manage_notifications', label: 'Manage notifications' },
+  { id: 'manage_content', label: 'Manage work & content' },
+  { id: 'manage_reports', label: 'Manage reports' },
+  { id: 'manage_governance', label: 'Manage governance & budgets' },
 ];
 export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;
@@ -564,7 +665,7 @@ export interface AdminUserDetail {
   google_accounts: Array<{ id: string; email: string | null; needs_reauth: boolean; workspace_ids: string[]; created_at?: string }>;
   audit: AuditEvent[];
 }
-export interface BingAccount { id: string; name: string; created_at: string }
+export interface BingAccount { id: string; name: string; auth_type: 'api_key' | 'oauth'; expires_at: string | null; created_at: string }
 
 export type NotifyChannel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
 export interface NotifyChannelResult { channel: NotifyChannel; configured: boolean; ok: boolean; error?: string }
@@ -678,7 +779,12 @@ export interface EnginePerformance {
 }
 export interface PerformanceResponse { days: number; google: EnginePerformance; bing: EnginePerformance }
 export type AiPromptCategory = 'discovery' | 'comparison' | 'commercial' | 'brand' | 'support';
-export interface AiPrompt { id: number; site_id: string | null; prompt: string; category: AiPromptCategory; enabled: number; created_at: string }
+export interface AiPrompt {
+  id: number; site_id: string | null; prompt: string; category: AiPromptCategory;
+  group_name: string; locale: string; device: string; persona: string | null;
+  cadence: 'manual' | 'daily' | 'weekly' | 'monthly'; next_run_at: string | null; last_run_at: string | null;
+  enabled: number; created_at: string;
+}
 export interface AiResult {
   id: number; prompt_id: number; prompt?: string; site_id?: string | null;
   provider: string; model: string | null; cited: number; domains: string; excerpt: string | null;
@@ -700,6 +806,7 @@ export interface AiInsights {
   }>;
   movements: Array<{
     promptId: number; prompt: string; provider: string; cited: boolean; previousCited: boolean; createdAt: string;
+    addedSources: string[]; removedSources: string[]; answerChanged: boolean;
   }>;
 }
 export interface ProviderModels {

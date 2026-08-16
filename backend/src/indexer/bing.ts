@@ -21,6 +21,8 @@
  */
 
 const BING_BASE = 'https://ssl.bing.com/webmaster/api.svc/json';
+export interface BingCredential { type: 'api_key' | 'oauth'; value: string }
+const credential = (value: string | BingCredential): BingCredential => typeof value === 'string' ? { type: 'api_key', value } : value;
 
 // SubmitUrlBatch accepts up to 500 URLs per call.
 export const BING_MAX_BATCH = 500;
@@ -57,10 +59,10 @@ export function deriveBingSiteUrl(gscUrl: string | null | undefined, domain: str
 }
 
 /** Fetches the remaining URL-submission quota for a Bing-verified site. */
-export async function getBingQuota(apiKey: string, siteUrl: string): Promise<BingQuota | null> {
-  const url = `${BING_BASE}/GetUrlSubmissionQuota?apikey=${encodeURIComponent(apiKey)}&siteUrl=${encodeURIComponent(siteUrl)}`;
+export async function getBingQuota(auth: string | BingCredential, siteUrl: string): Promise<BingQuota | null> {
+  const cred = credential(auth); const url = `${BING_BASE}/GetUrlSubmissionQuota?${cred.type === 'api_key' ? `apikey=${encodeURIComponent(cred.value)}&` : ''}siteUrl=${encodeURIComponent(siteUrl)}`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const res = await fetch(url, { headers: cred.type === 'oauth' ? { Authorization: `Bearer ${cred.value}` } : undefined, signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const body = await res.json() as { d?: { DailyQuota?: number; MonthlyQuota?: number } };
     if (!body?.d) return null;
@@ -74,18 +76,18 @@ export async function getBingQuota(apiKey: string, siteUrl: string): Promise<Bin
  * Submits a batch of URLs (≤ BING_MAX_BATCH) to Bing for a verified site.
  * Bing returns HTTP 200 with `{ "d": null }` on success.
  */
-export async function submitUrlBatchToBing(apiKey: string, siteUrl: string, urls: string[]): Promise<BingSubmitResult> {
+export async function submitUrlBatchToBing(auth: string | BingCredential, siteUrl: string, urls: string[]): Promise<BingSubmitResult> {
   if (urls.length === 0) {
     return { siteUrl, urlCount: 0, success: true, statusCode: 200, message: 'No URLs to submit.' };
   }
   const batch = urls.slice(0, BING_MAX_BATCH);
-  const endpoint = `${BING_BASE}/SubmitUrlBatch?apikey=${encodeURIComponent(apiKey)}`;
+  const cred = credential(auth); const endpoint = `${BING_BASE}/SubmitUrlBatch${cred.type === 'api_key' ? `?apikey=${encodeURIComponent(cred.value)}` : ''}`;
 
   let res: Response;
   try {
     res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8', ...(cred.type === 'oauth' ? { Authorization: `Bearer ${cred.value}` } : {}) },
       body: JSON.stringify({ siteUrl, urlList: batch }),
       signal: AbortSignal.timeout(30_000),
     });
@@ -113,11 +115,11 @@ export async function submitUrlBatchToBing(apiKey: string, siteUrl: string, urls
 }
 
 /** Submits URLs to Bing in batches of BING_MAX_BATCH, stopping on quota errors. */
-export async function submitToBingInBatches(apiKey: string, siteUrl: string, urls: string[]): Promise<BingSubmitResult[]> {
+export async function submitToBingInBatches(auth: string | BingCredential, siteUrl: string, urls: string[]): Promise<BingSubmitResult[]> {
   const results: BingSubmitResult[] = [];
   for (let i = 0; i < urls.length; i += BING_MAX_BATCH) {
     const batch = urls.slice(i, i + BING_MAX_BATCH);
-    const result = await submitUrlBatchToBing(apiKey, siteUrl, batch);
+    const result = await submitUrlBatchToBing(auth, siteUrl, batch);
     results.push(result);
     if (!result.success && result.quotaExceeded) break;
     if (i + BING_MAX_BATCH < urls.length) await new Promise(r => setTimeout(r, 500));

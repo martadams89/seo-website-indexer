@@ -41,6 +41,13 @@ Search engines only recrawl what they can discover, and AI answer engines only c
 - **SQLite persistence** — URL state, submission history, and credentials survive container restarts
 - **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
 - **Organic-search command centre** — a responsive daily operating view that joins workspace health, index coverage, organic momentum, AI visibility, connection health and a prioritized action centre; includes a global keyboard quick-switcher and full dark/light themes
+- **Unified evidence plane** — normalizes GA4, PageSpeed, Cloudflare, Plausible, Matomo, Search Console, server-log and rank-feed observations with provenance, freshness, saved views, exports and explainable forecast ranges
+- **Accountable action inbox** — turns regressions and opportunities into assignable, severity-ranked work with owners, due dates, snooze, deep-linked evidence, bulk previews and a causal deployment/annotation timeline
+- **Governed content delivery** — WordPress, Shopify and Webflow workflows require propose → approve → draft/stage → explicit publish → live verify, retain before-state evidence and support audited rollback
+- **Reports and client portal** — scheduled branded report templates, email delivery, severity-routed daily/weekly digests and a white-labelled read-only executive portal
+- **Markets and entities** — local-market entity facts, listing consistency, ratings/reviews and regional knowledge tracking alongside site and AI visibility evidence
+- **Metering and governance** — append-only per-user/workspace usage, estimated provider cost, soft/hard budgets, billback CSV, workspace MFA and retention policies, signed webhooks and hashed scoped automation tokens
+- **Stable automation API** — service-token endpoints for workspace evidence, metrics, custom events and server-log ingestion without sharing a human session
 - **Analytics engine** — daily per-site rollups with a portfolio dashboard: coverage funnel (sitemap → submitted → indexed), 60-day trends, GSC indexing-state breakdown, and day-over-day regression **alerts** (index drops, structured-data loss)
 - **Freshness radar** — every page whose sitemap `lastmod` moved *after* Google's last crawl, surfaced as a resubmission worklist
 - **AI visibility intelligence (GEO)** — run categorized, site-linked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search**; track portfolio/provider visibility, gains and losses, source-domain leaders, a competitor watchlist, prompt opportunities, full answer excerpts and follow-up conversations
@@ -109,7 +116,7 @@ Every member of a workspace (besides its owner) has a **role**, which sets their
 | --- | --- |
 | **Owner** (implicit) | Everything, including deleting the workspace. One per workspace — whoever created it. |
 | **Admin** | Everything operational in that workspace plus members, invitations and workspace-local access disable. Global identity recovery (password/2FA) stays super-admin-only; ownership and deletion remain owner/super-admin actions. |
-| **Editor** | Operates workspace features by default: sites, submissions, Google/Bing accounts, API keys and notifications. Each capability can be individually revoked for a constrained editor. Membership/security administration remains admin-only. |
+| **Editor** | Operates workspace features by default: sites/submissions, connected accounts, integrations, notifications, content actions, reports and governance. Each capability can be individually revoked for a constrained editor. Membership/security administration remains admin-only. |
 | **Viewer** | Strictly read-only. Every mutating action is blocked at the API, not just hidden in the UI. |
 
 A **super-admin** always has full access to every workspace, and can additionally:
@@ -137,6 +144,27 @@ Settings are **layered** so one install can serve many clients with full flexibi
 - Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; workspace owners/admins and editors with the relevant capability manage that workspace's integrations and notifications.
 
 See the [organic-search command-centre product strategy](docs/PRODUCT_STRATEGY.md) for the prioritized data, integration, workflow and UX roadmap. Planning to sell managed or self-hosted access? The [commercialisation roadmap](docs/COMMERCIALIZATION.md) covers the recommended entitlement, metering, billback and optional Stripe sequence.
+
+### Automation API and service tokens
+
+Create a write-once service token under **Governance & Usage → API &
+Webhooks**. Tokens are stored as hashes, belong to exactly one workspace, can
+be revoked or expired, and must carry the specific scope used by an endpoint:
+
+| Endpoint | Scope | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/workspace` | `workspace:read` | Workspace health, actions, forecasts and connector freshness |
+| `GET /api/v1/metrics` | `metrics:read` | Normalized observations with optional source/metric/date filters |
+| `POST /api/v1/events` | `events:write` | Add a custom numeric observation with provenance |
+| `POST /api/v1/logs/ingest` | `logs:write` | Ingest up to 1,000 origin/CDN request events per call |
+
+Send the token as `Authorization: Bearer oc_…`. Event and log ingestion is
+metered in the append-only usage ledger and respects configured hard budgets.
+Site IDs in incoming data are checked against the token's workspace.
+
+Outbound webhooks use `X-Organic-Event` plus an
+`X-Organic-Signature: sha256=<HMAC>` header so receivers can authenticate the
+exact request body.
 
 ### Sign-in methods
 

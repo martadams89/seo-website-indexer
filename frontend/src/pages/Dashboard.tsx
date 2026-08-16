@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Link, useLocation } from 'react-router-dom';
-import { api, type CommandCenter, type UrlFailureCheck, type UrlFailureRecord } from '../api';
+import { api, type CommandCenter, type PlatformOverview, type UrlFailureCheck, type UrlFailureRecord, type WorkItem } from '../api';
 import { useApp, useToast } from '../AppContext';
 import { useAuth } from '../auth/AuthGate';
 import { QuotaWidget } from '../components/QuotaWidget';
@@ -53,6 +53,7 @@ function VisibilitySparkline({ points }: { points: Array<{ visibility: number }>
 }
 
 export default function Dashboard() {
+  const [renderedAt] = useState(() => Date.now());
   const { status, sites, runs, logs, refresh } = useApp();
   const { user } = useAuth();
   const { active } = useWorkspace();
@@ -60,6 +61,9 @@ export default function Dashboard() {
   const canOperate = !!active?.permissions?.manage_sites;
   const toast = useToast();
   const [center, setCenter] = useState<CommandCenter | null>(null);
+  const [platform, setPlatform] = useState<PlatformOverview | null>(null);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [activation, setActivation] = useState({ prompts: 0, reports: 0 });
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
@@ -69,8 +73,9 @@ export default function Dashboard() {
   const [failureBusy, setFailureBusy] = useState<string | null>(null);
 
   const loadCenter = useCallback(async () => {
-    const [nextCenter, nextFailures] = await Promise.all([api.getCommandCenter(), api.getUrlFailures()]);
-    setCenter(nextCenter); setFailures(nextFailures);
+    const [nextCenter, nextFailures, nextPlatform, nextWork, prompts, reports] = await Promise.all([api.getCommandCenter(), api.getUrlFailures(), api.getPlatformOverview(), api.getWorkItems({ limit: 20 }), api.getAiPrompts(), api.getReportTemplates()]);
+    setCenter(nextCenter); setFailures(nextFailures); setPlatform(nextPlatform); setWorkItems(nextWork);
+    setActivation({ prompts: prompts.length, reports: reports.length });
   }, []);
 
   useEffect(() => { loadCenter().catch(() => null); }, [loadCenter, active?.id]);
@@ -132,6 +137,15 @@ export default function Dashboard() {
   const metrics = center?.metrics;
   const integrations = center?.integrations;
   const priorityAction = center?.actions[0];
+  const activeWork = workItems.filter(item => !['done', 'dismissed'].includes(item.status));
+  const freshSources = platform?.freshness.filter(row => renderedAt - new Date(row.observed_at).getTime() < 2 * 86_400_000).length ?? 0;
+  const activationSteps = [
+    { done: !!status?.auth.authenticated, label: 'Connect a Google account', to: '/settings?tab=accounts' },
+    { done: sites.length > 0, label: 'Add your first site', to: '/sites' },
+    { done: !!platform?.integrations.length, label: 'Connect outcome or delivery evidence', to: '/integrations' },
+    { done: activation.prompts > 0, label: 'Define your buyer-question set', to: '/citations' },
+    { done: activation.reports > 0, label: 'Create a client-ready report', to: '/reports' },
+  ];
 
   return (
     <div className="command-center">
@@ -167,20 +181,22 @@ export default function Dashboard() {
       {runError && <div className="alert alert-error mb-4"><div className="alert-content">{runError}</div></div>}
       {!status?.auth.authenticated && <div className="alert alert-warn mb-4"><div className="alert-content"><strong>Connect Google to start operating.</strong> Add a workspace or personal account in <Link to="/settings?tab=accounts">Settings</Link>.</div></div>}
 
+      {activationSteps.some(step => !step.done) && <details className="onboarding-checklist" open={activationSteps.filter(step=>step.done).length<3}><summary><span><Sparkles size={14}/><strong>First useful loop</strong><small>{activationSteps.filter(step=>step.done).length}/{activationSteps.length} ready</small></span><div><i style={{width:`${activationSteps.filter(step=>step.done).length/activationSteps.length*100}%`}}/></div></summary><div>{activationSteps.map((step,index)=><Link key={step.label} to={step.to} className={step.done?'done':''}><span>{step.done?<CheckCircle2/>:index+1}</span><strong>{step.label}</strong><ArrowRight/></Link>)}</div></details>}
+
       <section className="command-metrics" aria-label="Workspace metrics">
         <Link to="/analytics" className="command-metric"><span className="metric-icon cyan"><Globe2 size={17} /></span><div><small>Index coverage</small><strong>{metrics?.indexedRate ?? '—'}{metrics?.indexedRate != null ? '%' : ''}</strong><span>{(metrics?.indexed ?? 0).toLocaleString()} of {(metrics?.urls ?? 0).toLocaleString()} URLs</span></div></Link>
         <Link to="/analytics" className="command-metric"><span className="metric-icon green"><MousePointerClick size={17} /></span><div><small>Organic clicks · 7d</small><strong>{(metrics?.clicks7d ?? 0).toLocaleString()}</strong><Delta value={metrics?.clicksChange ?? null} /></div></Link>
         <Link to="/citations" className="command-metric"><span className="metric-icon violet"><Bot size={17} /></span><div><small>AI visibility</small><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><Delta value={metrics?.aiChange ?? null} /></div></Link>
-        <Link to="/analytics" className="command-metric"><span className={`metric-icon ${(metrics?.openAlerts ?? 0) ? 'amber' : 'green'}`}><ShieldCheck size={17} /></span><div><small>Open signals</small><strong>{metrics?.openAlerts ?? 0}</strong><span>{metrics?.failures ? `${metrics.failures} submission failures` : 'No active failures'}</span></div></Link>
+        <Link to="/actions" className="command-metric"><span className={`metric-icon ${activeWork.length ? 'amber' : 'green'}`}><ShieldCheck size={17} /></span><div><small>Owned actions</small><strong>{activeWork.length}</strong><span>{activeWork.filter(item => item.severity === 'critical').length ? `${activeWork.filter(item => item.severity === 'critical').length} critical now` : 'No critical actions'}</span></div></Link>
       </section>
 
       <section className="command-grid command-main-grid">
         <div className="command-panel action-panel">
-          <div className="command-panel-head"><div><span className="eyebrow">Prioritized work</span><h2>Action centre</h2></div><span className="signal-count">{center?.actions.length ?? 0} signals</span></div>
-          {center?.actions.length ? (
+          <div className="command-panel-head"><div><span className="eyebrow">Prioritized work</span><h2>Action centre</h2></div><Link to="/actions">{activeWork.length} owned <ArrowRight size={13} /></Link></div>
+          {activeWork.length ? (
             <div className="action-stack">
-              {center.actions.map((action, index) => (
-                <Link to={action.to} key={action.id} className={`action-row priority-${action.priority}`}><span className="action-rank">{String(index + 1).padStart(2, '0')}</span><span className="action-copy"><strong>{action.title}</strong><small>{action.description}</small></span>{action.count != null && <span className="action-count">{action.count}</span>}<ArrowRight size={15} /></Link>
+              {activeWork.slice(0, 7).map((action, index) => (
+                <Link to={action.deep_link || '/actions'} key={action.id} className={`action-row priority-${action.severity}`}><span className="action-rank">{String(index + 1).padStart(2, '0')}</span><span className="action-copy"><strong>{action.title}</strong><small>{action.description || `${action.source.replaceAll('_', ' ')} evidence`}</small></span><span className="action-count">{action.status === 'in_progress' ? '→' : '!'}</span><ArrowRight size={15} /></Link>
               ))}
             </div>
           ) : <div className="command-empty"><CheckCircle2 size={26} /><strong>You’re clear to grow</strong><span>No urgent operational actions. Keep monitoring movement and expanding prompt coverage.</span></div>}
@@ -206,13 +222,14 @@ export default function Dashboard() {
         </div>
 
         <div className="command-panel">
-          <div className="command-panel-head"><div><span className="eyebrow">Data plane</span><h2>Connections</h2></div><Link to="/settings?tab=keys">Manage <ArrowRight size={13} /></Link></div>
+          <div className="command-panel-head"><div><span className="eyebrow">Data plane</span><h2>Connections</h2></div><Link to="/integrations">Manage <ArrowRight size={13} /></Link></div>
           <div className="connection-grid">
             <Link to="/settings?tab=accounts" className={integrations?.google ? 'connected' : ''}><Cloud size={17} /><span><strong>Google</strong><small>{integrations?.google ? `${integrations.google} account${integrations.google === 1 ? '' : 's'}` : 'Connect account'}</small></span><i /></Link>
             <Link to="/settings?tab=keys" className={integrations?.bing ? 'connected' : ''}><Globe2 size={17} /><span><strong>Bing</strong><small>{integrations?.bing ? `${integrations.bing} account${integrations.bing === 1 ? '' : 's'}` : 'Not connected'}</small></span><i /></Link>
             <Link to="/settings?tab=keys" className={integrations?.aiProviders ? 'connected' : ''}><Sparkles size={17} /><span><strong>Answer engines</strong><small>{integrations?.aiProviders ? `${integrations.aiProviders} live` : 'Add API keys'}</small></span><i /></Link>
             <Link to="/settings?tab=notifications" className={integrations?.notifications ? 'connected' : ''}><Bell size={17} /><span><strong>Notifications</strong><small>{integrations?.notifications ? `${integrations.notifications} channels` : 'Choose a route'}</small></span><i /></Link>
           </div>
+          {!!platform?.integrations.length && <div className="connection-tip"><PlugZap size={14} /><span>{platform.integrations.filter(item => item.status === 'connected').reduce((sum, item) => sum + item.count, 0)} operational connections · {freshSources}/{platform.freshness.length} evidence sources fresh</span></div>}
           {priorityAction?.kind === 'integration' && <div className="connection-tip"><PlugZap size={14} /><span>{priorityAction.description}</span></div>}
         </div>
       </section>

@@ -6,7 +6,7 @@
  * access-control helpers every scoped endpoint uses.
  */
 import { randomUUID, randomBytes, createHash } from 'crypto';
-import { getDb } from '../db/database.js';
+import { effectiveSetting, getDb } from '../db/database.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import type { User } from './users.js';
 
@@ -123,7 +123,10 @@ export function canUseAiCitations(user: User, workspaceId: string): boolean {
 // time, e.g. an editor who can manage sites but not touch integrations/API
 // keys. Admins always have every capability in their own workspace; viewers
 // never have any (read-only is absolute) — overrides only affect editors.
-export const CAPABILITIES = ['manage_sites', 'manage_integrations', 'manage_notifications'] as const;
+export const CAPABILITIES = [
+  'manage_sites', 'manage_integrations', 'manage_notifications',
+  'manage_content', 'manage_reports', 'manage_governance',
+] as const;
 export type Capability = typeof CAPABILITIES[number];
 export type CapabilityMap = Record<Capability, boolean>;
 
@@ -190,7 +193,7 @@ export function listWorkspaceMembers(workspaceId: string): WorkspaceMember[] {
       user_id: r.user_id, email: r.email, name: r.name, is_owner: isOwner, role,
       ai_citations: !!r.ai_citations, disabled: !!r.disabled,
       permissions: isOwner
-        ? { manage_sites: true, manage_integrations: true, manage_notifications: true }
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true }
         : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', r.permissions),
     };
   });
@@ -243,7 +246,7 @@ export function listUserWorkspaceAccess(userId: string): UserWorkspaceAccess[] {
       ai_citations: !!row.ai_citations,
       disabled: !!row.disabled,
       permissions: isOwner
-        ? { manage_sites: true, manage_integrations: true, manage_notifications: true }
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true }
         : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', row.permissions),
     };
   });
@@ -346,8 +349,9 @@ export function bootstrapUserWorkspace(user: User, isFirstUser: boolean): Worksp
 
 // ── Multiple Bing accounts (per workspace) ───────────────────────────────────
 
-export interface BingAccount { id: string; workspace_id: string | null; name: string; api_key: string; created_at: string }
-export interface PublicBingAccount { id: string; name: string; created_at: string }
+export interface BingAccount { id: string; workspace_id: string | null; name: string; api_key: string; auth_type: 'api_key' | 'oauth'; access_token: string | null; refresh_token: string | null; expires_at: string | null; created_at: string }
+export interface PublicBingAccount { id: string; name: string; auth_type: 'api_key' | 'oauth'; expires_at: string | null; created_at: string }
+export interface BingCredential { type: 'api_key' | 'oauth'; value: string }
 
 export function addBingAccount(workspaceId: string, name: string, apiKey: string): BingAccount {
   const id = randomUUID();
@@ -357,12 +361,37 @@ export function addBingAccount(workspaceId: string, name: string, apiKey: string
 }
 
 export function listBingAccounts(workspaceId: string): PublicBingAccount[] {
-  return (getDb().prepare('SELECT id, name, created_at FROM bing_accounts WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as PublicBingAccount[]);
+  return (getDb().prepare('SELECT id,name,auth_type,expires_at,created_at FROM bing_accounts WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as PublicBingAccount[]);
+}
+
+export function addBingOAuthAccount(workspaceId: string, name: string, tokens: { access_token: string; refresh_token?: string; expires_in?: number }): PublicBingAccount {
+  const id = randomUUID(); const expiresAt = new Date(Date.now() + Math.max(Number(tokens.expires_in ?? 3600) - 60, 60) * 1000).toISOString();
+  getDb().prepare(`INSERT INTO bing_accounts(id,workspace_id,name,api_key,auth_type,access_token,refresh_token,expires_at)
+    VALUES(?,?,?,?,?,?,?,?)`).run(id, workspaceId, name.trim() || 'Bing OAuth', encrypt('__oauth__'), 'oauth', encrypt(tokens.access_token), tokens.refresh_token ? encrypt(tokens.refresh_token) : null, expiresAt);
+  return getDb().prepare('SELECT id,name,auth_type,expires_at,created_at FROM bing_accounts WHERE id=?').get(id) as PublicBingAccount;
 }
 
 export function getBingAccountKey(id: string): string | null {
   const r = getDb().prepare('SELECT api_key FROM bing_accounts WHERE id = ?').get(id) as { api_key: string } | undefined;
   return r ? decrypt(r.api_key) : null;
+}
+
+async function oauthCredential(account: BingAccount): Promise<BingCredential | null> {
+  let access = account.access_token ? decrypt(account.access_token) : null;
+  if (access && account.expires_at && new Date(account.expires_at).getTime() > Date.now() + 60_000) return { type: 'oauth', value: access };
+  const refresh = account.refresh_token ? decrypt(account.refresh_token) : null;
+  const clientId = account.workspace_id ? effectiveSetting(account.workspace_id, 'bing_oauth_client_id') : null;
+  const clientSecret = account.workspace_id ? effectiveSetting(account.workspace_id, 'bing_oauth_client_secret') : null;
+  if (!refresh || !clientId || !clientSecret) return access ? { type: 'oauth', value: access } : null;
+  const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refresh, grant_type: 'refresh_token' });
+  const response = await fetch('https://www.bing.com/webmasters/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`Bing OAuth refresh failed: HTTP ${response.status}`);
+  const tokens = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+  if (!tokens.access_token) throw new Error('Bing OAuth refresh returned no access token.');
+  access = tokens.access_token; const expiresAt = new Date(Date.now() + Math.max(Number(tokens.expires_in ?? 3600) - 60, 60) * 1000).toISOString();
+  getDb().prepare('UPDATE bing_accounts SET access_token=?,refresh_token=COALESCE(?,refresh_token),expires_at=? WHERE id=?')
+    .run(encrypt(access), tokens.refresh_token ? encrypt(tokens.refresh_token) : null, expiresAt, account.id);
+  return { type: 'oauth', value: access };
 }
 
 export function bingAccountWorkspace(id: string): string | null {
@@ -392,6 +421,32 @@ export function bingKeyForSite(siteId: string): string | null {
   }
   const legacy = db.prepare("SELECT value FROM settings WHERE key = 'bing_api_key'").get() as { value: string } | undefined;
   return legacy?.value ?? null;
+}
+
+/** Resolve and refresh the delegated credential selected by a site, falling
+ * back to legacy API-key behavior for self-hosted installations. */
+export async function bingCredentialForSite(siteId: string): Promise<BingCredential | null> {
+  const db = getDb(); const site = db.prepare('SELECT workspace_id,bing_account_id FROM sites WHERE id=?').get(siteId) as { workspace_id: string | null; bing_account_id: string | null } | undefined;
+  const accountId = site?.bing_account_id ?? (site?.workspace_id ? (db.prepare('SELECT id FROM bing_accounts WHERE workspace_id=? ORDER BY created_at LIMIT 1').get(site.workspace_id) as { id: string } | undefined)?.id : undefined);
+  if (accountId) {
+    const account = db.prepare('SELECT * FROM bing_accounts WHERE id=?').get(accountId) as BingAccount | undefined;
+    if (account?.auth_type === 'oauth') return oauthCredential(account);
+    if (account) { const key = decrypt(account.api_key); if (key) return { type: 'api_key', value: key }; }
+  }
+  const legacy = bingKeyForSite(siteId); return legacy ? { type: 'api_key', value: legacy } : null;
+}
+
+export function createBingOAuthState(input: { workspaceId: string; userId: string; name: string; redirectUri: string }): string {
+  const state = randomBytes(32).toString('base64url'); const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  getDb().prepare("DELETE FROM bing_oauth_states WHERE expires_at < datetime('now')").run();
+  getDb().prepare('INSERT INTO bing_oauth_states(state,workspace_id,user_id,name,redirect_uri,expires_at) VALUES(?,?,?,?,?,?)')
+    .run(state, input.workspaceId, input.userId, input.name.trim() || 'Bing OAuth', input.redirectUri, expiresAt);
+  return state;
+}
+
+export function consumeBingOAuthState(state: string): { workspace_id: string; user_id: string; name: string; redirect_uri: string } | null {
+  const db = getDb(); const row = db.prepare("SELECT workspace_id,user_id,name,redirect_uri FROM bing_oauth_states WHERE state=? AND expires_at>datetime('now')").get(state) as { workspace_id: string; user_id: string; name: string; redirect_uri: string } | undefined;
+  db.prepare('DELETE FROM bing_oauth_states WHERE state=?').run(state); return row ?? null;
 }
 
 // ── Super-admin: all workspaces at a glance ──────────────────────────────────

@@ -13,9 +13,9 @@ const METRICS: Array<{ id: Metric; label: string }> = [
   { id: 'clicks', label: 'Clicks' }, { id: 'impressions', label: 'Impressions' },
   { id: 'ctr', label: 'CTR' }, { id: 'position', label: 'Avg position' },
 ];
-type Breakdown = 'query' | 'page' | 'country' | 'device';
+type Breakdown = 'query' | 'page' | 'country' | 'device' | 'searchAppearance';
 const BREAKDOWNS: Array<{ id: Breakdown; label: string }> = [
-  { id: 'query', label: 'Queries' }, { id: 'page', label: 'Pages' }, { id: 'country', label: 'Countries' }, { id: 'device', label: 'Devices' },
+  { id: 'query', label: 'Queries' }, { id: 'page', label: 'Pages' }, { id: 'country', label: 'Countries' }, { id: 'device', label: 'Devices' }, { id: 'searchAppearance', label: 'Appearance' },
 ];
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString();
@@ -70,9 +70,9 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
 
   useEffect(() => { load(days, engine); }, [load, days, engine]);
 
-  // Country/device breakdowns come from a separate GSC dimension call.
+  // Country/device/search-appearance breakdowns come from a separate GSC call.
   useEffect(() => {
-    if (breakdown === 'country' || breakdown === 'device') {
+    if (breakdown === 'country' || breakdown === 'device' || breakdown === 'searchAppearance') {
       setDim(null);
       api.getPerfDimension(siteId, days, breakdown).then(setDim).catch(() => setDim({ available: false, reason: 'Failed to load', rows: [] }));
     }
@@ -150,7 +150,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
           {/* Breakdowns */}
           <div className="flex items-center gap-2" style={{ margin: '16px 0 8px', flexWrap: 'wrap' }}>
             <div className="seg">{BREAKDOWNS.map(b => <button key={b.id} className={`seg-btn${breakdown === b.id ? ' active' : ''}`} onClick={() => setBreakdown(b.id)}>{b.label}</button>)}</div>
-            {(breakdown === 'country' || breakdown === 'device') && <span className="text-dim" style={{ fontSize: 11 }}>Google only — Bing exposes no public traffic-by-{breakdown} API.</span>}
+            {(breakdown === 'country' || breakdown === 'device' || breakdown === 'searchAppearance') && <span className="text-dim" style={{ fontSize: 11 }}>Google only — Bing exposes no comparable {breakdown === 'searchAppearance' ? 'search appearance' : `traffic-by-${breakdown}`} API.</span>}
           </div>
 
           {(breakdown === 'query' || breakdown === 'page') ? (
@@ -192,7 +192,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
             <div className="table-scroll" style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className="mini-table">
                 <thead><tr>
-                  <SortTh label={breakdown === 'country' ? 'Country' : 'Device'} sortKey="key" sort={dimSort.sort} onSort={dimSort.requestSort} />
+                  <SortTh label={breakdown === 'country' ? 'Country' : breakdown === 'device' ? 'Device' : 'Search appearance'} sortKey="key" sort={dimSort.sort} onSort={dimSort.requestSort} />
                   <SortTh label="Clicks" sortKey="clicks" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
                   <SortTh label="Impr." sortKey="impressions" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
                   <SortTh label="CTR" sortKey="ctr" sort={dimSort.sort} onSort={dimSort.requestSort} align="right" />
@@ -200,7 +200,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
                 </tr></thead>
                 <tbody>
                   {(dimSort.sorted as unknown as typeof dim.rows).map((r, i) => (
-                    <tr key={i}><td style={{ textTransform: breakdown === 'country' ? 'uppercase' : 'capitalize' }}>{r.key}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.clicks)}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.impressions)}</td><td style={{ textAlign: 'right' }}>{fmtPct(r.ctr)}</td><td style={{ textAlign: 'right' }}>{fmtPos(r.position)}</td></tr>
+                    <tr key={i}><td style={{ textTransform: breakdown === 'country' ? 'uppercase' : 'capitalize' }}>{r.key.replaceAll('_', ' ')}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.clicks)}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.impressions)}</td><td style={{ textAlign: 'right' }}>{fmtPct(r.ctr)}</td><td style={{ textAlign: 'right' }}>{fmtPos(r.position)}</td></tr>
                   ))}
                 </tbody>
               </table>

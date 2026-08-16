@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2, Sparkles, Target, TrendingUp, Trophy, Save, Globe2, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { Bot, Play, Plus, Trash2, CheckCircle2, XCircle, KeyRound, Send, ExternalLink, MessageSquare, Loader2, Sparkles, Target, TrendingUp, Trophy, Save, Globe2, ArrowDownRight, ArrowUpRight, CalendarClock } from 'lucide-react';
 import { api, type AiInsights, type AiPrompt, type AiPromptCategory, type AiResult } from '../api';
 import { Markdown } from '../components/Markdown';
 import { useApp } from '../AppContext';
@@ -157,6 +157,11 @@ export default function CitationsPage() {
   const [newPrompt, setNewPrompt] = useState('');
   const [newSiteId, setNewSiteId] = useState('');
   const [newCategory, setNewCategory] = useState<AiPromptCategory>('discovery');
+  const [newGroup, setNewGroup] = useState('Core buyer journey');
+  const [newLocale, setNewLocale] = useState('en-GB');
+  const [newDevice, setNewDevice] = useState('desktop');
+  const [newPersona, setNewPersona] = useState('');
+  const [newCadence, setNewCadence] = useState<AiPrompt['cadence']>('weekly');
   const [competitorDomains, setCompetitorDomains] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
   const [running, setRunning] = useState<number | 'all' | null>(null);
@@ -182,7 +187,7 @@ export default function CitationsPage() {
   async function add() {
     if (!newPrompt.trim()) return;
     try {
-      await api.addAiPrompt(newPrompt.trim(), newSiteId || null, newCategory);
+      await api.addAiPrompt(newPrompt.trim(), newSiteId || null, newCategory, { group_name: newGroup, locale: newLocale, device: newDevice, persona: newPersona || null, cadence: newCadence });
       setNewPrompt('');
       load();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Failed to add'); }
@@ -319,8 +324,13 @@ export default function CitationsPage() {
         </div>
       </section>
 
+      {insights.movements.length > 0 && <section className="command-panel answer-diff-panel">
+        <div className="command-panel-head"><div><span className="eyebrow">Answer and source diffs</span><h2>What changed since the previous check</h2></div><span className="signal-count">{insights.movements.length} changes</span></div>
+        <div className="answer-diff-list">{insights.movements.slice(0,10).map(item=><button key={`${item.promptId}:${item.provider}`} onClick={()=>setExpanded(item.promptId)}><span className={`movement-dot ${item.cited!==item.previousCited?(item.cited?'gained':'lost'):'changed'}`}/><span><strong>{item.prompt}</strong><small>{PROVIDER_LABEL[item.provider]??item.provider}{item.cited!==item.previousCited?` · citation ${item.cited?'gained':'lost'}`:item.answerChanged?' · answer changed':''}</small></span><span>{item.addedSources.length>0&&<em>+{item.addedSources.join(', ')}</em>}{item.removedSources.length>0&&<em className="removed">−{item.removedSources.join(', ')}</em>}</span></button>)}</div>
+      </section>}
 
-      <div className="prompt-composer">
+
+      <div className="prompt-composer prompt-composer-advanced">
         <input
           className="input"
           placeholder='e.g. "What is the best damp survey app for UK surveyors?"'
@@ -335,6 +345,11 @@ export default function CitationsPage() {
           <option value="">Whole workspace</option>
           {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
         </select>
+        <input className="input" aria-label="Prompt group" value={newGroup} onChange={event => setNewGroup(event.target.value)} placeholder="Prompt group" />
+        <input className="input" aria-label="Locale" value={newLocale} onChange={event => setNewLocale(event.target.value)} placeholder="Locale, e.g. en-GB" />
+        <select className="input" aria-label="Device" value={newDevice} onChange={event => setNewDevice(event.target.value)}><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select>
+        <input className="input" aria-label="Persona" value={newPersona} onChange={event => setNewPersona(event.target.value)} placeholder="Persona (optional)" />
+        <select className="input" aria-label="Cadence" value={newCadence} onChange={event => setNewCadence(event.target.value as AiPrompt['cadence'])}><option value="manual">Manual</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
         <button className="btn btn-primary btn-sm" onClick={add}><Plus size={13} /> Add prompt</button>
       </div>
 
@@ -353,7 +368,7 @@ export default function CitationsPage() {
             <tbody>
               {prompts.map(p => (
                 <tr key={p.id} className={expanded === p.id ? 'row-active' : ''} onClick={() => setExpanded(expanded === p.id ? null : p.id)} style={{ cursor: 'pointer' }}>
-                  <td><span className={`category-chip category-${p.category}`}>{CATEGORY_LABEL[p.category] ?? p.category}</span><span className="prompt-table-text"><MessageSquare size={11} />{p.prompt}</span></td>
+                  <td><span className={`category-chip category-${p.category}`}>{CATEGORY_LABEL[p.category] ?? p.category}</span><span className="prompt-table-text"><MessageSquare size={11} />{p.prompt}</span><span className="prompt-schedule-meta"><CalendarClock size={10}/>{p.group_name || 'Ungrouped'} · {p.locale} · {p.device} · {p.cadence}</span></td>
                   {providers.all.map(prov => {
                     const r = latest.get(`${p.id}:${prov}`);
                     return (
@@ -402,6 +417,7 @@ export default function CitationsPage() {
               })}
             </div>
           </div>
+          <div className="prompt-run-policy"><CalendarClock size={13}/><span><strong>Tracking policy</strong><small>{expandedPrompt.group_name || 'Ungrouped'} · {expandedPrompt.locale} · {expandedPrompt.device}{expandedPrompt.persona ? ` · ${expandedPrompt.persona}` : ''}</small></span><select className="input" value={expandedPrompt.cadence} onChange={event => api.updateAiPrompt(expandedPrompt.id, { cadence: event.target.value as AiPrompt['cadence'] }).then(load).catch(error => toast('error', String(error)))}><option value="manual">Manual</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
           {activeProvider && (
             <Thread
               key={`${expandedPrompt.id}:${activeProvider}`}
