@@ -20,6 +20,22 @@ interface KeyGuide {
 
 const KEY_GUIDES: KeyGuide[] = [
   {
+    key: 'bing_oauth_client_id',
+    label: 'Bing Webmaster OAuth client ID',
+    hint: 'Delegated Bing access for a first-class connect flow. Keep API keys below as a self-hosted fallback.',
+    steps: [
+      { text: 'In Bing Webmaster Tools open Settings → API Access → OAuth Client.', href: 'https://www.bing.com/webmasters/', linkLabel: 'Bing Webmaster Tools' },
+      { text: 'Register the redirect URI shown by your installation: https://YOUR-HOST/api/auth/bing/callback.' },
+      { text: 'Paste the generated client ID here and the matching secret in the next field.' },
+    ],
+  },
+  {
+    key: 'bing_oauth_client_secret',
+    label: 'Bing Webmaster OAuth client secret',
+    hint: 'Write-only secret used to exchange and refresh delegated Bing tokens.',
+    steps: [{ text: 'Copy the secret from the same Bing Webmaster OAuth Client registration.' }],
+  },
+  {
     key: 'crux_api_key',
     label: 'CrUX API key (Core Web Vitals)',
     hint: 'Real-user p75 LCP / INP / CLS per site, straight from Chrome telemetry.',
@@ -1099,11 +1115,13 @@ function NotificationsTab() {
 // Bing Webmaster accounts — one or more API keys per workspace (each site can
 // pick which to use). Lives in the API Keys tab alongside the other credentials.
 function BingAccounts() {
+  const { toast } = useApp();
   const { active } = useWorkspace();
   const canManage = !!active?.permissions?.manage_integrations;
   const [bing, setBing] = useState<BingAccount[]>([]);
   const [bingName, setBingName] = useState('');
   const [bingKey, setBingKey] = useState('');
+  const [connecting, setConnecting] = useState(false);
 
   const load = useCallback(async () => { setBing(await api.getBingAccounts().catch(() => [])); }, []);
   useEffect(() => { load(); }, [load, active?.id]);
@@ -1114,6 +1132,18 @@ function BingAccounts() {
     setBingName(''); setBingKey(''); await load();
   }
   async function removeBing(id: string) { await api.removeBingAccount(id).catch(() => null); await load(); }
+  async function connectOAuth() {
+    setConnecting(true);
+    try {
+      const { authorizationUrl } = await api.startBingOAuth(bingName.trim() || 'Bing OAuth');
+      const popup = window.open(authorizationUrl, 'bing-oauth', 'width=600,height=760,noopener=false');
+      if (!popup) throw new Error('Allow popups to connect Bing.');
+    } catch (error) { toast('error', error instanceof Error ? error.message : 'Could not start Bing OAuth'); setConnecting(false); }
+  }
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => { if (event.origin === window.location.origin && event.data?.type === 'BING_AUTH_SUCCESS') { setConnecting(false); setBingName(''); load(); toast('success', 'Bing Webmaster connected'); } };
+    window.addEventListener('message', onMessage); return () => window.removeEventListener('message', onMessage);
+  }, [load, toast]);
 
   return (
     <div className="card mt-4">
@@ -1126,7 +1156,7 @@ function BingAccounts() {
       <div className="member-list">
         {bing.map(b => (
           <div key={b.id} className="member-row">
-            <span className="member-name">{b.name}</span>
+            <span className="member-name">{b.name}</span><span className={`badge ${b.auth_type === 'oauth' ? 'badge-ok' : ''}`}>{b.auth_type === 'oauth' ? 'OAuth' : 'API key'}</span>
             {canManage && <button className="btn-icon btn-icon-ghost" title="Remove" onClick={() => removeBing(b.id)}><Trash2 size={13} /></button>}
           </div>
         ))}
@@ -1137,6 +1167,7 @@ function BingAccounts() {
           <input className="input" style={{ flex: '1 1 140px' }} placeholder="Label (e.g. Client A)" value={bingName} onChange={e => setBingName(e.target.value)} />
           <input className="input" style={{ flex: '2 1 200px' }} type="password" placeholder="Bing API key" value={bingKey} onChange={e => setBingKey(e.target.value)} />
           <button className="btn btn-secondary btn-sm" disabled={!bingKey.trim()} onClick={addBing}><Plus size={13} /> Add</button>
+          <button className="btn btn-primary btn-sm" disabled={connecting} onClick={connectOAuth}><ExternalLink size={13} /> {connecting ? 'Complete in Bing…' : 'Connect with OAuth'}</button>
         </div>
       )}
     </div>

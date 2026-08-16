@@ -133,6 +133,52 @@ describe('cross-tenant HTTP authorization', () => {
     expect((await req('PUT', '/api/ai/models', { sid: userSid, ws: adminWs, body: { model_openai: 'gpt-test' } })).status).toBe(200);
     expect((await json<{ metrics: { sites: number } }>(await req('GET', '/api/command-center', { sid: userSid, ws: adminWs }))).metrics.sites).toBe(1);
 
+    // The normalized platform APIs preserve the same tenancy boundary. An
+    // editor can operate the workspace, while secrets and records never leak
+    // to the user's separate workspace.
+    const integration = await req('POST', '/api/platform/integrations', {
+      sid: userSid, ws: adminWs,
+      body: { provider: 'cloudflare', name: 'Admin edge', config: { api_token: 'edge-secret', zone_id: 'zone-1' } },
+    });
+    expect(integration.status).toBe(200);
+    const publicConnector = await json<{ config: Record<string, unknown>; configured_secrets: string[] }>(integration);
+    expect(publicConnector.config).toEqual({ zone_id: 'zone-1' });
+    expect(publicConnector.configured_secrets).toEqual(['api_token']);
+    expect(await json<unknown[]>(await req('GET', '/api/platform/integrations', { sid: userSid, ws: userWs }))).toHaveLength(0);
+
+    const work = await req('POST', '/api/platform/work-items', {
+      sid: userSid, ws: adminWs, body: { title: 'Review organic visibility movement', severity: 'high', assignee_user_id: createdUser.id },
+    });
+    expect(work.status).toBe(200);
+    expect(await json<unknown[]>(await req('GET', '/api/platform/work-items', { sid: userSid, ws: userWs }))).toHaveLength(0);
+
+    // Service tokens are one-time plaintext credentials, scoped to both a
+    // workspace and operation. They never inherit the caller's other tenants.
+    const tokenResult = await json<{ id: string; token: string }>(await req('POST', '/api/platform/tokens', {
+      sid: userSid, ws: adminWs, body: { name: 'Reporting automation', scopes: ['workspace:read', 'events:write'] },
+    }));
+    expect((await req('POST', '/api/platform/tokens', {
+      sid: userSid, ws: adminWs, body: { name: 'Over-broad token', scopes: ['*'] },
+    })).status).toBe(400);
+    const tokenHeaders = { Authorization: `Bearer ${tokenResult.token}`, 'Content-Type': 'application/json' };
+    const tokenOverview = await fetch(`${BASE}/api/v1/workspace`, { headers: tokenHeaders });
+    expect(tokenOverview.status).toBe(200);
+    expect((await json<{ integrations: Array<{ provider: string }> }>(tokenOverview)).integrations.some(row => row.provider === 'cloudflare')).toBe(true);
+    expect((await fetch(`${BASE}/api/v1/metrics`, { headers: tokenHeaders })).status).toBe(401);
+    expect((await fetch(`${BASE}/api/v1/events`, { method: 'POST', headers: tokenHeaders,
+      body: JSON.stringify({ source: 'rank_feed', metric: 'position', dimension: 'commercial keyword', value: 3 }) })).status).toBe(202);
+
+    // Individual capability changes take effect immediately at the HTTP
+    // boundary without removing the member from the workspace.
+    expect((await req('PATCH', `/api/workspaces/${adminWs}/members/${createdUser.id}`, {
+      sid: adminSid, ws: adminWs, body: { permissions: { manage_content: false } },
+    })).status).toBe(200);
+    expect((await req('POST', '/api/platform/work-items', { sid: userSid, ws: adminWs, body: { title: 'Blocked mutation' } })).status).toBe(403);
+    expect((await req('PATCH', `/api/workspaces/${adminWs}/members/${createdUser.id}`, {
+      sid: adminSid, ws: adminWs, body: { permissions: { manage_content: true } },
+    })).status).toBe(200);
+    expect((await req('POST', '/api/platform/work-items', { sid: userSid, ws: adminWs, body: { title: 'Allowed mutation' } })).status).toBe(200);
+
     // A per-member override is enforced by the HTTP pre-handler.
     expect((await req('PATCH', `/api/workspaces/${adminWs}/members/${createdUser.id}`, { sid: adminSid, ws: adminWs, body: { permissions: { manage_notifications: false } } })).status).toBe(200);
     expect((await req('PUT', '/api/notifications/config', { sid: userSid, ws: adminWs, body: { notify_run_complete: 'true' } })).status).toBe(403);

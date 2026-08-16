@@ -166,6 +166,13 @@ function initSchema(db: Database.Database): void {
       workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
       prompt     TEXT NOT NULL,
       category   TEXT NOT NULL DEFAULT 'discovery',
+      group_name TEXT NOT NULL DEFAULT 'Core prompts',
+      locale     TEXT NOT NULL DEFAULT 'en-GB',
+      device     TEXT NOT NULL DEFAULT 'desktop',
+      persona    TEXT,
+      cadence    TEXT NOT NULL DEFAULT 'manual',
+      next_run_at TEXT,
+      last_run_at TEXT,
       enabled    INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -323,9 +330,23 @@ function initSchema(db: Database.Database): void {
       workspace_id  TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
       name          TEXT NOT NULL,
       api_key       TEXT NOT NULL,           -- encrypted at rest
+      auth_type     TEXT NOT NULL DEFAULT 'api_key',
+      access_token  TEXT,
+      refresh_token TEXT,
+      expires_at    TEXT,
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_bing_accounts_ws ON bing_accounts(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS bing_oauth_states (
+      state         TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      redirect_uri  TEXT NOT NULL,
+      expires_at    TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 
     -- Cross-process advisory lock so only one process refreshes a given
     -- Google account's token at a time (accounts are shared across a user's
@@ -399,6 +420,257 @@ function initSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_notification_deliveries_ws
       ON notification_deliveries(workspace_id, created_at DESC);
+
+    -- ── Organic operations platform ───────────────────────────────────────
+    -- Connector credentials are encrypted as one JSON document. Operational
+    -- status stays queryable so the UI can diagnose freshness without ever
+    -- returning secrets to the browser.
+    CREATE TABLE IF NOT EXISTS integrations (
+      id               TEXT PRIMARY KEY,
+      workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id          TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      provider         TEXT NOT NULL,
+      name             TEXT NOT NULL,
+      config           TEXT NOT NULL,
+      enabled          INTEGER NOT NULL DEFAULT 1,
+      status           TEXT NOT NULL DEFAULT 'pending',
+      cadence_minutes  INTEGER NOT NULL DEFAULT 1440,
+      next_sync_at     TEXT,
+      last_sync_at     TEXT,
+      last_error       TEXT,
+      created_by       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_integrations_ws ON integrations(workspace_id, provider);
+    CREATE INDEX IF NOT EXISTS idx_integrations_due ON integrations(enabled, next_sync_at);
+
+    -- Provider-neutral evidence store. A dimension may be a URL, device,
+    -- locale or other grouping; provenance records how the number was made.
+    CREATE TABLE IF NOT EXISTS metric_observations (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id       TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      source        TEXT NOT NULL,
+      metric        TEXT NOT NULL,
+      dimension     TEXT NOT NULL DEFAULT '',
+      value         REAL NOT NULL,
+      unit          TEXT,
+      observed_at   TEXT NOT NULL,
+      provenance    TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(workspace_id, site_id, source, metric, dimension, observed_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_metric_obs_lookup
+      ON metric_observations(workspace_id, metric, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_metric_obs_site
+      ON metric_observations(site_id, source, observed_at DESC);
+
+    -- Actionable notification inbox: unlike delivery history, these rows have
+    -- an owner and lifecycle and can close an observe -> act -> proof loop.
+    CREATE TABLE IF NOT EXISTS work_items (
+      id               TEXT PRIMARY KEY,
+      workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id          TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      source           TEXT NOT NULL,
+      source_ref       TEXT,
+      title            TEXT NOT NULL,
+      description      TEXT,
+      evidence         TEXT,
+      severity         TEXT NOT NULL DEFAULT 'medium',
+      status           TEXT NOT NULL DEFAULT 'open',
+      assignee_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      due_at           TEXT,
+      snoozed_until    TEXT,
+      deep_link        TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_items_ws
+      ON work_items(workspace_id, status, severity, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS annotations (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id       TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      kind          TEXT NOT NULL DEFAULT 'note',
+      title         TEXT NOT NULL,
+      note          TEXT,
+      event_at      TEXT NOT NULL,
+      metadata      TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_annotations_ws ON annotations(workspace_id, event_at DESC);
+
+    CREATE TABLE IF NOT EXISTS dashboard_views (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      config        TEXT NOT NULL,
+      is_default    INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_dashboard_views_user ON dashboard_views(workspace_id, user_id);
+
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      sections      TEXT NOT NULL,
+      branding      TEXT,
+      recipients    TEXT,
+      cadence       TEXT NOT NULL DEFAULT 'manual',
+      next_run_at   TEXT,
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_templates_due ON report_templates(enabled, next_run_at);
+
+    CREATE TABLE IF NOT EXISTS report_runs (
+      id            TEXT PRIMARY KEY,
+      template_id   TEXT REFERENCES report_templates(id) ON DELETE SET NULL,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      status        TEXT NOT NULL,
+      period_start  TEXT NOT NULL,
+      period_end    TEXT NOT NULL,
+      snapshot      TEXT,
+      error         TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_runs_ws ON report_runs(workspace_id, created_at DESC);
+
+    -- Append-only usage is the trustworthy basis for budgets and billback.
+    CREATE TABLE IF NOT EXISTS usage_ledger (
+      id             TEXT PRIMARY KEY,
+      workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id        TEXT REFERENCES users(id) ON DELETE SET NULL,
+      provider       TEXT NOT NULL,
+      operation      TEXT NOT NULL,
+      quantity       REAL NOT NULL,
+      unit           TEXT NOT NULL,
+      estimated_cost REAL NOT NULL DEFAULT 0,
+      metadata       TEXT,
+      occurred_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_ledger_ws ON usage_ledger(workspace_id, occurred_at DESC);
+    DROP TRIGGER IF EXISTS usage_ledger_no_update;
+    CREATE TRIGGER usage_ledger_no_update
+      BEFORE UPDATE ON usage_ledger
+      -- User deletion may anonymise the actor through ON DELETE SET NULL. No
+      -- usage, cost, provider, time or tenant fact may otherwise be rewritten.
+      WHEN NOT (
+        OLD.user_id IS NOT NULL AND NEW.user_id IS NULL
+        AND NEW.id IS OLD.id AND NEW.workspace_id IS OLD.workspace_id
+        AND NEW.provider IS OLD.provider AND NEW.operation IS OLD.operation
+        AND NEW.quantity IS OLD.quantity AND NEW.unit IS OLD.unit
+        AND NEW.estimated_cost IS OLD.estimated_cost
+        AND NEW.metadata IS OLD.metadata AND NEW.occurred_at IS OLD.occurred_at
+      )
+      BEGIN SELECT RAISE(ABORT, 'usage ledger is append-only'); END;
+    DROP TRIGGER IF EXISTS usage_ledger_no_delete;
+    CREATE TRIGGER usage_ledger_no_delete
+      BEFORE DELETE ON usage_ledger
+      -- Permit only the database-managed cascade after its workspace has gone.
+      WHEN EXISTS (SELECT 1 FROM workspaces WHERE id=OLD.workspace_id)
+      BEGIN SELECT RAISE(ABORT, 'usage ledger is append-only'); END;
+
+    CREATE TABLE IF NOT EXISTS budget_policies (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
+      provider      TEXT,
+      period        TEXT NOT NULL DEFAULT 'monthly',
+      limit_value   REAL NOT NULL,
+      limit_unit    TEXT NOT NULL DEFAULT 'cost',
+      warning_pct   INTEGER NOT NULL DEFAULT 80,
+      hard_limit    INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_budget_policies_ws ON budget_policies(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS outbound_webhooks (
+      id              TEXT PRIMARY KEY,
+      workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name            TEXT NOT NULL,
+      url             TEXT NOT NULL,
+      secret          TEXT NOT NULL,
+      events          TEXT NOT NULL,
+      enabled         INTEGER NOT NULL DEFAULT 1,
+      failure_count   INTEGER NOT NULL DEFAULT 0,
+      last_delivery_at TEXT,
+      last_error      TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_outbound_webhooks_ws ON outbound_webhooks(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS service_tokens (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      name          TEXT NOT NULL,
+      token_hash    TEXT NOT NULL UNIQUE,
+      scopes        TEXT NOT NULL,
+      expires_at    TEXT,
+      last_used_at  TEXT,
+      revoked_at    TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_service_tokens_ws ON service_tokens(workspace_id);
+
+    -- Governed content changes: proposal, evidence, approval, staging,
+    -- publishing, verification and rollback all remain separate states.
+    CREATE TABLE IF NOT EXISTS content_actions (
+      id                TEXT PRIMARY KEY,
+      workspace_id      TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id           TEXT REFERENCES sites(id) ON DELETE CASCADE,
+      integration_id    TEXT REFERENCES integrations(id) ON DELETE SET NULL,
+      created_by        TEXT REFERENCES users(id) ON DELETE SET NULL,
+      approved_by       TEXT REFERENCES users(id) ON DELETE SET NULL,
+      kind              TEXT NOT NULL,
+      title             TEXT NOT NULL,
+      rationale         TEXT,
+      evidence          TEXT,
+      payload           TEXT NOT NULL,
+      rollback_payload  TEXT,
+      remote_id         TEXT,
+      preview_url       TEXT,
+      status            TEXT NOT NULL DEFAULT 'proposed',
+      last_error        TEXT,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      published_at      TEXT,
+      verified_at       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_actions_ws ON content_actions(workspace_id, status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS local_entities (
+      id             TEXT PRIMARY KEY,
+      workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      site_id        TEXT REFERENCES sites(id) ON DELETE SET NULL,
+      name           TEXT NOT NULL,
+      market         TEXT NOT NULL,
+      locale         TEXT NOT NULL DEFAULT 'en-GB',
+      entity_type    TEXT NOT NULL DEFAULT 'brand',
+      primary_url    TEXT,
+      address        TEXT,
+      phone          TEXT,
+      identifiers    TEXT NOT NULL DEFAULT '{}',
+      listings       TEXT NOT NULL DEFAULT '[]',
+      knowledge      TEXT NOT NULL DEFAULT '{}',
+      review_rating  REAL,
+      review_count   INTEGER,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_local_entities_ws ON local_entities(workspace_id, market, name);
   `);
 
   // Backwards compatibility migrations
@@ -448,6 +720,11 @@ function initSchema(db: Database.Database): void {
   if (!siteCols.some(c => c.name === 'bing_account_id')) {
     db.exec("ALTER TABLE sites ADD COLUMN bing_account_id TEXT REFERENCES bing_accounts(id) ON DELETE SET NULL;");
   }
+  const bingCols = db.prepare("PRAGMA table_info(bing_accounts)").all() as { name: string }[];
+  if (bingCols.length > 0 && !bingCols.some(c => c.name === 'auth_type')) db.exec("ALTER TABLE bing_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'api_key';");
+  if (bingCols.length > 0 && !bingCols.some(c => c.name === 'access_token')) db.exec('ALTER TABLE bing_accounts ADD COLUMN access_token TEXT;');
+  if (bingCols.length > 0 && !bingCols.some(c => c.name === 'refresh_token')) db.exec('ALTER TABLE bing_accounts ADD COLUMN refresh_token TEXT;');
+  if (bingCols.length > 0 && !bingCols.some(c => c.name === 'expires_at')) db.exec('ALTER TABLE bing_accounts ADD COLUMN expires_at TEXT;');
   const gaCols = db.prepare("PRAGMA table_info(google_accounts)").all() as { name: string }[];
   if (gaCols.length > 0 && !gaCols.some(c => c.name === 'workspace_id')) {
     db.exec("ALTER TABLE google_accounts ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;");
@@ -523,6 +800,27 @@ function initSchema(db: Database.Database): void {
   }
   if (apCols.length > 0 && !apCols.some(c => c.name === 'category')) {
     db.exec("ALTER TABLE ai_prompts ADD COLUMN category TEXT NOT NULL DEFAULT 'discovery';");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'group_name')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN group_name TEXT NOT NULL DEFAULT 'Core prompts';");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'locale')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN locale TEXT NOT NULL DEFAULT 'en-GB';");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'device')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN device TEXT NOT NULL DEFAULT 'desktop';");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'persona')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN persona TEXT;");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'cadence')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN cadence TEXT NOT NULL DEFAULT 'manual';");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'next_run_at')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN next_run_at TEXT;");
+  }
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'last_run_at')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN last_run_at TEXT;");
   }
   if (apCols.length > 0) db.exec("CREATE INDEX IF NOT EXISTS idx_ai_prompts_ws ON ai_prompts(workspace_id);");
 

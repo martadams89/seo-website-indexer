@@ -56,14 +56,19 @@ uses platform-level keys.
 
 ## Highest-value follow-on work
 
-1. Workspace/user budget policies and an immutable usage ledger.
-2. Audit-log filtering, retention policy and signed export.
-3. API tokens/service accounts for CI and automation, scoped like users.
-4. Enforced workspace MFA and session/device management.
-5. SCIM/group-to-role mapping for enterprise identity providers.
-6. PostgreSQL plus a real job queue before supporting multiple application
+The v1.27 platform delivers the first four commercial foundations: workspace
+and user budgets, an immutable usage ledger, billback export, retention
+controls, scoped service tokens, signed webhooks and enforced workspace MFA.
+That is enough to validate Agency and Managed packaging without handling money.
+
+The next scale-dependent investments are:
+
+1. Signed audit exports and richer audit-log filtering.
+2. Session/device management beyond the current session revocation controls.
+3. SCIM/group-to-role mapping for enterprise identity providers.
+4. PostgreSQL plus a real job queue before supporting multiple application
    replicas; SQLite remains the right default for a single-container install.
-7. Restore drills and an admin-facing backup restore workflow.
+5. Restore drills and an admin-facing backup restore workflow.
 
 This sequence validates willingness to pay with low operational risk. Stripe is
 then an adapter on top of proven entitlements and metering, rather than the

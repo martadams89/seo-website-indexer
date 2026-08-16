@@ -11,7 +11,7 @@
  */
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 import { type Site } from '../db/database.js';
-import { bingKeyForSite } from '../auth/workspaces.js';
+import { bingCredentialForSite, type BingCredential } from '../auth/workspaces.js';
 import { deriveBingSiteUrl } from './bing.js';
 
 const GSC_BASE = 'https://www.googleapis.com/webmasters/v3';
@@ -96,10 +96,10 @@ export async function getGooglePerformance(site: Site, days: number): Promise<En
 
 export interface DimensionRow { key: string; clicks: number; impressions: number; ctr: number; position: number }
 
-// GSC country/device breakdown. (Bing has no comparable public traffic-by-
-// country/device API, so this is Google-only — the UI says so.)
+// GSC country/device/search-appearance breakdown. Bing has no comparable
+// public API, so this is Google-only and the UI identifies the source.
 export async function getGoogleDimension(
-  site: Site, days: number, dimension: 'country' | 'device'
+  site: Site, days: number, dimension: 'country' | 'device' | 'searchAppearance'
 ): Promise<{ available: boolean; reason?: string; rows: DimensionRow[] }> {
   if (!site.google_account_id) return { available: false, reason: 'No Google account linked to this site.', rows: [] };
   let token: string;
@@ -147,9 +147,10 @@ export async function getGoogleDailyQueries(site: Site, days: number): Promise<D
 
 // ── Bing Webmaster — rank/traffic + query/page stats ─────────────────────────
 
-async function bingCall<T>(method: string, apiKey: string, siteUrl: string): Promise<T> {
-  const res = await fetch(`${BING_BASE}/${method}?apikey=${encodeURIComponent(apiKey)}&siteUrl=${encodeURIComponent(siteUrl)}`, {
-    headers: { Accept: 'application/json' },
+async function bingCall<T>(method: string, credential: BingCredential, siteUrl: string): Promise<T> {
+  const params = new URLSearchParams({ siteUrl }); if (credential.type === 'api_key') params.set('apikey', credential.value);
+  const res = await fetch(`${BING_BASE}/${method}?${params}`, {
+    headers: { Accept: 'application/json', ...(credential.type === 'oauth' ? { Authorization: `Bearer ${credential.value}` } : {}) },
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`Bing ${method} ${res.status}: ${(await res.text()).slice(0, 160)}`);
@@ -166,15 +167,15 @@ export async function getBingPerformance(site: Site, days: number): Promise<Engi
   const empty: EnginePerformance = {
     available: false, totals: { clicks: 0, impressions: 0, ctr: 0, position: 0 }, series: [], queries: [], pages: [],
   };
-  const apiKey = bingKeyForSite(site.id);
-  if (!apiKey) return { ...empty, reason: 'No Bing Webmaster API key configured (Settings).' };
+  const credential = await bingCredentialForSite(site.id);
+  if (!credential) return { ...empty, reason: 'No Bing Webmaster OAuth account or API key configured (Settings).' };
   const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
   const cutoff = rangeDates(days).startDate;
   try {
     const [traffic, queries, pages] = await Promise.all([
-      bingCall<Array<{ Date: string; Impressions: number; Clicks: number }>>('GetRankAndTrafficStats', apiKey, siteUrl),
-      bingCall<Array<{ Query: string; Impressions: number; Clicks: number; AvgImpressionPosition: number }>>('GetQueryStats', apiKey, siteUrl).catch(() => []),
-      bingCall<Array<{ Query: string; Impressions: number; Clicks: number }>>('GetPageStats', apiKey, siteUrl).catch(() => []),
+      bingCall<Array<{ Date: string; Impressions: number; Clicks: number }>>('GetRankAndTrafficStats', credential, siteUrl),
+      bingCall<Array<{ Query: string; Impressions: number; Clicks: number; AvgImpressionPosition: number }>>('GetQueryStats', credential, siteUrl).catch(() => []),
+      bingCall<Array<{ Query: string; Impressions: number; Clicks: number }>>('GetPageStats', credential, siteUrl).catch(() => []),
     ]);
     const series: SeriesPoint[] = traffic
       .map(r => ({ date: parseBingDate(r.Date), clicks: r.Clicks ?? 0, impressions: r.Impressions ?? 0, ctr: 0, position: 0 }))
@@ -206,8 +207,8 @@ export async function getBingPerformance(site: Site, days: number): Promise<Engi
 export interface CrawlIssue { url: string; issues: string[]; code?: number }
 
 export async function getBingCrawlIssues(site: Site): Promise<{ available: boolean; reason?: string; issues: CrawlIssue[] }> {
-  const apiKey = bingKeyForSite(site.id);
-  if (!apiKey) return { available: false, reason: 'No Bing Webmaster API key configured.', issues: [] };
+  const credential = await bingCredentialForSite(site.id);
+  if (!credential) return { available: false, reason: 'No Bing Webmaster OAuth account or API key configured.', issues: [] };
   const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
   // Bit flags Bing uses in CrawlIssues.Issues.
   const FLAGS: Array<[number, string]> = [
@@ -215,7 +216,7 @@ export async function getBingCrawlIssues(site: Site): Promise<{ available: boole
     [16, 'Contains malware'], [32, 'Not master (canonical)'], [64, 'Excluded by REP'], [128, 'DNS failure'],
   ];
   try {
-    const rows = await bingCall<Array<{ Url: string; HttpCode?: number; Issues?: number }>>('GetCrawlIssues', apiKey, siteUrl);
+    const rows = await bingCall<Array<{ Url: string; HttpCode?: number; Issues?: number }>>('GetCrawlIssues', credential, siteUrl);
     return {
       available: true,
       issues: rows.slice(0, 200).map(r => ({

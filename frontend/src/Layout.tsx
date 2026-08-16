@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
   ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut,
   BarChart3, Bot, Search, Command, ArrowRight,
+  Inbox, Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye,
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
@@ -17,14 +18,22 @@ import { ToastHost } from './components/Toast';
 const NAV_GROUPS = [
   { label: 'Operate', items: [
     { to: '/', icon: LayoutDashboard, label: 'Command Centre' },
+    { to: '/actions', icon: Inbox, label: 'Action Inbox' },
     { to: '/sites', icon: Globe, label: 'Sites & Submissions' },
+    { to: '/publishing', icon: Send, label: 'Content & Publishing' },
     { to: '/logs', icon: ScrollText, label: 'Live Activity' },
   ] },
   { label: 'Measure', items: [
+    { to: '/intelligence', icon: Layers3, label: 'Unified Intelligence' },
+    { to: '/entities', icon: MapPin, label: 'Markets & Entities' },
     { to: '/analytics', icon: BarChart3, label: 'Search Analytics' },
     { to: '/citations', icon: Bot, label: 'AI Visibility' },
+    { to: '/reports', icon: FileOutput, label: 'Reports' },
+    { to: '/portal', icon: Eye, label: 'Client Portal' },
   ] },
   { label: 'Configure', items: [
+    { to: '/integrations', icon: PlugZap, label: 'Integrations' },
+    { to: '/governance', icon: ShieldCheck, label: 'Governance & Usage' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ] },
 ];

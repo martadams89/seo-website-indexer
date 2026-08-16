@@ -11,6 +11,7 @@ import { resolveModel, type ModelProvider } from './models.js';
 import { logSystem } from '../utils/logger.js';
 import { recordAlert } from '../analytics/stats.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
+import { assertWithinBudget, recordUsage } from '../platform/store.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
 export type Provider = typeof PROVIDERS[number];
@@ -219,7 +220,9 @@ export type PromptCategory = typeof PROMPT_CATEGORIES[number];
 
 export interface PromptRow {
   id: number; workspace_id: string | null; site_id: string | null; prompt: string;
-  category: PromptCategory; enabled: number; created_at: string;
+  category: PromptCategory; group_name: string; locale: string; device: string; persona: string | null;
+  cadence: 'manual' | 'daily' | 'weekly' | 'monthly'; next_run_at: string | null; last_run_at: string | null;
+  enabled: number; created_at: string;
 }
 
 /** Prompts for one workspace (the tenant boundary). */
@@ -235,11 +238,42 @@ export function addPrompt(
   siteId?: string | null,
   workspaceId: string | null = null,
   category: PromptCategory = 'discovery',
+  schedule: Partial<Pick<PromptRow, 'group_name' | 'locale' | 'device' | 'persona' | 'cadence'>> = {},
 ): PromptRow {
   const safeCategory = PROMPT_CATEGORIES.includes(category) ? category : 'discovery';
-  const r = getDb().prepare('INSERT INTO ai_prompts(site_id, prompt, workspace_id, category) VALUES(?, ?, ?, ?)')
-    .run(siteId ?? null, prompt, workspaceId, safeCategory);
+  const cadence = ['manual', 'daily', 'weekly', 'monthly'].includes(schedule.cadence ?? '') ? schedule.cadence! : 'manual';
+  const next = cadence === 'manual' ? null : new Date().toISOString();
+  const r = getDb().prepare(`INSERT INTO ai_prompts(site_id,prompt,workspace_id,category,group_name,locale,device,persona,cadence,next_run_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?)`)
+    .run(siteId ?? null, prompt, workspaceId, safeCategory, schedule.group_name?.trim() || 'Core prompts',
+      schedule.locale?.trim() || 'en-GB', schedule.device?.trim() || 'desktop', schedule.persona?.trim() || null, cadence, next);
   return getDb().prepare('SELECT * FROM ai_prompts WHERE id = ?').get(r.lastInsertRowid) as PromptRow;
+}
+
+function nextPromptRun(cadence: PromptRow['cadence']): string | null {
+  const next = new Date();
+  if (cadence === 'daily') next.setUTCDate(next.getUTCDate() + 1);
+  else if (cadence === 'weekly') next.setUTCDate(next.getUTCDate() + 7);
+  else if (cadence === 'monthly') next.setUTCMonth(next.getUTCMonth() + 1);
+  else return null;
+  return next.toISOString();
+}
+
+export function updatePrompt(id: number, workspaceId: string, changes: Partial<Pick<PromptRow, 'prompt' | 'site_id' | 'category' | 'group_name' | 'locale' | 'device' | 'persona' | 'cadence' | 'enabled'>>): PromptRow | null {
+  const current = getPrompt(id, workspaceId); if (!current) return null;
+  const cadence = changes.cadence && ['manual','daily','weekly','monthly'].includes(changes.cadence) ? changes.cadence : current.cadence;
+  getDb().prepare(`UPDATE ai_prompts SET prompt=?,site_id=?,category=?,group_name=?,locale=?,device=?,persona=?,cadence=?,enabled=?,
+    next_run_at=CASE WHEN ?='manual' THEN NULL WHEN cadence!=? OR next_run_at IS NULL THEN datetime('now') ELSE next_run_at END
+    WHERE id=? AND workspace_id=?`).run(changes.prompt?.trim() || current.prompt, changes.site_id === undefined ? current.site_id : changes.site_id,
+      changes.category ?? current.category, changes.group_name?.trim() || current.group_name, changes.locale?.trim() || current.locale,
+      changes.device?.trim() || current.device, changes.persona === undefined ? current.persona : (changes.persona?.trim() || null), cadence,
+      changes.enabled === undefined ? current.enabled : changes.enabled, cadence, cadence, id, workspaceId);
+  return getPrompt(id, workspaceId) ?? null;
+}
+
+export function listDuePrompts(limit = 50): PromptRow[] {
+  return getDb().prepare(`SELECT * FROM ai_prompts WHERE enabled=1 AND cadence!='manual' AND
+    (next_run_at IS NULL OR julianday(next_run_at)<=julianday('now')) ORDER BY COALESCE(next_run_at,created_at) LIMIT ?`).all(limit) as PromptRow[];
 }
 
 function getPrompt(promptId: number, workspaceId: string | null): PromptRow | undefined {
@@ -290,18 +324,24 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
     VALUES(?,?,?,?,?,?,?,?,?,?)
   `);
 
-  const movements: Array<{ provider: Provider; cited: boolean }> = [];
+  const movements: Array<{ provider: Provider; cited: boolean; sourceChanged?: boolean }> = [];
   const results = await Promise.all(providers.map(async provider => {
+    if (workspaceId) assertWithinBudget({ workspaceId, provider, quantity: 1 });
     const key = effectiveSetting(workspaceId, KEY_SETTING[provider])!;
     const previous = db.prepare(`
-      SELECT cited FROM ai_results
+      SELECT cited,citations FROM ai_results
       WHERE prompt_id = ? AND provider = ? AND parent_id IS NULL
       ORDER BY created_at DESC, id DESC LIMIT 1
-    `).get(promptId, provider) as { cited: number } | undefined;
+    `).get(promptId, provider) as { cited: number; citations: string | null } | undefined;
     try {
       const modelId = provider === 'brave' ? undefined : resolveModel(workspaceId, provider as ModelProvider);
-      const answer = await ASK[provider]([{ role: 'user', content: row.prompt }], key, modelId);
+      const context = [row.locale ? `Locale: ${row.locale}.` : '', row.device ? `Device context: ${row.device}.` : '', row.persona ? `Audience persona: ${row.persona}.` : ''].filter(Boolean).join(' ');
+      const answer = await ASK[provider]([{ role: 'user', content: context ? `${row.prompt}\n\n${context}` : row.prompt }], key, modelId);
       const found = findDomains(answer, domains);
+      const currentSources = [...new Set(answer.citations.map(sourceDomain).filter((value): value is string => !!value))];
+      const previousSources = [...new Set(safeArray(previous?.citations).map(sourceDomain).filter((value): value is string => !!value))];
+      const addedSources = currentSources.filter(source => !previousSources.includes(source));
+      const removedSources = previousSources.filter(source => !currentSources.includes(source));
       // Full response (bounded) — the dashboard renders it as a scrollable chat bubble.
       const text = answer.text.trim().slice(0, 12_000);
       insert.run(promptId, provider, answer.model, found.length ? 1 : 0, JSON.stringify(found), text, null,
@@ -318,9 +358,16 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
           workspaceId,
         );
         movements.push({ provider, cited: gained });
+      } else if (previous && (addedSources.length || removedSources.length)) {
+        const label = PROVIDER_LABELS[provider] ?? provider;
+        recordAlert(row.site_id, 'citation', `Answer sources changed on ${label}: “${row.prompt.slice(0, 90)}”`, 'info',
+          `${addedSources.length ? `Added ${addedSources.join(', ')}. ` : ''}${removedSources.length ? `Removed ${removedSources.join(', ')}.` : ''}`.trim(), workspaceId);
+        movements.push({ provider, cited: Boolean(found.length), sourceChanged: true });
       }
       logSystem(found.length ? 'ok' : 'info',
         `AI citation [${provider}] ${found.length ? `cited: ${found.join(', ')}` : 'not cited'} — "${row.prompt.slice(0, 60)}"`);
+      if (workspaceId) recordUsage({ workspace_id: workspaceId, user_id: null, provider, operation: 'ai.visibility_check', quantity: 1, unit: 'check', estimated_cost: 0,
+        metadata: { prompt_id: promptId, model: answer.model, cited: found.length > 0, group: row.group_name, locale: row.locale, device: row.device } });
       return { provider, model: answer.model, cited: found.length > 0, domains: found, excerpt: text };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -330,12 +377,22 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
     }
   }));
   if (workspaceId && movements.length > 0 && notificationEventEnabled(workspaceId, 'citation_changes')) {
-    const gained = movements.filter(m => m.cited).length;
-    const lost = movements.length - gained;
-    const body = `${gained} citation${gained === 1 ? '' : 's'} gained, ${lost} lost for “${row.prompt.slice(0, 100)}”.`;
+    const sourceChanges = movements.filter(m => m.sourceChanged).length;
+    const citationMoves = movements.filter(m => !m.sourceChanged); const gained = citationMoves.filter(m => m.cited).length;
+    const lost = citationMoves.length - gained;
+    const body = `${gained} citation${gained === 1 ? '' : 's'} gained, ${lost} lost, ${sourceChanges} answer source set${sourceChanges === 1 ? '' : 's'} changed for “${row.prompt.slice(0, 100)}”.`;
     sendWorkspaceNotification(workspaceId, 'AI visibility changed', body, 'citation_changes').catch(() => null);
   }
+  db.prepare('UPDATE ai_prompts SET last_run_at=datetime(\'now\'),next_run_at=? WHERE id=?').run(nextPromptRun(row.cadence), row.id);
   return results;
+}
+
+export async function runDuePrompts(): Promise<number> {
+  const prompts = listDuePrompts(); let completed = 0;
+  for (const prompt of prompts) {
+    try { await runPrompt(prompt.id, prompt.workspace_id); completed++; } catch { /* result errors and connector health are retained */ }
+  }
+  return completed;
 }
 
 /** Run all enabled prompts (used by the scheduler's citation sweep). */
@@ -431,10 +488,11 @@ export interface AiInsights {
   }>;
   movements: Array<{
     promptId: number; prompt: string; provider: Provider; cited: boolean; previousCited: boolean; createdAt: string;
+    addedSources: string[]; removedSources: string[]; answerChanged: boolean;
   }>;
 }
 
-function safeArray(value: string | null): string[] {
+function safeArray(value: string | null | undefined): string[] {
   try {
     const parsed = JSON.parse(value ?? '[]');
     return Array.isArray(parsed) ? parsed.filter(v => typeof v === 'string') : [];
@@ -534,10 +592,17 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
 
   const movements = current.flatMap(row => {
     const priorRow = previous.get(`${row.prompt_id}:${row.provider}`);
-    if (!priorRow || Boolean(priorRow.cited) === Boolean(row.cited)) return [];
+    if (!priorRow) return [];
+    const currentSources = [...new Set(safeArray(row.citations).map(sourceDomain).filter((value): value is string => !!value))];
+    const previousSources = [...new Set(safeArray(priorRow.citations).map(sourceDomain).filter((value): value is string => !!value))];
+    const addedSources = currentSources.filter(source => !previousSources.includes(source));
+    const removedSources = previousSources.filter(source => !currentSources.includes(source));
+    const answerChanged = (row.excerpt ?? '').trim() !== (priorRow.excerpt ?? '').trim();
+    if (Boolean(priorRow.cited) === Boolean(row.cited) && !addedSources.length && !removedSources.length && !answerChanged) return [];
     return [{
       promptId: row.prompt_id, prompt: row.prompt, provider: row.provider,
       cited: Boolean(row.cited), previousCited: Boolean(priorRow.cited), createdAt: row.created_at,
+      addedSources, removedSources, answerChanged,
     }];
   }).slice(0, 20);
 

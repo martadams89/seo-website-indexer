@@ -50,13 +50,14 @@ import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry
 import { submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
 import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexer/bing.js';
-import { bingKeyForSite } from './auth/workspaces.js';
+import { bingCredentialForSite } from './auth/workspaces.js';
 import { auditRobotsTxt, probeLlmsTxt, parseSemanticSchema } from './indexer/geo.js';
 import { deployGeoFiles } from './indexer/geo-deploy.js';
 import { snapshotAllSites } from './analytics/stats.js';
 import { snapshotAllPerformance } from './analytics/perf-store.js';
 import { snapshotAllAgentReadiness } from './analytics/agent-readiness-store.js';
 import { sendWorkspaceNotification, configuredChannels, notificationEventEnabled } from './utils/notify.js';
+import { runPlatformAutomation } from './platform/automation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,7 @@ export { subscribeToLogs };
 interface ActiveRun { runId: string; workspaceId: string; stopRequested: boolean; }
 const _activeRuns = new Map<string, ActiveRun>(); // keyed by workspaceId
 let _scheduledTask: ReturnType<typeof cron.schedule> | null = null;
+let _platformTask: ReturnType<typeof cron.schedule> | null = null;
 
 /** Is a run active? For a specific workspace, or (no arg) anywhere. */
 export function isRunning(workspaceId?: string | null): boolean {
@@ -537,9 +539,9 @@ async function _doRun(
         const data = siteDataMap.get(site.id);
         if (!data || data.error) continue;
 
-        const bingApiKey = (bingKeyForSite(site.id) ?? '').trim();
-        if (!bingApiKey) {
-          log(runId, 'dim', `${site.domain} — Bing submission skipped (no API key for this workspace).`, site.id);
+        const bingCredential = await bingCredentialForSite(site.id);
+        if (!bingCredential) {
+          log(runId, 'dim', `${site.domain} — Bing submission skipped (no OAuth account or API key for this workspace).`, site.id);
           continue;
         }
 
@@ -554,7 +556,7 @@ async function _doRun(
 
         // Respect Bing's daily quota: prefer the live quota, else a local counter.
         const usedToday = getQuotaUsage('bing_submission', `site:${site.id}`);
-        const quota = await getBingQuota(bingApiKey, siteUrl);
+        const quota = await getBingQuota(bingCredential, siteUrl);
         const dailyAllowance = quota?.dailyQuota ?? Math.max(0, BING_DAILY_LIMIT_FALLBACK - usedToday);
         if (dailyAllowance <= 0) {
           log(runId, 'warn', `${site.domain} — Bing daily quota exhausted${quota ? '' : ` (local counter ${usedToday}/${BING_DAILY_LIMIT_FALLBACK})`}. Skipping.`, site.id);
@@ -569,7 +571,7 @@ async function _doRun(
 
         log(runId, 'info', `${site.domain} — submitting ${toSubmit.length} URLs to Bing (siteUrl: ${siteUrl}${quota ? `, quota: ${quota.dailyQuota}/day left` : ''})`, site.id);
 
-        const results = await submitToBingInBatches(bingApiKey, siteUrl, toSubmit);
+        const results = await submitToBingInBatches(bingCredential, siteUrl, toSubmit);
         let cursor = 0;
         for (const r of results) {
           if (activeRun.stopRequested) break;
@@ -806,6 +808,15 @@ export function startScheduler(): void {
     }
   });
 
+  // Lightweight orchestration loop for connector refreshes, scheduled AI
+  // visibility, digests, reports and content inventory. Each subsystem owns
+  // its own next-run timestamp, so the loop is safe and inexpensive.
+  if (_platformTask) _platformTask.stop();
+  _platformTask = cron.schedule('*/15 * * * *', async () => {
+    try { await runPlatformAutomation(); }
+    catch (error) { console.error('[platform] Automation cycle failed:', error instanceof Error ? error.message : error); }
+  });
+
   console.log(`[scheduler] Started — schedule: "${cronExpr}"`);
 }
 
@@ -814,6 +825,10 @@ export function stopScheduler(): void {
     _scheduledTask.stop();
     _scheduledTask = null;
     console.log('[scheduler] Stopped.');
+  }
+  if (_platformTask) {
+    _platformTask.stop();
+    _platformTask = null;
   }
 }
 

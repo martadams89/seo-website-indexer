@@ -15,10 +15,41 @@ reports. A self-hosted workspace gives them credential ownership and tenant
 isolation; the commercial offer can add managed operations, reporting and
 governance without withholding the useful open-source core.
 
-The v1.26 command centre starts this model with a workspace health score,
-prioritized action centre, search momentum, AI visibility, source/competitor
-intelligence, connection health, event routing and delivery history. Each
-headline signal links back to the operating surface that can resolve it.
+The v1.27 platform completes the first broad implementation of this model. The
+command centre now sits on a normalized evidence layer and links directly to an
+assignable action inbox, scheduled AI visibility, governed CMS publishing,
+branded reporting, local-entity intelligence, usage controls and a client
+portal. Each headline signal links back to the operating surface that can
+resolve it.
+
+## v1.27 delivery snapshot
+
+The recommendations in this document are now represented in the product where
+they are safe and useful in a single-container architecture:
+
+- Normalized, provenance-retaining observations for GA4, PageSpeed,
+  Cloudflare, Plausible, Matomo, Search Console, rank feeds and server logs,
+  with source freshness, CSV export, saved views and explainable forecast
+  ranges.
+- Assignable actions with severity, status, due date, snooze, bulk preview,
+  deep-linked evidence and a causal annotation/deployment timeline.
+- Scheduled prompt groups with market, device and persona context, answer and
+  source diffs, citation movement notifications and cost attribution.
+- WordPress, Shopify and Webflow adapter contracts with a mandatory propose →
+  approve → stage → publish → verify workflow and captured rollback state.
+- Content inventory auditing, local-market entities/listings/reviews, scheduled
+  branded reports, severity-routed digests and a white-labelled read-only
+  client portal.
+- Encrypted connectors, Bing OAuth plus API-key fallback, signed webhooks,
+  hashed scoped service tokens and stable metric/event/log ingestion APIs.
+- Workspace MFA and retention policies, an append-only usage ledger,
+  per-user/per-workspace provider budgets and billback exports.
+
+The remaining items are scale or commercialisation gates, not missing daily
+workflow: SCIM, PostgreSQL/job-queue multi-replica operation, high availability,
+managed backup restore and an optional hosted billing adapter. They should be
+added when deployment evidence justifies their operating cost. Stripe remains
+deliberately outside the core for the reasons below.
 
 ## What belongs in the product
 

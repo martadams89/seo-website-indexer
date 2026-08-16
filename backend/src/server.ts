@@ -49,6 +49,7 @@ import {
   deleteSite,
   setSiteLlmsContent,
   getAllSettings,
+  effectiveSetting,
   getSetting,
   setSetting,
   getWorkspaceSettings,
@@ -110,7 +111,7 @@ import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexe
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
-import { listPrompts, addPrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, type Provider, type PromptCategory } from './ai/citations.js';
+import { listPrompts, addPrompt, updatePrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, type Provider, type PromptCategory, type PromptRow } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
@@ -129,7 +130,8 @@ import {
   createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
   canAccessWorkspace, canManageWorkspace, canAccessSiteInWorkspace, bootstrapUserWorkspace,
   listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember, reassignOwnedWorkspaces,
-  addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
+  addBingAccount, addBingOAuthAccount, bingCredentialForSite, listBingAccounts, removeBingAccount, bingAccountWorkspace,
+  createBingOAuthState, consumeBingOAuthState,
   workspaceRole, canUseAiCitations, updateWorkspaceMember, hasCapability, type Capability,
   listAllWorkspacesSummary, reassignWorkspaceOwner,
   listUserWorkspaceAccess,
@@ -141,6 +143,7 @@ import {
 } from './auth/passkeys.js';
 import { ssoProviders, ssoAuthorizeUrl, ssoHandleCallback } from './auth/sso.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
+import { registerPlatformRoutes } from './platform/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = path.join(__dirname, '../frontend/dist');
@@ -185,7 +188,7 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body,
 
 await app.register(fastifyCors, {
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
 });
 
@@ -219,6 +222,9 @@ app.addHook('preHandler', async (req, reply) => {
   const method = req.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
   if (CSRF_EXEMPT_PATHS.has(req.url.split('?')[0])) return;
+  // Public automation endpoints authenticate with a scoped bearer token and
+  // are intentionally callable by CI, n8n/Zapier and log shippers.
+  if (req.url.startsWith('/api/v1/')) return;
   if (!req.url.startsWith('/api/')) return;
   // The IndexNow key file route is GET only — covered above. All other state-
   // changing API routes must come from our own JS client.
@@ -239,13 +245,14 @@ app.addHook('preHandler', async (req, reply) => {
 const AUTH_OPEN_PATHS = new Set<string>([
   '/api/auth/login', '/api/auth/signup', '/api/auth/bootstrap-status', '/api/auth/logout',
   '/api/auth/google/callback', '/health', '/api/livez', '/api/healthz',
+  '/api/auth/bing/callback',
   '/api/auth/passkeys/login/start', '/api/auth/passkeys/login/finish', '/api/auth/sso/providers',
   '/api/auth/forgot-password', '/api/auth/reset-password',
 ]);
 // Pre-auth path prefixes (dynamic segments) — e.g. the SSO provider redirect
 // and callback which the identity provider hits with no session, and the
 // workspace-invite accept flow (the invitee has no account/session yet).
-const AUTH_OPEN_PREFIXES = ['/api/auth/sso/', '/api/invites/'];
+const AUTH_OPEN_PREFIXES = ['/api/auth/sso/', '/api/invites/', '/api/v1/'];
 function sessionTokenFromReq(req: { headers: Record<string, unknown> }): string | undefined {
   const raw = req.headers['cookie'];
   if (typeof raw !== 'string') return undefined;
@@ -346,12 +353,16 @@ function capabilityForPath(path: string): Capability | null {
     return 'manage_sites';
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
-    || path.startsWith('/api/auth/google/start')
+    || path.startsWith('/api/auth/google/start') || path.startsWith('/api/auth/bing/start')
     || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys'
     || path === '/api/ai/models' || path.startsWith('/api/ai/provision/')) {
     return 'manage_integrations';
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
+  if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
+  if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
+  if (path.startsWith('/api/platform/reports') || path.startsWith('/api/platform/views')) return 'manage_reports';
+  if (path.startsWith('/api/platform/budgets') || path.startsWith('/api/platform/webhooks') || path.startsWith('/api/platform/tokens') || path.startsWith('/api/platform/governance')) return 'manage_governance';
   return null;
 }
 
@@ -367,6 +378,13 @@ app.addHook('preHandler', async (req, reply) => {
   if (!ctx || !ctx.workspaceId) return;
   if (WORKSPACE_GATE_EXEMPT_EXACT.has(pathOnly)) return;
   if (SELF_ACCOUNT_EXEMPT_EXACT.has(pathOnly) || SELF_ACCOUNT_EXEMPT_PREFIXES.some(p => pathOnly.startsWith(p))) return;
+  const policy = getWorkspaceSettings(ctx.workspaceId);
+  if (policy.workspace_mfa_required === 'true' && !ctx.user.totp_enabled && listPasskeys(ctx.user.id).length === 0) {
+    return reply.status(428).send({
+      error: 'This workspace requires MFA. Enroll an authenticator or passkey in Settings before making changes.',
+      mfaEnrollmentRequired: true,
+    });
+  }
   if (ctx.user.is_super_admin) return;
   const role = workspaceRole(ctx.user, ctx.workspaceId);
   if (role === 'viewer' || role === null) {
@@ -749,6 +767,9 @@ app.get('/api/workspaces', async (req) => {
       manage_sites: hasCapability(user, w.id, 'manage_sites'),
       manage_integrations: hasCapability(user, w.id, 'manage_integrations'),
       manage_notifications: hasCapability(user, w.id, 'manage_notifications'),
+      manage_content: hasCapability(user, w.id, 'manage_content'),
+      manage_reports: hasCapability(user, w.id, 'manage_reports'),
+      manage_governance: hasCapability(user, w.id, 'manage_governance'),
     },
   }));
 });
@@ -1736,7 +1757,7 @@ const PUBLIC_SETTINGS = ['cron_schedule', 'google_project_id'];
 // `<key>_configured` booleans instead. These are the PLATFORM DEFAULTS; each
 // workspace can override any of them (see /api/workspace/keys).
 const SECRET_SETTINGS = [
-  'bing_api_key', 'crux_api_key',
+  'bing_api_key', 'bing_oauth_client_id', 'bing_oauth_client_secret', 'crux_api_key',
   'openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'perplexity_api_key', 'xai_api_key',
   'brave_api_key',
 ];
@@ -2081,7 +2102,7 @@ app.get('/api/performance/:siteId/dimension', async (req, reply) => {
   if (!site) return reply.code(404).send({ error: 'Site not found' });
   const q = req.query as { days?: string; dimension?: string };
   const days = Math.min(Math.max(Number(q.days) || 28, 1), 365);
-  const dimension = q.dimension === 'device' ? 'device' : 'country';
+  const dimension = q.dimension === 'device' ? 'device' : q.dimension === 'searchAppearance' ? 'searchAppearance' : 'country';
   return getGoogleDimension(site, days, dimension);
 });
 
@@ -2160,12 +2181,12 @@ app.post('/api/submit/:siteId', async (req, reply) => {
     }
   }
   if (targets.includes('bing')) {
-    const apiKey = bingKeyForSite(site.id);
-    if (!apiKey) {
-      result.bing = { error: 'No Bing Webmaster API key configured.' };
+    const bingCredential = await bingCredentialForSite(site.id);
+    if (!bingCredential) {
+      result.bing = { error: 'No Bing Webmaster OAuth account or API key configured.' };
     } else {
       try {
-        const results = await submitToBingInBatches(apiKey, deriveBingSiteUrl(site.gsc_url, site.domain), list);
+        const results = await submitToBingInBatches(bingCredential, deriveBingSiteUrl(site.gsc_url, site.domain), list);
         result.bing = { submitted: results.filter(r => r.success).reduce((s, r) => s + r.urlCount, 0) };
       } catch (e) {
         result.bing = { error: e instanceof Error ? e.message : String(e) };
@@ -2229,10 +2250,10 @@ app.put('/api/sites/:id/llms', async (req, reply) => {
 app.get('/api/bing/quota/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  const apiKey = bingKeyForSite(site.id);
-  if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
-  const quota = await getBingQuota(apiKey, deriveBingSiteUrl(site.gsc_url, site.domain));
-  if (!quota) return reply.code(502).send({ error: 'Bing quota unavailable — check the API key and that the site is verified in Bing Webmaster Tools' });
+  const bingCredential = await bingCredentialForSite(site.id);
+  if (!bingCredential) return reply.code(400).send({ error: 'Bing OAuth account or API key not configured' });
+  const quota = await getBingQuota(bingCredential, deriveBingSiteUrl(site.gsc_url, site.domain));
+  if (!quota) return reply.code(502).send({ error: 'Bing quota unavailable — check the delegated account/key and verified property' });
   // Keep the response shape the dashboard expects.
   return { DailyQuota: quota.dailyQuota, MonthlyQuota: quota.monthlyQuota };
 });
@@ -2240,12 +2261,12 @@ app.get('/api/bing/quota/:siteId', async (req, reply) => {
 app.post('/api/bing/submit/:siteId', async (req, reply) => {
   const site = getSiteById((req.params as { siteId: string }).siteId);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
-  const apiKey = bingKeyForSite(site.id);
-  if (!apiKey) return reply.code(400).send({ error: 'Bing API key not configured' });
+  const bingCredential = await bingCredentialForSite(site.id);
+  if (!bingCredential) return reply.code(400).send({ error: 'Bing OAuth account or API key not configured' });
   const { urls } = (req.body ?? {}) as { urls?: string[] };
   const list = urls?.length ? urls : getUrlsBySite(site.id).slice(0, 100).map((u: { url: string }) => u.url);
   const siteUrl = deriveBingSiteUrl(site.gsc_url, site.domain);
-  const results = await submitToBingInBatches(apiKey, siteUrl, list);
+  const results = await submitToBingInBatches(bingCredential, siteUrl, list);
   const submitted = results.filter(r => r.success).reduce((s, r) => s + r.urlCount, 0);
   const failed = results.find(r => !r.success);
   if (failed) {
@@ -2260,6 +2281,40 @@ app.post('/api/bing/submit/:siteId', async (req, reply) => {
 // Each workspace can hold several Bing Webmaster API keys; a site either picks
 // one (site.bing_account_id) or falls back to the workspace's first.
 
+app.post('/api/auth/bing/start', async (req, reply) => {
+  const workspaceId = requireWorkspace(req); const current = currentUser(req);
+  const clientId = effectiveSetting(workspaceId, 'bing_oauth_client_id');
+  const clientSecret = effectiveSetting(workspaceId, 'bing_oauth_client_secret');
+  if (!clientId || !clientSecret) return reply.code(400).send({ error: 'Configure the Bing OAuth client ID and secret for this workspace first.' });
+  const name = String(((req.body ?? {}) as { name?: string }).name ?? 'Bing OAuth'); const { origin } = rpInfo(req);
+  const redirectUri = `${origin}/api/auth/bing/callback`; const state = createBingOAuthState({ workspaceId, userId: current.id, name, redirectUri });
+  const params = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: 'webmaster.manage', state });
+  return { authorizationUrl: `https://www.bing.com/webmasters/oauth/authorize?${params}` };
+});
+
+app.get('/api/auth/bing/callback', async (req, reply) => {
+  const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
+  if (error) return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection cancelled</h2><p>${escapeHtml(error)}</p><button onclick="window.close()">Close</button></div></body></html>`);
+  const pending = state ? consumeBingOAuthState(state) : null;
+  if (!code || !pending) return reply.code(400).send({ error: 'This Bing authorization request is invalid or expired.' });
+  const pendingUser = getUserById(pending.user_id);
+  if (!pendingUser || pendingUser.disabled || !canAccessWorkspace(pendingUser, pending.workspace_id)) return reply.code(403).send({ error: 'The user or workspace is no longer available.' });
+  const clientId = effectiveSetting(pending.workspace_id, 'bing_oauth_client_id'); const clientSecret = effectiveSetting(pending.workspace_id, 'bing_oauth_client_secret');
+  if (!clientId || !clientSecret) return reply.code(400).send({ error: 'Bing OAuth credentials are no longer configured.' });
+  try {
+    const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, grant_type: 'authorization_code', redirect_uri: pending.redirect_uri });
+    const response = await fetch('https://www.bing.com/webmasters/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20_000) });
+    const tokens = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
+    if (!response.ok || !tokens.access_token) throw new Error(tokens.error || `HTTP ${response.status}`);
+    const account = addBingOAuthAccount(pending.workspace_id, pending.name, { access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
+    recordAuditEvent({ actorUserId: pending.user_id, workspaceId: pending.workspace_id, action: 'bing_oauth.connected', detail: { accountId: account.id } });
+    const openerOrigin = new URL(pending.redirect_uri).origin;
+    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#74e6b2;display:grid;place-items:center;height:90vh"><div><h2>Bing connected</h2><p>You can return to Organic Command.</p></div><script>if(window.opener)window.opener.postMessage({type:'BING_AUTH_SUCCESS'},${JSON.stringify(openerOrigin)});setTimeout(()=>window.close(),1200)</script></body></html>`);
+  } catch (failure) {
+    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection failed</h2><p>${escapeHtml(failure instanceof Error ? failure.message : failure)}</p><button onclick="window.close()">Close</button></div></body></html>`);
+  }
+});
+
 app.get('/api/bing/accounts', async (req) => {
   const ws = currentWorkspace(req);
   return ws ? listBingAccounts(ws) : [];
@@ -2270,7 +2325,7 @@ app.post('/api/bing/accounts', async (req, reply) => {
   const { name, apiKey } = (req.body ?? {}) as { name?: string; apiKey?: string };
   if (!apiKey?.trim()) return reply.code(400).send({ error: 'apiKey is required.' });
   const acc = addBingAccount(ws, name ?? 'Bing account', apiKey);
-  return { id: acc.id, name: acc.name, created_at: acc.created_at };
+  return { id: acc.id, name: acc.name, auth_type: acc.auth_type, expires_at: acc.expires_at, created_at: acc.created_at };
 });
 
 app.delete('/api/bing/accounts/:id', async (req, reply) => {
@@ -2336,11 +2391,21 @@ app.get('/api/ai/providers', async (req) => ({
 app.get('/api/ai/prompts', async (req) => listPrompts(currentWorkspace(req)));
 app.post('/api/ai/prompts', async (req, reply) => {
   const wsId = currentWorkspace(req);
-  const { prompt, site_id, category } = (req.body ?? {}) as { prompt?: string; site_id?: string; category?: PromptCategory };
+  const { prompt, site_id, category, group_name, locale, device, persona, cadence } = (req.body ?? {}) as {
+    prompt?: string; site_id?: string; category?: PromptCategory; group_name?: string; locale?: string;
+    device?: string; persona?: string; cadence?: PromptRow['cadence'];
+  };
   if (!prompt?.trim()) return reply.code(400).send({ error: 'prompt required' });
   if (site_id && !canAccessSiteInWorkspace(currentUser(req), site_id, wsId)) return reply.code(404).send({ error: 'Site not found' });
   if (category && !PROMPT_CATEGORIES.includes(category)) return reply.code(400).send({ error: 'Invalid prompt category' });
-  return addPrompt(prompt.trim(), site_id ?? null, wsId, category ?? 'discovery');
+  return addPrompt(prompt.trim(), site_id ?? null, wsId, category ?? 'discovery', { group_name, locale, device, persona, cadence });
+});
+app.patch('/api/ai/prompts/:id', async (req, reply) => {
+  const ws = requireWorkspace(req); const id = Number((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Partial<Pick<PromptRow, 'prompt' | 'site_id' | 'category' | 'group_name' | 'locale' | 'device' | 'persona' | 'cadence' | 'enabled'>>;
+  if (body.site_id) assertSiteAccess(req, body.site_id);
+  if (body.category && !PROMPT_CATEGORIES.includes(body.category)) return reply.code(400).send({ error: 'Invalid prompt category' });
+  return updatePrompt(id, ws, body) ?? reply.code(404).send({ error: 'Prompt not found' });
 });
 app.delete('/api/ai/prompts/:id', async (req) => {
   deletePrompt(Number((req.params as { id: string }).id), currentWorkspace(req));
@@ -2431,6 +2496,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
   return result;
 });
 
+registerPlatformRoutes(app);
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 SEO Website Indexer running at http://localhost:${PORT}\n`);
