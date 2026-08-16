@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/martadams89/seo-website-indexer/compare/v1.25.0...v1.26.0) (2026-08-16)
+
+
+### ✨ Features
+
+* launch organic search command center ([#249](https://github.com/martadams89/seo-website-indexer/issues/249)) ([e843fe3](https://github.com/martadams89/seo-website-indexer/commit/e843fe30b74b2fcbaa57c43c1434f0a4ed5f0e29))
+
 ## [1.25.0](https://github.com/martadams89/seo-website-indexer/compare/v1.24.4...v1.25.0) (2026-08-16)
 
 
