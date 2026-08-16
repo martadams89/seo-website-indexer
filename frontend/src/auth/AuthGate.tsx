@@ -13,6 +13,7 @@ interface AuthValue {
   user: CurrentUser;
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
+  stopImpersonating: () => Promise<void>;
 }
 const AuthContext = createContext<AuthValue | null>(null);
 export function useAuth(): AuthValue {
@@ -45,14 +46,62 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setUser(null);
     setPhase('login');
   }, []);
+  const stopImpersonating = useCallback(async () => {
+    const restored = await api.stopImpersonating();
+    setUser(restored);
+    window.location.reload();
+  }, []);
 
   if (phase === 'loading') {
     return <div className="auth-screen"><Loader2 className="spin" size={22} /></div>;
   }
   if (phase === 'authed' && user) {
-    return <AuthContext.Provider value={{ user, refreshUser, logout }}>{children}</AuthContext.Provider>;
+    if (user.must_change_password && !user.impersonation) {
+      return <RequiredPasswordChange onDone={refreshUser} />;
+    }
+    return <AuthContext.Provider value={{ user, refreshUser, logout, stopImpersonating }}>{children}</AuthContext.Provider>;
   }
   return <AuthForm mode={phase === 'signup' ? 'signup' : 'login'} onAuthed={resolve} />;
+}
+
+function RequiredPasswordChange({ onDone }: { onDone: () => Promise<void> }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
+    setBusy(true); setError('');
+    try {
+      await api.setRequiredPassword(password);
+      await onDone();
+    } catch (err) {
+      setError((err as ApiError).message || 'Could not update the password.');
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="auth-screen">
+      <form className="auth-card" onSubmit={submit}>
+        <div className="auth-logo">🔐</div>
+        <h1 className="auth-title">Choose your password</h1>
+        <p className="auth-sub">An administrator issued a temporary password. Replace it before continuing.</p>
+        <label className="auth-field"><span>New password</span>
+          <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={8} autoComplete="new-password" required />
+        </label>
+        <label className="auth-field"><span>Confirm password</span>
+          <input className="input" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} minLength={8} autoComplete="new-password" required />
+        </label>
+        {error && <div className="auth-error">{error}</div>}
+        <button className="btn btn-primary" type="submit" disabled={busy || password.length < 8 || confirmPassword.length < 8} style={{ width: '100%', justifyContent: 'center' }}>
+          {busy ? <Loader2 className="spin" size={14} /> : <KeyRound size={14} />} Set password
+        </button>
+      </form>
+    </div>
+  );
 }
 
 function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () => void }) {

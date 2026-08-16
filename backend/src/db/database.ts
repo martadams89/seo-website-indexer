@@ -25,6 +25,7 @@ export function getDb(): Database.Database {
     _db.pragma('busy_timeout = 5000');
     initSchema(_db);
     migrateSettingsToAccounts(_db);
+    migrateGoogleAccountWorkspaceShares(_db);
     backfillSiteAccounts(_db);
   }
   return _db;
@@ -335,6 +336,50 @@ function initSchema(db: Database.Database): void {
       holder      TEXT NOT NULL,
       acquired_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Explicit Google-account delegation. Credentials belong to a user, while
+    -- these rows decide which workspaces may use them. This lets a member add
+    -- their own Google account to one workspace without exposing it to every
+    -- tenant they can access.
+    CREATE TABLE IF NOT EXISTS google_account_workspaces (
+      account_id   TEXT NOT NULL REFERENCES google_accounts(id) ON DELETE CASCADE,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      added_by     TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (account_id, workspace_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_google_account_workspaces_ws
+      ON google_account_workspaces(workspace_id);
+
+    -- Short-lived, single-use OAuth handshakes. Client secrets are encrypted;
+    -- only a hash of the browser-visible state token is stored. This avoids the
+    -- old process-global credential slot racing when two users connect at once.
+    CREATE TABLE IF NOT EXISTS google_oauth_states (
+      state_hash    TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      client_id     TEXT NOT NULL,
+      client_secret TEXT NOT NULL,
+      redirect_uri  TEXT NOT NULL,
+      expires_at    TEXT NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_google_oauth_states_expiry ON google_oauth_states(expires_at);
+
+    -- Security and administration audit trail. User ids intentionally are not
+    -- foreign keys: deleting an account must not erase the record of who acted.
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_user_id TEXT,
+      target_user_id TEXT,
+      workspace_id  TEXT,
+      action        TEXT NOT NULL,
+      detail        TEXT,
+      ip_address    TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_target ON audit_events(target_user_id, created_at);
   `);
 
   // Backwards compatibility migrations
@@ -421,6 +466,17 @@ function initSchema(db: Database.Database): void {
   if (gaCols.length > 0 && !gaCols.some(c => c.name === 'last_refresh_error')) {
     db.exec("ALTER TABLE google_accounts ADD COLUMN last_refresh_error TEXT;");
   }
+  if (gaCols.length > 0) {
+    const credentialRows = db.prepare('SELECT id, client_secret, access_token, refresh_token FROM google_accounts').all() as Array<{
+      id: string; client_secret: string; access_token: string | null; refresh_token: string;
+    }>;
+    const protect = db.prepare('UPDATE google_accounts SET client_secret = ?, access_token = ?, refresh_token = ? WHERE id = ?');
+    db.transaction(() => {
+      for (const row of credentialRows) {
+        protect.run(encrypt(row.client_secret) ?? '', encrypt(row.access_token), encrypt(row.refresh_token) ?? '', row.id);
+      }
+    })();
+  }
   // Runs are per-workspace: which tenant an indexing run belongs to.
   const rhCols = db.prepare("PRAGMA table_info(run_history)").all() as { name: string }[];
   if (rhCols.length > 0 && !rhCols.some(c => c.name === 'workspace_id')) {
@@ -500,6 +556,14 @@ function initSchema(db: Database.Database): void {
   if (userCols.length > 0 && !userCols.some(c => c.name === 'disabled')) {
     db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;");
   }
+  if (userCols.length > 0 && !userCols.some(c => c.name === 'must_change_password')) {
+    db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;");
+  }
+
+  const sessionCols = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  if (sessionCols.length > 0 && !sessionCols.some(c => c.name === 'impersonator_user_id')) {
+    db.exec("ALTER TABLE sessions ADD COLUMN impersonator_user_id TEXT REFERENCES users(id) ON DELETE CASCADE;");
+  }
 
   // Fuller per-workspace permissions: role gains 'admin'/'viewer' tiers (legacy
   // 'member' rows are treated as 'editor' in code), ai_citations gates access to
@@ -540,6 +604,30 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_workspace_invites_ws ON workspace_invites(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_workspace_invites_email ON workspace_invites(email);
   `);
+
+}
+
+function migrateGoogleAccountWorkspaceShares(db: Database.Database): void {
+  // Run after migrateSettingsToAccounts so a legacy settings-only credential is
+  // present before the one-time share snapshot is created. Preserve the old
+  // implicit availability, while new connections remain workspace-explicit.
+  db.exec(`
+    INSERT OR IGNORE INTO google_account_workspaces(account_id, workspace_id, added_by)
+    SELECT ga.id, w.id, ga.owner_user_id
+    FROM google_accounts ga
+    JOIN workspaces w ON w.owner_user_id = ga.owner_user_id
+    WHERE ga.owner_user_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'migration_google_account_workspace_shares');
+
+    INSERT OR IGNORE INTO google_account_workspaces(account_id, workspace_id, added_by)
+    SELECT ga.id, ga.workspace_id, ga.owner_user_id
+    FROM google_accounts ga
+    WHERE ga.workspace_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'migration_google_account_workspace_shares');
+
+    INSERT OR IGNORE INTO settings(key, value)
+    VALUES('migration_google_account_workspace_shares', '1');
+  `);
 }
 
 function migrateSettingsToAccounts(db: Database.Database): void {
@@ -567,9 +655,9 @@ function migrateSettingsToAccounts(db: Database.Database): void {
         'default',
         'Primary Account',
         oldClientId,
-        oldClientSecret,
-        oldAccessToken,
-        oldRefreshToken,
+        encrypt(oldClientSecret) ?? '',
+        encrypt(oldAccessToken),
+        encrypt(oldRefreshToken) ?? '',
         oldTokenExpiry
       );
 
@@ -591,35 +679,36 @@ function backfillSiteAccounts(db: Database.Database): void {
     const accountCount = (db.prepare('SELECT COUNT(*) AS c FROM google_accounts').get() as { c: number }).c;
     if (accountCount === 0) return; // nothing to link to yet
 
-    // Pick the newest account by created_at as the default fallback. This
-    // matches the scheduler's first-account fallback semantics in spirit
-    // (single-account installs are unambiguous; multi-account ones get the
-    // most-recently-added account, and the user can re-assign per site).
-    const defaultAccount = db.prepare(
-      'SELECT id FROM google_accounts ORDER BY created_at DESC LIMIT 1'
-    ).get() as { id: string } | undefined;
-    if (!defaultAccount) return;
-
     // Orphan = NULL OR points at a row that no longer exists.
     const orphans = db.prepare(`
-      SELECT s.id, s.name, s.google_account_id
+      SELECT s.id, s.name, s.google_account_id, s.workspace_id
       FROM sites s
       LEFT JOIN google_accounts a ON a.id = s.google_account_id
       WHERE s.google_account_id IS NULL OR a.id IS NULL
-    `).all() as Array<{ id: string; name: string; google_account_id: string | null }>;
+    `).all() as Array<{ id: string; name: string; google_account_id: string | null; workspace_id: string | null }>;
 
     if (orphans.length === 0) return;
 
+    const available = db.prepare(`
+      SELECT ga.id FROM google_account_workspaces gaw
+      JOIN google_accounts ga ON ga.id = gaw.account_id
+      WHERE gaw.workspace_id = ? ORDER BY ga.created_at DESC LIMIT 1
+    `);
+    const legacyFallback = db.prepare('SELECT id FROM google_accounts ORDER BY created_at DESC LIMIT 1');
     const upd = db.prepare('UPDATE sites SET google_account_id = ? WHERE id = ?');
+    let linked = 0;
     const tx = db.transaction((rows: typeof orphans) => {
-      for (const r of rows) upd.run(defaultAccount.id, r.id);
+      for (const r of rows) {
+        // Never borrow an account from another tenant. Unassigned legacy sites
+        // retain the old single-tenant fallback until the first admin claims
+        // them; workspace sites require an explicit credential delegation.
+        const account = (r.workspace_id ? available.get(r.workspace_id) : legacyFallback.get()) as { id: string } | undefined;
+        if (account) { upd.run(account.id, r.id); linked++; }
+      }
     });
     tx(orphans);
 
-    console.log(
-      `[migration] Linked ${orphans.length} site(s) to Google account ${defaultAccount.id}: ` +
-      orphans.map(o => `${o.name}${o.google_account_id ? ` (was stale "${o.google_account_id}")` : ''}`).join(', ')
-    );
+    if (linked > 0) console.log(`[migration] Linked ${linked} orphan site(s) to a Google account delegated to their workspace.`);
   } catch (e) {
     console.error('Failed to backfill site → google_account associations:', e);
   }
@@ -997,52 +1086,91 @@ export interface GoogleAccount {
   last_refreshed_at?: string | null;
   last_refresh_error?: string | null;
   workspace_id?: string | null;   // "home" workspace where it was first connected
-  owner_user_id?: string | null;  // owner: the account is available to all of this owner's workspaces
+  owner_user_id?: string | null;  // credential owner; workspace use is delegated separately
   needs_reauth?: number;          // 1 when the refresh token is dead (revoked / reauth policy) and the user must reconnect
   created_at?: string;
+  owner_email?: string | null;
+  shared_at?: string | null;
 }
 
 export function getAllGoogleAccounts(): GoogleAccount[] {
-  return getDb().prepare('SELECT * FROM google_accounts ORDER BY created_at').all() as GoogleAccount[];
+  return (getDb().prepare('SELECT * FROM google_accounts ORDER BY created_at').all() as GoogleAccount[]).map(decryptGoogleAccount);
 }
 
-/**
- * Google accounts AVAILABLE to a workspace = every account owned by that
- * workspace's owner. Accounts are account-level: connect once, reuse across all
- * of the owner's workspaces, and pick the right one per site. (Cross-owner
- * isolation is preserved — a different owner's accounts never appear.)
- */
+function decryptGoogleAccount(account: GoogleAccount): GoogleAccount {
+  return {
+    ...account,
+    client_secret: decrypt(account.client_secret) ?? '',
+    access_token: decrypt(account.access_token),
+    refresh_token: decrypt(account.refresh_token) ?? '',
+  };
+}
+
+/** Google accounts explicitly delegated to a workspace. The credential owner
+ * may be the workspace owner or any member who connected their own account. */
 export function getGoogleAccountsForWorkspace(workspaceId: string): GoogleAccount[] {
-  return getDb().prepare(`
-    SELECT ga.* FROM google_accounts ga
-    WHERE ga.owner_user_id IS NOT NULL
-      AND ga.owner_user_id = (SELECT owner_user_id FROM workspaces WHERE id = ?)
+  return (getDb().prepare(`
+    SELECT ga.*, u.email AS owner_email, gaw.created_at AS shared_at
+    FROM google_account_workspaces gaw
+    JOIN google_accounts ga ON ga.id = gaw.account_id
+    LEFT JOIN users u ON u.id = ga.owner_user_id
+    WHERE gaw.workspace_id = ?
     ORDER BY ga.created_at
-  `).all(workspaceId) as GoogleAccount[];
+  `).all(workspaceId) as GoogleAccount[]).map(decryptGoogleAccount);
 }
 
 /**
  * True if `accountId` is usable from `workspaceId` (i.e. it's in the list
  * `getGoogleAccountsForWorkspace` would return). This is the single source of
  * truth for authorizing use of a Google account, so a shared account is
- * actually usable in every one of its owner's workspaces — not just visible
- * in the picker but rejected everywhere except its original "home" workspace.
+ * actually usable only where it has been explicitly delegated.
  */
 export function isGoogleAccountAvailableToWorkspace(accountId: string, workspaceId: string): boolean {
-  return getGoogleAccountsForWorkspace(workspaceId).some(a => a.id === accountId);
+  return !!getDb().prepare(`
+    SELECT 1 FROM google_account_workspaces
+    WHERE account_id = ? AND workspace_id = ?
+  `).get(accountId, workspaceId);
 }
 
 /** All Google accounts owned by a user (their account-level pool). */
 export function getGoogleAccountsForOwner(ownerUserId: string): GoogleAccount[] {
-  return getDb().prepare('SELECT * FROM google_accounts WHERE owner_user_id = ? ORDER BY created_at').all(ownerUserId) as GoogleAccount[];
+  return (getDb().prepare('SELECT * FROM google_accounts WHERE owner_user_id = ? ORDER BY created_at').all(ownerUserId) as GoogleAccount[])
+    .map(decryptGoogleAccount);
+}
+
+/** Make one user's Google credential available to a workspace. */
+export function shareGoogleAccountWithWorkspace(accountId: string, workspaceId: string, addedBy?: string | null): void {
+  getDb().prepare(`
+    INSERT OR IGNORE INTO google_account_workspaces(account_id, workspace_id, added_by)
+    VALUES(?,?,?)
+  `).run(accountId, workspaceId, addedBy ?? null);
+}
+
+/** Remove workspace access without deleting the owner's credential or shares
+ * in other workspaces. Sites in this workspace are unlinked atomically. */
+export function unshareGoogleAccountFromWorkspace(accountId: string, workspaceId: string): boolean {
+  const db = getDb();
+  return db.transaction(() => {
+    db.prepare('UPDATE sites SET google_account_id = NULL WHERE workspace_id = ? AND google_account_id = ?')
+      .run(workspaceId, accountId);
+    return db.prepare('DELETE FROM google_account_workspaces WHERE account_id = ? AND workspace_id = ?')
+      .run(accountId, workspaceId).changes > 0;
+  })();
+}
+
+export function googleAccountWorkspaceIds(accountId: string): string[] {
+  return (getDb().prepare('SELECT workspace_id FROM google_account_workspaces WHERE account_id = ? ORDER BY created_at')
+    .all(accountId) as Array<{ workspace_id: string }>).map(r => r.workspace_id);
 }
 
 export function getGoogleAccountById(id: string): GoogleAccount | null {
-  return (getDb().prepare('SELECT * FROM google_accounts WHERE id = ?').get(id) as GoogleAccount | undefined) ?? null;
+  const row = getDb().prepare('SELECT * FROM google_accounts WHERE id = ?').get(id) as GoogleAccount | undefined;
+  return row ? decryptGoogleAccount(row) : null;
 }
 
 export function getGoogleAccountByEmail(email: string): GoogleAccount | null {
-  return (getDb().prepare('SELECT * FROM google_accounts WHERE email = ?').get(email) as GoogleAccount | undefined) ?? null;
+  const row = getDb().prepare('SELECT * FROM google_accounts WHERE email = ?').get(email) as GoogleAccount | undefined;
+  return row ? decryptGoogleAccount(row) : null;
 }
 
 /** Assign (or move) a Google account to a workspace. */
@@ -1075,6 +1203,12 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
   // COALESCE keeps the existing workspace if the caller omits it (token
   // refreshes don't carry a workspace), while still allowing a first
   // assignment when the row had none.
+  const stored = {
+    ...acc,
+    client_secret: encrypt(acc.client_secret) ?? '',
+    access_token: encrypt(acc.access_token),
+    refresh_token: encrypt(acc.refresh_token) ?? '',
+  };
   getDb().prepare(`
     INSERT INTO google_accounts (
       id, email, client_id, client_secret, access_token, refresh_token,
@@ -1106,7 +1240,7 @@ export function upsertGoogleAccount(acc: GoogleAccount): void {
     granted_scopes: null,
     last_refreshed_at: null,
     last_refresh_error: null,
-    ...acc,
+    ...stored,
   });
 }
 
@@ -1217,6 +1351,18 @@ export function getRecentlyBackedOffUrls(api: string, threshold = 3, recencyDays
 
 export function getAllUrlFailures(): UrlFailure[] {
   return getDb().prepare('SELECT * FROM url_failures ORDER BY last_failed_at DESC').all() as UrlFailure[];
+}
+
+/** Clear matching failures only inside a validated set of workspace site ids. */
+export function clearUrlFailuresForSites(siteIds: string[], filters: { siteId?: string; url?: string; api?: string } = {}): number {
+  if (siteIds.length === 0) return 0;
+  if (filters.siteId && !siteIds.includes(filters.siteId)) return 0;
+  const clauses = [`site_id IN (${siteIds.map(() => '?').join(',')})`];
+  const params: unknown[] = [...siteIds];
+  if (filters.siteId) { clauses.push('site_id = ?'); params.push(filters.siteId); }
+  if (filters.url) { clauses.push('url = ?'); params.push(filters.url); }
+  if (filters.api) { clauses.push('api = ?'); params.push(filters.api); }
+  return getDb().prepare(`DELETE FROM url_failures WHERE ${clauses.join(' AND ')}`).run(...params).changes;
 }
 
 // ── Run Lock with TTL ─────────────────────────────────────────────────────────

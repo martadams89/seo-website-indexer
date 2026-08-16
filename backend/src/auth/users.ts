@@ -21,6 +21,7 @@ export interface User {
   role: string;
   is_super_admin: number;
   disabled: number;
+  must_change_password: number;
   created_at: string;
   last_login_at: string | null;
 }
@@ -34,12 +35,18 @@ export interface PublicUser {
   is_super_admin: boolean;
   disabled: boolean;
   totp_enabled: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  last_login_at: string | null;
 }
 
 export function toPublic(u: User): PublicUser {
   return {
     id: u.id, email: u.email, name: u.name, role: u.role,
     is_super_admin: !!u.is_super_admin, disabled: !!u.disabled, totp_enabled: !!u.totp_enabled,
+    must_change_password: !!u.must_change_password,
+    created_at: u.created_at,
+    last_login_at: u.last_login_at,
   };
 }
 
@@ -71,21 +78,51 @@ export function getUserById(id: string): User | undefined {
   return getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
 }
 
-export function createUser(opts: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean }): User {
+export function createUser(opts: { email: string; password: string; name?: string; role?: string; superAdmin?: boolean; mustChangePassword?: boolean }): User {
   const salt = randomBytes(16).toString('hex');
   const id = randomUUID();
   getDb().prepare(`
-    INSERT INTO users(id, email, name, password_hash, password_salt, role, is_super_admin)
-    VALUES(?,?,?,?,?,?,?)
-  `).run(id, opts.email.trim(), opts.name?.trim() || null, hashPassword(opts.password, salt), salt,
-    opts.role ?? 'user', opts.superAdmin ? 1 : 0);
+    INSERT INTO users(id, email, name, password_hash, password_salt, role, is_super_admin, must_change_password)
+    VALUES(?,?,?,?,?,?,?,?)
+  `).run(id, opts.email.trim().toLowerCase(), opts.name?.trim() || null, hashPassword(opts.password, salt), salt,
+    opts.role ?? 'user', opts.superAdmin ? 1 : 0, opts.mustChangePassword ? 1 : 0);
   return getUserById(id)!;
 }
 
 export function setUserPassword(id: string, password: string): void {
   const salt = randomBytes(16).toString('hex');
-  getDb().prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?')
+  getDb().prepare('UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0 WHERE id = ?')
     .run(hashPassword(password, salt), salt, id);
+}
+
+/** Set a one-time admin-generated password and revoke every existing session. */
+export function setTemporaryPassword(id: string, password: string): void {
+  const salt = randomBytes(16).toString('hex');
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1 WHERE id = ?')
+      .run(hashPassword(password, salt), salt, id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    // A previously emailed link must not be able to replace a newer
+    // administrator-issued credential.
+    db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(id);
+  })();
+}
+
+export function generateTemporaryPassword(): string {
+  // 24 URL-safe random characters; comfortably above the app's 8-char floor.
+  return randomBytes(18).toString('base64url');
+}
+
+export function updateUserProfile(id: string, changes: { email?: string; name?: string | null; role?: string }): boolean {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (typeof changes.email === 'string') { sets.push('email = ?'); params.push(changes.email.trim().toLowerCase()); }
+  if (changes.name !== undefined) { sets.push('name = ?'); params.push(changes.name?.trim() || null); }
+  if (typeof changes.role === 'string') { sets.push('role = ?'); params.push(changes.role); }
+  if (sets.length === 0) return true;
+  params.push(id);
+  return getDb().prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params).changes > 0;
 }
 
 export function recordLogin(id: string): void {
@@ -119,25 +156,35 @@ export function deleteUser(id: string): void {
 
 const SESSION_TTL_DAYS = 30;
 
-export function createSession(userId: string, userAgent?: string): string {
+export function createSession(userId: string, userAgent?: string, impersonatorUserId?: string | null): string {
   const token = randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_TTL_DAYS * 86_400_000).toISOString();
-  getDb().prepare('INSERT INTO sessions(token, user_id, expires_at, user_agent) VALUES(?,?,?,?)')
-    .run(token, userId, expires, userAgent ?? null);
+  getDb().prepare('INSERT INTO sessions(token, user_id, expires_at, user_agent, impersonator_user_id) VALUES(?,?,?,?,?)')
+    .run(token, userId, expires, userAgent ?? null, impersonatorUserId ?? null);
   return token;
 }
 
-/** Resolve a session token to its user, or null if missing/expired. */
-export function getSessionUser(token: string | undefined): User | null {
+export interface SessionContext { user: User; impersonator: User | null }
+
+/** Resolve a session token to its user and optional impersonating admin. */
+export function getSessionContext(token: string | undefined): SessionContext | null {
   if (!token) return null;
-  const row = getDb().prepare('SELECT user_id, expires_at FROM sessions WHERE token = ?')
-    .get(token) as { user_id: string; expires_at: string } | undefined;
+  const row = getDb().prepare('SELECT user_id, impersonator_user_id, expires_at FROM sessions WHERE token = ?')
+    .get(token) as { user_id: string; impersonator_user_id: string | null; expires_at: string } | undefined;
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
     destroySession(token);
     return null;
   }
-  return getUserById(row.user_id) ?? null;
+  const user = getUserById(row.user_id);
+  if (!user) return null;
+  const impersonator = row.impersonator_user_id ? getUserById(row.impersonator_user_id) ?? null : null;
+  return { user, impersonator };
+}
+
+/** Backwards-compatible identity-only session lookup. */
+export function getSessionUser(token: string | undefined): User | null {
+  return getSessionContext(token)?.user ?? null;
 }
 
 export function destroySession(token: string): void {
@@ -146,6 +193,46 @@ export function destroySession(token: string): void {
 
 export function pruneExpiredSessions(): number {
   return getDb().prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run().changes;
+}
+
+export interface AuditEvent {
+  id: number;
+  actor_user_id: string | null;
+  actor_email?: string | null;
+  target_user_id: string | null;
+  target_email?: string | null;
+  workspace_id: string | null;
+  action: string;
+  detail: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export function recordAuditEvent(event: {
+  actorUserId?: string | null; targetUserId?: string | null; workspaceId?: string | null;
+  action: string; detail?: Record<string, unknown> | string | null; ipAddress?: string | null;
+}): void {
+  const detail = typeof event.detail === 'string' ? event.detail
+    : event.detail ? JSON.stringify(event.detail) : null;
+  getDb().prepare(`
+    INSERT INTO audit_events(actor_user_id, target_user_id, workspace_id, action, detail, ip_address)
+    VALUES(?,?,?,?,?,?)
+  `).run(event.actorUserId ?? null, event.targetUserId ?? null, event.workspaceId ?? null,
+    event.action, detail, event.ipAddress ?? null);
+}
+
+export function listAuditEvents(limit = 100, targetUserId?: string): AuditEvent[] {
+  const sql = `
+    SELECT ae.*, actor.email AS actor_email, target.email AS target_email
+    FROM audit_events ae
+    LEFT JOIN users actor ON actor.id = ae.actor_user_id
+    LEFT JOIN users target ON target.id = ae.target_user_id
+    ${targetUserId ? 'WHERE ae.target_user_id = ? OR ae.actor_user_id = ?' : ''}
+    ORDER BY ae.created_at DESC, ae.id DESC LIMIT ?
+  `;
+  return (targetUserId
+    ? getDb().prepare(sql).all(targetUserId, targetUserId, limit)
+    : getDb().prepare(sql).all(limit)) as AuditEvent[];
 }
 
 // ── Password reset tokens (emailed link) ─────────────────────────────────────

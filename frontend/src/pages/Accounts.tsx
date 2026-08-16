@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, AlertTriangle, RefreshCw, Smartphone } from 'lucide-react';
-import { api, getActiveWorkspaceId, type GoogleAccount } from '../api';
+import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 
 export default function AccountsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { status, refresh } = useApp();
+  const { active } = useWorkspace();
+  const canConnect = !!active?.permissions?.manage_integrations;
   const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
+  const [myAccounts, setMyAccounts] = useState<GoogleAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -29,8 +33,9 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   async function fetchAccounts() {
     setLoading(true);
     try {
-      const data = await api.getAccounts();
+      const [data, mine] = await Promise.all([api.getAccounts(), api.getMyAccounts()]);
       setAccounts(data);
+      setMyAccounts(mine);
     } catch (e) {
       setError(String(e).replace('Error: ', ''));
     }
@@ -44,7 +49,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   // Listen for callback postMessage
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+      if (event.origin === window.location.origin && event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
         await refresh();
         await fetchAccounts();
         setShowAddForm(false);
@@ -57,46 +62,15 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   }, [refresh]);
 
   // `reconnect` re-authorises an existing account in place: it reuses the
-  // account's stored client id/secret (primed server-side), so the user never
-  // has to disconnect it or re-enter credentials — the fresh tokens land on the
-  // same row and clear its "Reconnect required" flag.
+  // account's encrypted client id/secret through a single-use server-side OAuth
+  // state, so the user never has to disconnect it or re-enter credentials.
   async function startGoogleAuth(reconnect?: GoogleAccount) {
     setConnectError('');
     if (reconnect) setReconnectingId(reconnect.id); else setConnecting(true);
     try {
-      let activeClientId: string;
-      if (reconnect) {
-        // Prime the pending exchange with the account's stored credentials.
-        const primed = await api.reconnectAccount(reconnect.id);
-        activeClientId = primed.clientId;
-      } else {
-        if (!hasBuiltin) {
-          await api.saveCredentials(clientId.trim(), clientSecret.trim());
-        }
-        activeClientId = hasBuiltin ? (status?.auth?.clientId || '') : clientId.trim();
-      }
-      if (!activeClientId) {
-        throw new Error('Google OAuth Client ID is missing.');
-      }
-
-      // Base scopes always requested; the Cloud scope (opt-in) lets the tool
-      // auto-enable the required APIs after connecting and provision a Gemini
-      // key on request. Must match the backend OAUTH_SCOPES for those to work.
-      const baseScopes = [
-        'https://www.googleapis.com/auth/webmasters',
-        'https://www.googleapis.com/auth/userinfo.email',
-      ];
-      if (autoSetup) baseScopes.push('https://www.googleapis.com/auth/cloud-platform');
-      const scope = baseScopes.join(' ');
-      // Carry the active workspace as OAuth `state` so the callback attaches the
-      // account to the tenant the user is actually viewing (not just their first).
-      const ws = getActiveWorkspaceId();
-      const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
-      const loginHint = reconnect?.email ? `&login_hint=${encodeURIComponent(reconnect.email)}` : '';
-      // Do not use include_granted_scopes here. Carrying an old cloud-platform
-      // grant into a minimal reconnect can keep a managed account subject to a
-      // Workspace session-control policy even when Auto-configure is off.
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account%20consent${stateParam}${loginHint}`;
+      const { authorizationUrl } = await api.beginGoogleAuth(reconnect
+        ? { accountId: reconnect.id, autoSetup }
+        : { clientId: hasBuiltin ? undefined : clientId.trim(), clientSecret: hasBuiltin ? undefined : clientSecret.trim(), autoSetup });
 
       const width = 600;
       const height = 700;
@@ -104,7 +78,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       const top = window.screen.height / 2 - height / 2;
       
       const popup = window.open(
-        authUrl,
+        authorizationUrl,
         'google-auth',
         `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
       );
@@ -120,7 +94,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   }
 
   async function disconnectAccount(id: string, email: string | null) {
-    if (!confirm(`Disconnect account ${email || id}? Any sites linked to this account will stop indexing.`)) return;
+    if (!confirm(`Delete Google credential ${email || id}? It will be removed from every workspace using it and linked sites will stop using it.`)) return;
     try {
       await api.disconnectAccount(id);
       await refresh();
@@ -128,6 +102,23 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
     } catch (e) {
       setError(String(e).replace('Error: ', ''));
     }
+  }
+
+  async function shareAccount(id: string) {
+    try {
+      await api.shareAccountWithWorkspace(id);
+      await refresh();
+      await fetchAccounts();
+    } catch (e) { setError(String(e).replace('Error: ', '')); }
+  }
+
+  async function unshareAccount(id: string, email: string | null) {
+    if (!confirm(`Remove ${email || id} from this workspace? Sites here that use it will be unlinked; the credential remains available to its owner and other workspaces.`)) return;
+    try {
+      await api.unshareAccountFromWorkspace(id);
+      await refresh();
+      await fetchAccounts();
+    } catch (e) { setError(String(e).replace('Error: ', '')); }
   }
 
   function copyRedirectUri() {
@@ -141,9 +132,9 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       {embedded ? (
         <div className="flex items-center justify-between mb-3">
           <p className="text-dim" style={{ fontSize: 12, margin: 0 }}>
-            Connect once, reuse across all your workspaces — pick the right account per site.
+            Workspace members can use shared accounts or contribute one of their own. Credentials remain owned by the person who connected them.
           </p>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowAddForm(!showAddForm)}>
+          <button className="btn btn-primary btn-sm" disabled={!canConnect} onClick={() => setShowAddForm(!showAddForm)}>
             <Plus size={14} /> Connect Account
           </button>
         </div>
@@ -153,7 +144,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             <h1 className="page-title">Google Accounts</h1>
             <p className="page-subtitle">Manage connected Google OAuth profiles for Search Console</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowAddForm(!showAddForm)}>
+          <button className="btn btn-primary" disabled={!canConnect} onClick={() => setShowAddForm(!showAddForm)}>
             <Plus size={14} /> Connect Account
           </button>
         </div>
@@ -257,6 +248,24 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       )}
 
       {/* Accounts List */}
+      {myAccounts.some(a => !a.available_in_workspace) && (
+        <div className="card mb-4">
+          <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Your other Google accounts</h2>
+          <p className="text-dim" style={{ fontSize: 12, marginBottom: 10 }}>Reuse a personal connection in this workspace without signing in to Google again.</p>
+          <div className="member-list">
+            {myAccounts.filter(a => !a.available_in_workspace).map(acc => (
+              <div className="member-row" key={acc.id}>
+                <div className="member-info">
+                  <span className="member-name">{acc.email || acc.id}</span>
+                  <span className="member-role">Owned by you · not shared with this workspace</span>
+                </div>
+                <button className="btn btn-secondary btn-sm" disabled={!canConnect} onClick={() => shareAccount(acc.id)}><Plus size={13} /> Add to workspace</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>Connected Accounts</h2>
         
@@ -287,6 +296,9 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                    {acc.is_mine ? 'Connected by you' : `Shared workspace account${acc.owner_email ? ` · owned by ${acc.owner_email}` : ''}`}
+                  </div>
                   {acc.refresh_token_expiry && (
                     <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
                       Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}.
@@ -311,17 +323,26 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     </div>
                   )}
                 </div>
-                <button
-                  className={`btn btn-sm ${acc.needs_reauth ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => startGoogleAuth(acc)}
-                  disabled={reconnectingId === acc.id}
-                  title="Reconnect this account (reuses stored credentials)"
-                >
-                  <RefreshCw size={14} /> {reconnectingId === acc.id ? 'Reconnecting…' : 'Reconnect'}
-                </button>
-                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => disconnectAccount(acc.id, acc.email)} title="Disconnect Account">
-                  <Trash2 size={14} /> Disconnect
-                </button>
+                {acc.can_disconnect && (
+                  <button
+                    className={`btn btn-sm ${acc.needs_reauth ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => startGoogleAuth(acc)}
+                    disabled={reconnectingId === acc.id || !canConnect}
+                    title="Reconnect this account (reuses stored credentials)"
+                  >
+                    <RefreshCw size={14} /> {reconnectingId === acc.id ? 'Reconnecting…' : 'Reconnect'}
+                  </button>
+                )}
+                {acc.can_unshare && (
+                  <button className="btn btn-ghost btn-sm" disabled={!canConnect} onClick={() => unshareAccount(acc.id, acc.email)} title="Remove from this workspace">
+                    Remove
+                  </button>
+                )}
+                {acc.can_disconnect && (
+                  <button className="btn btn-ghost btn-sm" disabled={!canConnect} style={{ color: 'var(--error)' }} onClick={() => disconnectAccount(acc.id, acc.email)} title="Delete credential everywhere">
+                    <Trash2 size={14} /> Delete
+                  </button>
+                )}
               </div>
             ))}
           </div>

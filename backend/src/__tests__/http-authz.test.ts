@@ -53,6 +53,7 @@ describe('cross-tenant HTTP authorization', () => {
     const signup = await req('POST', '/api/auth/signup', { body: { email: adminEmail, password: 'password123' } });
     expect(signup.status).toBe(200);
     const adminSid = sidFrom(signup)!;
+    const adminUser = await json<{ id: string }>(signup);
     expect(adminSid).toBeTruthy();
 
     const adminWs = (await json<Array<{ id: string }>>(await req('GET', '/api/workspaces', { sid: adminSid })))[0].id;
@@ -69,9 +70,11 @@ describe('cross-tenant HTTP authorization', () => {
     const userEmail = `user-${randomUUID()}@x.com`;
     const mk = await req('POST', '/api/users', { sid: adminSid, body: { email: userEmail, password: 'password123' } });
     expect(mk.status).toBe(200);
+    const createdUser = await json<{ id: string }>(mk);
     const login = await req('POST', '/api/auth/login', { body: { email: userEmail, password: 'password123' } });
     expect(login.status).toBe(200);
     const userSid = sidFrom(login)!;
+    expect((await req('POST', '/api/auth/set-required-password', { sid: userSid, body: { newPassword: 'password456' } })).status).toBe(200);
     const userWs = (await json<Array<{ id: string }>>(await req('GET', '/api/workspaces', { sid: userSid })))[0].id;
     expect(userWs).not.toBe(adminWs);
 
@@ -96,6 +99,41 @@ describe('cross-tenant HTTP authorization', () => {
     // The user's own workspace remains empty (no leakage the other way).
     const userSites = await json<unknown[]>(await req('GET', '/api/sites', { sid: userSid, ws: userWs }));
     expect(userSites).toHaveLength(0);
+
+    // Super-admin can attach an existing user to another workspace and inspect
+    // their complete tenant/security profile.
+    const addMember = await req('POST', `/api/workspaces/${adminWs}/members`, {
+      sid: adminSid, ws: adminWs, body: { email: userEmail, role: 'editor', ai_citations: true },
+    });
+    expect(addMember.status).toBe(200);
+    const detail = await json<{ workspaces: Array<{ workspace_id: string; role: string; permissions: Record<string, boolean> }> }>(
+      await req('GET', `/api/admin/users/${createdUser.id}`, { sid: adminSid, ws: adminWs }),
+    );
+    const adminAccess = detail.workspaces.find(w => w.workspace_id === adminWs);
+    expect(adminAccess?.role).toBe('editor');
+    expect(adminAccess?.permissions.manage_integrations).toBe(true);
+
+    // Impersonation uses a dedicated session that remembers the actor and can
+    // safely return to the super-admin without knowing either password.
+    const impersonate = await req('POST', `/api/admin/users/${createdUser.id}/impersonate`, { sid: adminSid, ws: adminWs });
+    expect(impersonate.status).toBe(200);
+    const impersonatedSid = sidFrom(impersonate)!;
+    const asUser = await json<{ id: string; impersonation: { actor: { id: string } } }>(await req('GET', '/api/auth/me', { sid: impersonatedSid, ws: adminWs }));
+    expect(asUser.id).toBe(createdUser.id);
+    expect(asUser.impersonation.actor.id).toBe(adminUser.id);
+    const stop = await req('POST', '/api/auth/impersonation/stop', { sid: impersonatedSid, ws: adminWs });
+    expect(stop.status).toBe(200);
+    const restoredSid = sidFrom(stop)!;
+    expect((await req('GET', '/api/users', { sid: restoredSid, ws: adminWs })).status).toBe(200);
+
+    // Generated passwords revoke old sessions and require replacement.
+    const generated = await req('POST', `/api/admin/users/${createdUser.id}/generate-password`, { sid: restoredSid, ws: adminWs });
+    expect(generated.status).toBe(200);
+    const temporaryPassword = (await json<{ temporaryPassword: string }>(generated)).temporaryPassword;
+    expect((await req('GET', '/api/auth/me', { sid: userSid, ws: userWs })).status).toBe(401);
+    const tempLogin = await req('POST', '/api/auth/login', { body: { email: userEmail, password: temporaryPassword } });
+    expect(tempLogin.status).toBe(200);
+    expect((await json<{ must_change_password: boolean }>(tempLogin)).must_change_password).toBe(true);
   });
 
   it('rate-limits repeated bad logins', async () => {

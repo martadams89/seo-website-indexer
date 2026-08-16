@@ -87,8 +87,8 @@ export function workspaceRole(user: User, workspaceId: string): 'owner' | 'admin
 }
 
 /** True if the user owns the workspace, is a super-admin, or holds the
- *  workspace-scoped 'admin' role there — required for destructive/admin
- *  actions (rename, delete, invites, member role/reset-password/2FA/disable). */
+ *  workspace-scoped 'admin' role there — required for destructive and tenant
+ *  administration actions (rename, delete, invites, member roles/disable). */
 export function canManageWorkspace(user: User, workspaceId: string): boolean {
   if (user.is_super_admin) return !!getWorkspace(workspaceId);
   const ws = getWorkspace(workspaceId);
@@ -127,10 +127,13 @@ export const CAPABILITIES = ['manage_sites', 'manage_integrations', 'manage_noti
 export type Capability = typeof CAPABILITIES[number];
 export type CapabilityMap = Record<Capability, boolean>;
 
-function roleDefaultCapability(role: 'admin' | 'editor' | 'viewer', cap: Capability): boolean {
+function roleDefaultCapability(role: 'admin' | 'editor' | 'viewer', _cap: Capability): boolean {
   if (role === 'admin') return true;
   if (role === 'viewer') return false;
-  return cap === 'manage_sites'; // editor default: can manage sites, not integrations/notifications
+  // Ordinary workspace users can operate the full SEO tool by default. A
+  // workspace admin can still revoke individual capabilities for a constrained
+  // editor; membership/security administration remains admin-only.
+  return true;
 }
 
 function parsePermissions(raw: string | null): Partial<CapabilityMap> {
@@ -202,6 +205,50 @@ export function removeWorkspaceMember(workspaceId: string, userId: string): void
   getDb().prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?').run(workspaceId, userId);
 }
 
+export interface UserWorkspaceAccess {
+  workspace_id: string;
+  workspace_name: string;
+  role: 'owner' | 'admin' | 'editor' | 'viewer';
+  is_owner: boolean;
+  ai_citations: boolean;
+  disabled: boolean;
+  permissions: CapabilityMap;
+}
+
+/** Complete tenant membership view used by the super-admin user inspector. */
+export function listUserWorkspaceAccess(userId: string): UserWorkspaceAccess[] {
+  const rows = getDb().prepare(`
+    SELECT w.id AS workspace_id, w.name AS workspace_name,
+           CASE WHEN w.owner_user_id = @uid THEN 'owner' ELSE m.role END AS role,
+           CASE WHEN w.owner_user_id = @uid THEN 1 ELSE 0 END AS is_owner,
+           COALESCE(m.ai_citations, 1) AS ai_citations,
+           COALESCE(m.disabled, 0) AS disabled,
+           m.permissions
+    FROM workspaces w
+    LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = @uid
+    WHERE w.owner_user_id = @uid OR m.user_id = @uid
+    ORDER BY w.name COLLATE NOCASE
+  `).all({ uid: userId }) as Array<{
+    workspace_id: string; workspace_name: string; role: string; is_owner: number;
+    ai_citations: number; disabled: number; permissions: string | null;
+  }>;
+  return rows.map(row => {
+    const isOwner = !!row.is_owner;
+    const role = isOwner ? 'owner' : normalizeRole(row.role);
+    return {
+      workspace_id: row.workspace_id,
+      workspace_name: row.workspace_name,
+      role,
+      is_owner: isOwner,
+      ai_citations: !!row.ai_citations,
+      disabled: !!row.disabled,
+      permissions: isOwner
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true }
+        : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', row.permissions),
+    };
+  });
+}
+
 /** Update a member's role / AI-citations access / disabled flag / individual
  *  capability overrides within ONE workspace. Never touches the owner (not a
  *  workspace_members row) or the user's other workspace memberships. */
@@ -268,9 +315,13 @@ export function bootstrapUserWorkspace(user: User, isFirstUser: boolean): Worksp
   if (isFirstUser) {
     const db = getDb();
     db.prepare('UPDATE sites SET workspace_id = ? WHERE workspace_id IS NULL').run(ws.id);
-    // Claim legacy Google accounts: set both the home workspace AND the owner
-    // (accounts are owner-level — available across all of this owner's workspaces).
+    // Claim legacy Google accounts and explicitly delegate them to this first
+    // workspace. Ownership alone never grants access in another workspace.
     db.prepare('UPDATE google_accounts SET workspace_id = ?, owner_user_id = COALESCE(owner_user_id, ?) WHERE workspace_id IS NULL').run(ws.id, user.id);
+    db.prepare(`
+      INSERT OR IGNORE INTO google_account_workspaces(account_id, workspace_id, added_by)
+      SELECT id, ?, ? FROM google_accounts WHERE owner_user_id = ?
+    `).run(ws.id, user.id, user.id);
     // Claim legacy AI-citation prompts (per-workspace now).
     db.prepare('UPDATE ai_prompts SET workspace_id = ? WHERE workspace_id IS NULL').run(ws.id);
     // A legacy single Bing key in settings becomes this workspace's first Bing account.

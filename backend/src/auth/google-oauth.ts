@@ -20,7 +20,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash } from 'crypto';
 import {
   getSetting,
   setSetting,
@@ -32,11 +32,15 @@ import {
   setGoogleAccountNeedsReauth,
   setGoogleAccountRefreshError,
   canOwnGoogleAccount,
+  shareGoogleAccountWithWorkspace,
+  unshareGoogleAccountFromWorkspace,
   tryAcquireGoogleTokenLock,
   releaseGoogleTokenLock,
+  getDb,
   type GoogleAccount
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
+import { encrypt, decrypt } from '../utils/crypto.js';
 
 // ── OAuth Scopes ──────────────────────────────────────────────────────────────
 
@@ -101,6 +105,72 @@ export function saveCredentials(clientId: string, clientSecret: string): void {
   _tempClientSecret = clientSecret.trim();
 }
 
+const GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const OAUTH_STATE_TTL_MS = 10 * 60_000;
+const hashState = (state: string) => createHash('sha256').update(state).digest('hex');
+
+export interface PendingGoogleOAuth {
+  userId: string;
+  workspaceId: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
+/** Create a concurrency-safe, single-use OAuth handshake and authorization URL. */
+export function createGoogleOAuthAuthorization(opts: {
+  userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
+  clientId?: string; clientSecret?: string; loginHint?: string | null;
+}): string {
+  const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
+  const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error('OAuth Client ID and Client Secret are required.');
+  const state = randomBytes(32).toString('base64url');
+  const expires = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
+  const db = getDb();
+  db.prepare("DELETE FROM google_oauth_states WHERE julianday(expires_at) < julianday('now')").run();
+  db.prepare(`
+    INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
+    VALUES(?,?,?,?,?,?,?)
+  `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
+  const scopes = opts.autoSetup ? `${OAUTH_SCOPES} https://www.googleapis.com/auth/cloud-platform` : OAUTH_SCOPES;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: opts.redirectUri,
+    response_type: 'code',
+    scope: scopes,
+    access_type: 'offline',
+    prompt: 'select_account consent',
+    state,
+  });
+  if (opts.loginHint) params.set('login_hint', opts.loginHint);
+  return `${GOOGLE_AUTHORIZE_URL}?${params.toString()}`;
+}
+
+/** Consume a pending state exactly once. Unknown, expired, or replayed states fail. */
+export function consumeGoogleOAuthState(state: string): PendingGoogleOAuth | null {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at
+    FROM google_oauth_states WHERE state_hash = ?
+  `).get(hashState(state)) as {
+    user_id: string; workspace_id: string; client_id: string; client_secret: string;
+    redirect_uri: string; expires_at: string;
+  } | undefined;
+  if (!row) return null;
+  db.prepare('DELETE FROM google_oauth_states WHERE state_hash = ?').run(hashState(state));
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  const clientSecret = decrypt(row.client_secret);
+  if (!clientSecret) return null;
+  return {
+    userId: row.user_id,
+    workspaceId: row.workspace_id,
+    clientId: row.client_id,
+    clientSecret,
+    redirectUri: row.redirect_uri,
+  };
+}
+
 // ── Web Flow Token Exchange ───────────────────────────────────────────────────
 
 async function fetchUserEmail(accessToken: string): Promise<string> {
@@ -121,9 +191,12 @@ async function fetchUserEmail(accessToken: string): Promise<string> {
  * Exchanges the authorization code received from Google for access/refresh tokens.
  * Persists the credentials inside SQLite.
  */
-export async function exchangeCodeForTokens(code: string, redirectUri: string, workspaceId?: string | null, ownerUserId?: string | null): Promise<string> {
-  const clientId     = _tempClientId     || BUILTIN_CLIENT_ID;
-  const clientSecret = _tempClientSecret || BUILTIN_CLIENT_SECRET;
+export async function exchangeCodeForTokens(
+  code: string, redirectUri: string, workspaceId?: string | null, ownerUserId?: string | null,
+  credentials?: { clientId: string; clientSecret: string },
+): Promise<string> {
+  const clientId     = credentials?.clientId || _tempClientId || BUILTIN_CLIENT_ID;
+  const clientSecret = credentials?.clientSecret || _tempClientSecret || BUILTIN_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
     throw new Error('OAuth Client ID or Client Secret is missing. Please save credentials first.');
@@ -171,11 +244,11 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   // Fetch Google email address to identify account
   const email = await fetchUserEmail(data.access_token);
 
-  // Reject if this Google account already belongs to a different tenant.
+  // Reject if this Google account already belongs to a different app user.
   // Without this, the upsert below would silently overwrite that tenant's
   // tokens with ours while leaving ownership unchanged — a cross-tenant
-  // credential clash, not a real reassignment. Strict account-level tenancy:
-  // a Google account connected under one account is never usable by another.
+  // credential clash, not a real reassignment. The owner can explicitly
+  // delegate the credential to workspaces where they are a member.
   if (ownerUserId && !canOwnGoogleAccount(email, ownerUserId)) {
     throw new Error(
       `This Google account (${email}) is already connected to a different account in this app. Disconnect it there first, or sign in with a different Google account.`
@@ -183,9 +256,9 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
   }
 
   // Save the new account (uses email as account ID for extreme simplicity and clarity).
-  // owner_user_id makes the account available across ALL of the owner's
-  // workspaces (account-level). workspace_id records the "home" workspace it was
-  // first connected in. The upsert's COALESCE preserves both on token refresh.
+  // owner_user_id records who controls the credential. workspace_id records its
+  // original "home" workspace, while a separate delegation row grants use in
+  // the active workspace. The upsert preserves ownership on token refresh.
   upsertGoogleAccount({
     id: email,
     email,
@@ -201,6 +274,7 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string, w
     workspace_id: workspaceId ?? null,
     owner_user_id: ownerUserId ?? null,
   });
+  if (workspaceId) shareGoogleAccountWithWorkspace(email, workspaceId, ownerUserId);
 
   // Reconnecting mints a fresh refresh token, so clear any stale reauth flag
   // (the upsert's ON CONFLICT preserves the old needs_reauth value otherwise).
@@ -463,10 +537,11 @@ export function disconnectGoogleAccount(id: string): void {
   _inFlightRefresh.delete(id);
 }
 
-/** Disconnect every Google account in ONE workspace (tenant-scoped). */
+/** Remove every Google-account delegation from ONE workspace. Credentials and
+ * shares used by other workspaces remain intact. */
 export function clearAuthForWorkspace(workspaceId: string): void {
   for (const acc of getGoogleAccountsForWorkspace(workspaceId)) {
-    disconnectGoogleAccount(acc.id);
+    unshareGoogleAccountFromWorkspace(acc.id, workspaceId);
   }
 }
 

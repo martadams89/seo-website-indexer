@@ -59,11 +59,16 @@ import {
   getIndexNowKey,
   getAllGoogleAccounts,
   getGoogleAccountsForWorkspace,
+  getGoogleAccountsForOwner,
   getGoogleAccountById,
   isGoogleAccountAvailableToWorkspace,
+  shareGoogleAccountWithWorkspace,
+  unshareGoogleAccountFromWorkspace,
+  googleAccountWorkspaceIds,
   getUrlsBySite,
   getAllQuotaUsageForDay,
   getAllUrlFailures,
+  clearUrlFailuresForSites,
   getRunLock,
   getDb,
   pruneOldLogs,
@@ -76,6 +81,8 @@ import {
   saveCredentials,
   exchangeCodeForTokens,
   disconnectGoogleAccount,
+  createGoogleOAuthAuthorization,
+  consumeGoogleOAuthState,
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -108,11 +115,12 @@ import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
 import {
   countUsers, getUserByEmail, createUser, verifyPassword, recordLogin,
-  createSession, getSessionUser, destroySession, setUserPassword,
+  createSession, getSessionUser, getSessionContext, destroySession, setUserPassword,
+  setTemporaryPassword, generateTemporaryPassword, updateUserProfile,
   generateTotpSecret, totpUri, verifyTotp, setTotpSecret, getTotpSecret, enableTotp, disableTotp,
   toPublic, pruneExpiredSessions, listUsers, getUserById,
   countSuperAdmins, setUserSuperAdmin, deleteUser, setUserDisabled,
-  createPasswordReset, consumePasswordReset, type User,
+  createPasswordReset, consumePasswordReset, recordAuditEvent, listAuditEvents, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
 import { sendTestNotification, configuredChannels, NOTIFY_KEYS } from './utils/notify.js';
@@ -123,6 +131,7 @@ import {
   addBingAccount, listBingAccounts, removeBingAccount, bingAccountWorkspace, bingKeyForSite,
   workspaceRole, canUseAiCitations, updateWorkspaceMember, hasCapability, type Capability,
   listAllWorkspacesSummary, reassignWorkspaceOwner,
+  listUserWorkspaceAccess,
   createWorkspaceInvite, listWorkspaceInvites, revokeWorkspaceInvite, getInviteByToken, markInviteAccepted,
 } from './auth/workspaces.js';
 import {
@@ -250,7 +259,8 @@ app.addHook('preHandler', async (req, reply) => {
   if (!pathOnly.startsWith('/api/')) return;            // static assets + key files
   if (AUTH_OPEN_PATHS.has(pathOnly)) return;
   if (AUTH_OPEN_PREFIXES.some(p => pathOnly.startsWith(p))) return;
-  const user = getSessionUser(sessionTokenFromReq(req));
+  const session = getSessionContext(sessionTokenFromReq(req));
+  const user = session?.user;
   if (!user) {
     return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
   }
@@ -260,6 +270,10 @@ app.addHook('preHandler', async (req, reply) => {
   if (user.disabled) {
     return reply.status(403).send({ error: 'This account has been disabled.' });
   }
+  if (user.must_change_password && !session?.impersonator
+    && !['/api/auth/me', '/api/auth/set-required-password', '/api/auth/logout'].includes(pathOnly)) {
+    return reply.status(428).send({ error: 'Replace the temporary password before continuing.', passwordChangeRequired: true });
+  }
   // Resolve the active workspace from the X-Workspace-Id header (the UI's
   // workspace switcher sets it), validating access; fall back to the user's
   // first accessible workspace. This is the tenant scope for the request.
@@ -268,10 +282,10 @@ app.addHook('preHandler', async (req, reply) => {
   let activeWs: string | null = null;
   if (typeof wsHeader === 'string' && accessible.some(w => w.id === wsHeader)) activeWs = wsHeader;
   else if (accessible.length > 0) activeWs = accessible[0].id;
-  (req as unknown as RequestCtx).ctx = { user, workspaceId: activeWs };
+  (req as unknown as RequestCtx).ctx = { user, impersonator: session?.impersonator ?? null, workspaceId: activeWs };
 });
 
-interface RequestCtx { ctx: { user: User; workspaceId: string | null } }
+interface RequestCtx { ctx: { user: User; impersonator: User | null; workspaceId: string | null } }
 
 // Centralised tenant authorization: extract a site id from the known
 // site-scoped URL shapes and 404 if the caller can't access that site's
@@ -313,6 +327,7 @@ app.addHook('preHandler', async (req, reply) => {
 // disconnect, credentials, etc.) is workspace integration management.
 const SELF_ACCOUNT_EXEMPT_EXACT = new Set<string>([
   '/api/auth/logout', '/api/auth/change-password',
+  '/api/auth/set-required-password', '/api/auth/impersonation/stop',
   '/api/auth/totp/setup', '/api/auth/totp/enable', '/api/auth/totp/disable',
 ]);
 const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/'];
@@ -325,10 +340,12 @@ const WORKSPACE_GATE_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
 function capabilityForPath(path: string): Capability | null {
   if (path.startsWith('/api/sites') || path.startsWith('/api/submit/') || path.startsWith('/api/runs')
     || path.startsWith('/api/performance/') || path.startsWith('/api/crux/')
-    || path.startsWith('/api/bing/quota/') || path.startsWith('/api/bing/submit/')) {
+    || path.startsWith('/api/bing/quota/') || path.startsWith('/api/bing/submit/')
+    || path.startsWith('/api/url-failures')) {
     return 'manage_sites';
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
+    || path.startsWith('/api/auth/google/start')
     || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys') {
     return 'manage_integrations';
   }
@@ -380,6 +397,24 @@ function rpInfo(req: { headers: Record<string, unknown> }): { rpID: string; orig
 }
 function currentUser(req: unknown): User { return (req as RequestCtx).ctx.user; }
 function currentWorkspace(req: unknown): string | null { return (req as RequestCtx).ctx.workspaceId; }
+// Mutations execute with the target user's workspace permissions while
+// impersonating, but the security trail must identify the real administrator.
+function auditActor(req: unknown): User {
+  const ctx = (req as RequestCtx).ctx;
+  return ctx.impersonator ?? ctx.user;
+}
+function requestIp(req: { ip?: string; headers: Record<string, unknown> }): string | null {
+  const forwarded = req.headers['x-forwarded-for'];
+  return (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip) ?? null;
+}
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 // Guards — throw a 403-shaped error the handlers turn into a reply.
 function requireWorkspace(req: unknown): string {
   const ws = currentWorkspace(req);
@@ -448,9 +483,15 @@ app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers(
 
 app.get('/api/auth/me', async (req, reply) => {
   const token = sessionTokenFromReq(req);
-  const user = getSessionUser(token);
-  if (!user) return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
-  return toPublic(user);
+  const session = getSessionContext(token);
+  if (!session) return reply.status(401).send({ error: 'Not authenticated', needsBootstrap: countUsers() === 0 });
+  return {
+    ...toPublic(session.user),
+    // An administrator should not be trapped in the target user's forced
+    // password-change screen while diagnosing their account.
+    must_change_password: session.impersonator ? false : !!session.user.must_change_password,
+    impersonation: session.impersonator ? { actor: toPublic(session.impersonator) } : null,
+  };
 });
 
 // First-run only: create the super-admin. Refuses once any user exists.
@@ -505,7 +546,35 @@ app.post('/api/auth/change-password', async (req, reply) => {
   }
   if (!newPassword || newPassword.length < 8) return reply.status(400).send({ error: 'New password must be at least 8 characters.' });
   setUserPassword(user.id, newPassword);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: user.id, action: 'user.password.changed', ipAddress: requestIp(req) });
   return { ok: true };
+});
+
+// A temporary password minted by a super-admin must be replaced immediately
+// after login. The authenticated session is proof of possession of that
+// temporary secret, so asking for it again adds no protection.
+app.post('/api/auth/set-required-password', async (req, reply) => {
+  const user = currentUser(req);
+  if (!user.must_change_password) return reply.status(400).send({ error: 'No password change is required.' });
+  const { newPassword } = (req.body ?? {}) as { newPassword?: string };
+  if (!newPassword || newPassword.length < 8) return reply.status(400).send({ error: 'New password must be at least 8 characters.' });
+  setUserPassword(user.id, newPassword);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: user.id, action: 'user.temporary_password.replaced', ipAddress: requestIp(req) });
+  return { ok: true };
+});
+
+app.post('/api/auth/impersonation/stop', async (req, reply) => {
+  const token = sessionTokenFromReq(req);
+  const session = getSessionContext(token);
+  const actor = session?.impersonator;
+  if (!session || !actor?.is_super_admin || actor.disabled) {
+    return reply.status(400).send({ error: 'This is not an active impersonation session.' });
+  }
+  if (token) destroySession(token);
+  const next = createSession(actor.id, String(req.headers['user-agent'] ?? ''));
+  setSessionCookie(req, reply, next);
+  recordAuditEvent({ actorUserId: actor.id, targetUserId: session.user.id, action: 'user.impersonation.stopped', ipAddress: requestIp(req) });
+  return toPublic(actor);
 });
 
 // ── Forgot / reset password (email link) ─────────────────────────────────────
@@ -618,6 +687,7 @@ app.post('/api/auth/passkeys/login/finish', AUTH_RATE_LIMIT, async (req, reply) 
   try {
     const user = await finishAuthentication(challengeId, credential as never, rpID, origin);
     if (!user) return reply.status(401).send({ error: 'Passkey not recognised.' });
+    if (user.disabled) return reply.status(403).send({ error: 'This account has been disabled.' });
     recordLogin(user.id);
     setSessionCookie(req, reply, createSession(user.id, String(req.headers['user-agent'] ?? '')));
     return toPublic(user);
@@ -669,6 +739,11 @@ app.get('/api/workspaces', async (req) => {
     is_active: w.id === active,
     role: w.owner_user_id === user.id ? 'owner' : (user.is_super_admin ? 'admin' : workspaceRole(user, w.id)),
     can_manage: canManageWorkspace(user, w.id),
+    permissions: {
+      manage_sites: hasCapability(user, w.id, 'manage_sites'),
+      manage_integrations: hasCapability(user, w.id, 'manage_integrations'),
+      manage_notifications: hasCapability(user, w.id, 'manage_notifications'),
+    },
   }));
 });
 
@@ -676,6 +751,7 @@ app.post('/api/workspaces', async (req, reply) => {
   const { name } = (req.body ?? {}) as { name?: string };
   if (!name?.trim()) return reply.status(400).send({ error: 'name is required.' });
   const ws = createWorkspace(name, currentUser(req).id);
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws.id, action: 'workspace.created', ipAddress: requestIp(req) });
   return { id: ws.id, name: ws.name, created_at: ws.created_at, is_owner: true };
 });
 
@@ -685,6 +761,7 @@ app.patch('/api/workspaces/:id', async (req, reply) => {
   const { name } = (req.body ?? {}) as { name?: string };
   if (!name?.trim()) return reply.status(400).send({ error: 'name is required.' });
   renameWorkspace(id, name);
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: id, action: 'workspace.renamed', detail: { name: name.trim() }, ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -696,6 +773,7 @@ app.delete('/api/workspaces/:id', async (req, reply) => {
   if (accessibleWorkspaces(user).length <= 1) {
     return reply.status(400).send({ error: 'You cannot delete your only workspace.' });
   }
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: id, action: 'workspace.deleted', ipAddress: requestIp(req) });
   deleteWorkspace(id);
   return { ok: true };
 });
@@ -716,6 +794,8 @@ app.post('/api/workspaces/:id/members', async (req, reply) => {
   if (!target) return reply.status(404).send({ error: 'No user with that email. Invite them instead.' });
   const normRole: 'admin' | 'editor' | 'viewer' = role === 'admin' || role === 'viewer' ? role : 'editor';
   addWorkspaceMember(id, target.id, normRole, ai_citations !== false);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: target.id, workspaceId: id,
+    action: 'workspace.member.added', detail: { role: normRole }, ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -725,6 +805,8 @@ app.delete('/api/workspaces/:id/members/:userId', async (req, reply) => {
   const ws = getWorkspace(id);
   if (ws && ws.owner_user_id === userId) return reply.status(400).send({ error: 'The owner cannot be removed.' });
   removeWorkspaceMember(id, userId);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+    action: 'workspace.member.removed', ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -747,7 +829,8 @@ app.post('/api/users', async (req, reply) => {
   if (!email?.trim() || !password) return reply.status(400).send({ error: 'email and password are required.' });
   if (getUserByEmail(email.trim().toLowerCase())) return reply.status(409).send({ error: 'A user with that email already exists.' });
   if (workspaceId && !getWorkspace(workspaceId)) return reply.status(400).send({ error: 'That workspace does not exist.' });
-  const user = createUser({ email: email.trim().toLowerCase(), password, name, role: role ?? 'user', superAdmin: !!superAdmin });
+  if (password.length < 8) return reply.status(400).send({ error: 'Password must be at least 8 characters.' });
+  const user = createUser({ email: email.trim().toLowerCase(), password, name, role: role ?? 'user', superAdmin: !!superAdmin, mustChangePassword: true });
   if (workspaceId) {
     // Add them to the ONE workspace the admin picked — no separate workspace.
     const normRole: 'admin' | 'editor' | 'viewer' = wRole === 'admin' || wRole === 'viewer' ? wRole : 'editor';
@@ -757,7 +840,25 @@ app.post('/api/users', async (req, reply) => {
     // can start immediately (the original single-tenant "new client" flow).
     bootstrapUserWorkspace(user, false);
   }
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: user.id, workspaceId: workspaceId ?? null,
+    action: 'user.created', detail: { superAdmin: !!superAdmin }, ipAddress: requestIp(req) });
   return toPublic(user);
+});
+
+app.get('/api/admin/users/:id', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  return {
+    user: toPublic(target),
+    workspaces: listUserWorkspaceAccess(id),
+    google_accounts: getGoogleAccountsForOwner(id).map(a => ({
+      id: a.id, email: a.email, needs_reauth: !!a.needs_reauth,
+      workspace_ids: googleAccountWorkspaceIds(a.id), created_at: a.created_at,
+    })),
+    audit: listAuditEvents(30, id),
+  };
 });
 
 app.patch('/api/users/:id', async (req, reply) => {
@@ -765,23 +866,107 @@ app.patch('/api/users/:id', async (req, reply) => {
   const { id } = req.params as { id: string };
   const target = getUserById(id);
   if (!target) return reply.status(404).send({ error: 'User not found' });
-  const { password, superAdmin, disabled } = (req.body ?? {}) as { password?: string; superAdmin?: boolean; disabled?: boolean };
-  if (typeof password === 'string' && password) setUserPassword(id, password);
-  if (typeof superAdmin === 'boolean') {
-    // Never let the last super-admin drop their own privilege and lock everyone out.
-    if (!superAdmin && target.is_super_admin && countSuperAdmins() <= 1) {
+  const { password, superAdmin, disabled, email, name, role } = (req.body ?? {}) as
+    { password?: string; superAdmin?: boolean; disabled?: boolean; email?: string; name?: string | null; role?: string };
+  if (typeof password === 'string' && password && password.length < 8) return reply.status(400).send({ error: 'Password must be at least 8 characters.' });
+  if (email !== undefined) {
+    if (!email.includes('@')) return reply.status(400).send({ error: 'A valid email is required.' });
+    const conflict = getUserByEmail(email);
+    if (conflict && conflict.id !== id) return reply.status(409).send({ error: 'A user with that email already exists.' });
+  }
+  if (role !== undefined && !['user', 'admin'].includes(role)) return reply.status(400).send({ error: 'Invalid platform role.' });
+  if (typeof superAdmin === 'boolean' && !superAdmin && target.is_super_admin && countSuperAdmins() <= 1) {
+    return reply.status(400).send({ error: 'At least one super-admin must remain.' });
+  }
+  if (typeof disabled === 'boolean' && disabled) {
+    if (id === currentUser(req).id) return reply.status(400).send({ error: 'You cannot disable yourself.' });
+    if (target.is_super_admin && superAdmin !== false && countSuperAdmins() <= 1) {
       return reply.status(400).send({ error: 'At least one super-admin must remain.' });
     }
+  }
+
+  if (typeof password === 'string' && password) setTemporaryPassword(id, password);
+  updateUserProfile(id, { email, name, role });
+  if (typeof superAdmin === 'boolean') {
     setUserSuperAdmin(id, superAdmin);
   }
   if (typeof disabled === 'boolean') {
-    if (id === currentUser(req).id) return reply.status(400).send({ error: 'You cannot disable yourself.' });
-    if (disabled && target.is_super_admin && countSuperAdmins() <= 1) {
-      return reply.status(400).send({ error: 'At least one super-admin must remain.' });
-    }
     setUserDisabled(id, disabled);
   }
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: id, action: 'user.updated',
+    detail: { email: email !== undefined, name: name !== undefined, role, superAdmin, disabled, password: !!password }, ipAddress: requestIp(req) });
   return { ok: true };
+});
+
+app.post('/api/admin/users/:id/generate-password', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  const temporaryPassword = generateTemporaryPassword();
+  setTemporaryPassword(id, temporaryPassword);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: id, action: 'user.temporary_password.generated', ipAddress: requestIp(req) });
+  return { ok: true, temporaryPassword, mustChangePassword: true };
+});
+
+app.post('/api/admin/users/:id/send-password-reset', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  const token = createPasswordReset(id);
+  const { origin } = rpInfo(req);
+  const link = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+  let emailed = false;
+  if (emailConfigured()) {
+    try {
+      await sendEmail({
+        to: target.email,
+        subject: 'Reset your SEO Website Indexer password',
+        text: `An administrator sent you a password-reset link.\n\nSet a new password here (valid for 1 hour):\n${link}`,
+        html: `<p>An administrator sent you a password-reset link.</p><p><a href="${link}">Set a new password</a> (valid for 1 hour).</p>`,
+      });
+      emailed = true;
+    } catch (e) {
+      logSystem('warn', `Admin password-reset email failed for ${target.email}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: id, action: 'user.password_reset.sent',
+    detail: { emailed }, ipAddress: requestIp(req) });
+  return { ok: true, emailed, resetPath: emailed ? undefined : `/reset-password?token=${encodeURIComponent(token)}` };
+});
+
+app.post('/api/admin/users/:id/clear-2fa', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  if (!getUserById(id)) return reply.status(404).send({ error: 'User not found' });
+  disableTotp(id);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: id, action: 'user.2fa.cleared', ipAddress: requestIp(req) });
+  return { ok: true };
+});
+
+app.post('/api/admin/users/:id/impersonate', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  if ((req as unknown as RequestCtx).ctx.impersonator) {
+    return reply.status(400).send({ error: 'Stop the current impersonation before starting another.' });
+  }
+  const actor = currentUser(req);
+  const { id } = req.params as { id: string };
+  if (id === actor.id) return reply.status(400).send({ error: 'You are already signed in as this user.' });
+  const target = getUserById(id);
+  if (!target) return reply.status(404).send({ error: 'User not found' });
+  if (target.disabled) return reply.status(400).send({ error: 'Enable the user before impersonating them.' });
+  const currentToken = sessionTokenFromReq(req);
+  if (currentToken) destroySession(currentToken);
+  setSessionCookie(req, reply, createSession(target.id, String(req.headers['user-agent'] ?? ''), actor.id));
+  recordAuditEvent({ actorUserId: actor.id, targetUserId: id, action: 'user.impersonation.started', ipAddress: requestIp(req) });
+  return { ...toPublic(target), impersonation: { actor: toPublic(actor) } };
+});
+
+app.get('/api/admin/audit-events', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  const limit = Math.min(Math.max(Number((req.query as { limit?: string }).limit ?? 100), 1), 500);
+  return listAuditEvents(limit);
 });
 
 app.delete('/api/users/:id', async (req, reply) => {
@@ -797,6 +982,12 @@ app.delete('/api/users/:id', async (req, reply) => {
   // acting admin so deletion never silently orphans a client's data. Their
   // sessions + memberships cascade away via the schema's ON DELETE CASCADE.
   const moved = reassignOwnedWorkspaces(id, currentUser(req).id);
+  // Preserve workspace integrations when an account is removed: credential
+  // ownership transfers to the acting super-admin, while explicit workspace
+  // delegation remains unchanged.
+  getDb().prepare('UPDATE google_accounts SET owner_user_id = ? WHERE owner_user_id = ?').run(currentUser(req).id, id);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: id, action: 'user.deleted',
+    detail: { reassignedWorkspaces: moved }, ipAddress: requestIp(req) });
   deleteUser(id);
   return { ok: true, reassignedWorkspaces: moved };
 });
@@ -815,16 +1006,19 @@ app.patch('/api/admin/workspaces/:id/owner', async (req, reply) => {
   const { ownerUserId } = (req.body ?? {}) as { ownerUserId?: string };
   if (!ownerUserId || !getUserById(ownerUserId)) return reply.status(400).send({ error: 'A valid ownerUserId is required.' });
   reassignWorkspaceOwner(id, ownerUserId);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: ownerUserId, workspaceId: id,
+    action: 'workspace.owner.reassigned', ipAddress: requestIp(req) });
   return { ok: true };
 });
 
-// ── Workspace member administration (owner / workspace-admin / super-admin) ──
-// Reset a member's password, clear their 2FA, change their role/AI-citations
-// access, or disable their access to THIS workspace only.
+// ── Workspace member administration ─────────────────────────────────────────
+// Workspace owners/admins manage tenant membership and permissions. Password
+// and 2FA recovery affect a global identity, so those remain super-admin-only.
 
 app.post('/api/workspaces/:id/members/:userId/reset-password', async (req, reply) => {
   const { id, userId } = req.params as { id: string; userId: string };
-  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  if (!requireSuperAdmin(req, reply)) return;
+  if (!getWorkspace(id)) return reply.status(404).send({ error: 'Workspace not found' });
   const target = getUserById(userId);
   if (!target || !listWorkspaceMembers(id).some(m => m.user_id === userId)) {
     return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
@@ -833,6 +1027,8 @@ app.post('/api/workspaces/:id/members/:userId/reset-password', async (req, reply
   if (!emailConfigured()) {
     // No SMTP configured — hand the admin the link to share manually instead
     // of silently doing nothing.
+    recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+      action: 'user.password_reset.sent', detail: { emailed: false }, ipAddress: requestIp(req) });
     return { ok: true, emailed: false, resetPath: `/reset-password?token=${encodeURIComponent(token)}` };
   }
   const { origin } = rpInfo(req);
@@ -841,23 +1037,31 @@ app.post('/api/workspaces/:id/members/:userId/reset-password', async (req, reply
     await sendEmail({
       to: target.email,
       subject: 'Your SEO Website Indexer password was reset',
-      text: `A workspace admin reset your password.\n\nSet a new one here (valid for 1 hour):\n${link}`,
-      html: `<p>A workspace admin reset your password.</p><p><a href="${link}">Set a new password</a> (valid for 1 hour).</p>`,
+      text: `An administrator reset your password.\n\nSet a new one here (valid for 1 hour):\n${link}`,
+      html: `<p>An administrator reset your password.</p><p><a href="${link}">Set a new password</a> (valid for 1 hour).</p>`,
     });
   } catch (e) {
     logSystem('warn', `Admin-initiated password-reset email failed for ${target.email}: ${e instanceof Error ? e.message : String(e)}`);
+    recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+      action: 'user.password_reset.sent', detail: { emailed: false }, ipAddress: requestIp(req) });
+    return { ok: true, emailed: false, resetPath: `/reset-password?token=${encodeURIComponent(token)}` };
   }
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+    action: 'user.password_reset.sent', detail: { emailed: true }, ipAddress: requestIp(req) });
   return { ok: true, emailed: true };
 });
 
 app.post('/api/workspaces/:id/members/:userId/clear-2fa', async (req, reply) => {
   const { id, userId } = req.params as { id: string; userId: string };
-  if (!canManageWorkspace(currentUser(req), id)) return reply.status(404).send({ error: 'Workspace not found' });
+  if (!requireSuperAdmin(req, reply)) return;
+  if (!getWorkspace(id)) return reply.status(404).send({ error: 'Workspace not found' });
   const target = getUserById(userId);
   if (!target || !listWorkspaceMembers(id).some(m => m.user_id === userId)) {
     return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
   }
   disableTotp(userId);
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+    action: 'user.2fa.cleared', ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -878,6 +1082,8 @@ app.patch('/api/workspaces/:id/members/:userId', async (req, reply) => {
     permissions,
   });
   if (!ok) return reply.status(404).send({ error: 'That user is not a member of this workspace.' });
+  recordAuditEvent({ actorUserId: auditActor(req).id, targetUserId: userId, workspaceId: id,
+    action: 'workspace.member.updated', detail: { role, ai_citations, disabled, permissions }, ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -975,6 +1181,7 @@ app.post('/api/invites/:token/accept', async (req, reply) => {
 
 app.get('/api/auth/accounts', async (req) => {
   const ws = currentWorkspace(req);
+  const user = currentUser(req);
   const accounts = ws ? getGoogleAccountsForWorkspace(ws) : [];
   return accounts.map(acc => ({
     id: acc.id,
@@ -986,7 +1193,55 @@ app.get('/api/auth/accounts', async (req) => {
     last_refreshed_at: acc.last_refreshed_at ?? null,
     last_refresh_error: acc.last_refresh_error ?? null,
     granted_scopes: acc.granted_scopes ?? null,
+    owner_email: acc.owner_email ?? null,
+    is_mine: acc.owner_user_id === user.id,
+    can_disconnect: acc.owner_user_id === user.id || !!user.is_super_admin,
+    can_unshare: !!ws && (acc.owner_user_id === user.id || canManageWorkspace(user, ws)),
   }));
+});
+
+// Personal credential pool, including accounts not yet delegated to the active
+// workspace. This is how a multi-workspace member reuses one Google login
+// without reconnecting or exposing it to unrelated tenants.
+app.get('/api/auth/accounts/mine', async (req) => {
+  const ws = currentWorkspace(req);
+  return getGoogleAccountsForOwner(currentUser(req).id).map(acc => ({
+    id: acc.id,
+    email: acc.email,
+    created_at: acc.created_at,
+    needs_reauth: acc.needs_reauth ? 1 : 0,
+    available_in_workspace: !!ws && isGoogleAccountAvailableToWorkspace(acc.id, ws),
+  }));
+});
+
+app.post('/api/auth/accounts/:id/share', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const account = getGoogleAccountById(id);
+  const user = currentUser(req);
+  const ws = currentWorkspace(req);
+  if (!account || (!user.is_super_admin && account.owner_user_id !== user.id)) {
+    return reply.status(404).send({ error: 'Account not found' });
+  }
+  if (!ws || !canAccessWorkspace(user, ws)) return reply.status(404).send({ error: 'Workspace not found' });
+  shareGoogleAccountWithWorkspace(id, ws, user.id);
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws, action: 'google_account.shared', detail: { accountId: id }, ipAddress: requestIp(req) });
+  return { ok: true };
+});
+
+app.delete('/api/auth/accounts/:id/workspace', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const account = getGoogleAccountById(id);
+  const user = currentUser(req);
+  const ws = currentWorkspace(req);
+  if (!account || !ws || !isGoogleAccountAvailableToWorkspace(id, ws)) {
+    return reply.status(404).send({ error: 'Account not found' });
+  }
+  if (!user.is_super_admin && account.owner_user_id !== user.id && !canManageWorkspace(user, ws)) {
+    return reply.status(403).send({ error: 'Only the credential owner or a workspace admin can remove this connection.' });
+  }
+  unshareGoogleAccountFromWorkspace(id, ws);
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws, action: 'google_account.unshared', detail: { accountId: id }, ipAddress: requestIp(req) });
+  return { ok: true };
 });
 
 app.delete('/api/auth/accounts/:id', async (req, reply) => {
@@ -999,6 +1254,7 @@ app.delete('/api/auth/accounts/:id', async (req, reply) => {
   const allowed = acc.owner_user_id ? (acc.owner_user_id === u.id || u.is_super_admin) : u.is_super_admin;
   if (!allowed) return reply.code(404).send({ error: 'Account not found' });
   disconnectGoogleAccount(id);
+  recordAuditEvent({ actorUserId: auditActor(req).id, action: 'google_account.disconnected', detail: { accountId: id }, ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -1026,6 +1282,7 @@ app.post('/api/auth/clear', async (req, reply) => {
   const ws = currentWorkspace(req);
   if (!ws) return reply.code(400).send({ error: 'No active workspace' });
   clearAuthForWorkspace(ws);
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws, action: 'google_account.workspace_cleared', ipAddress: requestIp(req) });
   return { ok: true };
 });
 
@@ -1042,6 +1299,37 @@ app.post('/api/auth/save-credentials', async (req, reply) => {
   }
 });
 
+app.post('/api/auth/google/start', async (req, reply) => {
+  const user = currentUser(req);
+  const workspaceId = currentWorkspace(req);
+  if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
+  const { clientId, clientSecret, autoSetup, accountId } = (req.body ?? {}) as {
+    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string;
+  };
+  let reconnect: ReturnType<typeof getGoogleAccountById> = null;
+  if (accountId) {
+    reconnect = getGoogleAccountById(accountId);
+    if (!reconnect || (!user.is_super_admin && reconnect.owner_user_id !== user.id)) {
+      return reply.status(404).send({ error: 'Account not found' });
+    }
+  }
+  const { origin } = rpInfo(req);
+  try {
+    const authorizationUrl = createGoogleOAuthAuthorization({
+      userId: user.id,
+      workspaceId,
+      redirectUri: `${origin}/api/auth/google/callback`,
+      autoSetup: !!autoSetup,
+      clientId: reconnect?.client_id ?? clientId,
+      clientSecret: reconnect?.client_secret ?? clientSecret,
+      loginHint: reconnect?.email ?? null,
+    });
+    return { authorizationUrl };
+  } catch (e) {
+    return reply.status(400).send({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 app.get('/api/auth/google/callback', async (req, reply) => {
   const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
   if (error) {
@@ -1055,7 +1343,7 @@ app.get('/api/auth/google/callback', async (req, reply) => {
         <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
           <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
           <h2 style="color: white; margin-bottom: 8px;">Authentication Failed</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${error}</p>
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${escapeHtml(error)}</p>
           <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
         </body>
       </html>
@@ -1066,28 +1354,20 @@ app.get('/api/auth/google/callback', async (req, reply) => {
     return reply.status(400).send({ error: 'Authorization code is required' });
   }
 
-  // Construct standard redirect URI based on the request host (handles reverse proxies perfectly!)
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'http';
-  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
-  const redirectUri = `${proto}://${host}/api/auth/google/callback`;
-
-  // The popup carries the active workspace in `state` (the tenant to attach this
-  // Google account to). This route is open (Google redirects here with no
-  // header), so resolve the caller from the session cookie and only honour a
-  // `state` the user may actually access; otherwise fall back to their first
-  // workspace. Prevents a crafted state from parking an account in a foreign tenant.
-  const sessionUser = getSessionUser(sessionTokenFromReq(req));
-  let workspaceId: string | null = null;
-  if (sessionUser) {
-    const accessible = accessibleWorkspaces(sessionUser);
-    if (state && accessible.some(w => w.id === state)) workspaceId = state;
-    else if (accessible.length > 0) workspaceId = accessible[0].id;
+  // State is an opaque, single-use nonce backed by an encrypted DB row. It
+  // binds the exchange to one user, workspace, redirect URI and client secret;
+  // two people can connect concurrently without sharing process-global state.
+  const pending = state ? consumeGoogleOAuthState(state) : null;
+  if (!pending) return reply.status(400).send({ error: 'This Google authorization request is invalid or has expired. Start again from Settings.' });
+  const pendingUser = getUserById(pending.userId);
+  if (!pendingUser || pendingUser.disabled || !canAccessWorkspace(pendingUser, pending.workspaceId)) {
+    return reply.status(403).send({ error: 'The user or workspace for this authorization is no longer available.' });
   }
 
   try {
-    // Owner = the signed-in user connecting the account; makes it available
-    // across all of their workspaces (account-level), not just `workspaceId`.
-    await exchangeCodeForTokens(code, redirectUri, workspaceId, sessionUser?.id ?? null);
+    await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
+      { clientId: pending.clientId, clientSecret: pending.clientSecret });
+    const openerOrigin = new URL(pending.redirectUri).origin;
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html lang="en">
@@ -1101,7 +1381,7 @@ app.get('/api/auth/google/callback', async (req, reply) => {
           <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">Your Google account is now securely connected. You can return to the dashboard.</p>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS' }, '*');
+              window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS' }, ${JSON.stringify(openerOrigin)});
             }
             setTimeout(() => window.close(), 1500);
           </script>
@@ -1120,7 +1400,7 @@ app.get('/api/auth/google/callback', async (req, reply) => {
         <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
           <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
           <h2 style="color: white; margin-bottom: 8px;">Token Exchange Failed</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${String(e)}</p>
+          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${escapeHtml(e)}</p>
           <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
         </body>
       </html>
@@ -1134,9 +1414,8 @@ app.get('/api/auth/gsc-sites', async (req, reply) => {
   const ws = currentWorkspace(req);
   try {
     if (accountId) {
-      // Authorize: the account must be available to the active workspace
-      // (account-level — usable across all of its owner's workspaces, not
-      // just the one it was first connected in).
+      // Authorize: the account must be explicitly delegated to the active
+      // workspace, even when this user owns it elsewhere.
       if (!ws || !isGoogleAccountAvailableToWorkspace(accountId, ws)) {
         return reply.status(404).send({ error: 'Account not found' });
       }
@@ -1207,8 +1486,8 @@ app.post('/api/sites', async (req, reply) => {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
   }
   const workspaceId = requireWorkspace(req);
-  // A site may only be linked to a Google account available to its workspace
-  // (account-level — usable across all of the owner's workspaces).
+  // A site may only be linked to a Google account explicitly delegated to its
+  // workspace.
   if (googleAccountId) {
     if (!isGoogleAccountAvailableToWorkspace(googleAccountId, workspaceId)) {
       return reply.status(400).send({ error: 'That Google account is not available in this workspace.' });
@@ -1268,9 +1547,9 @@ app.put('/api/sites/:id', async (req, reply) => {
     updates.google_account_id !== undefined ? updates.google_account_id :
     undefined;
 
-  // Validate the FK target exists AND is available to this site's workspace
-  // (account-level — usable across all of the owner's workspaces), otherwise
-  // the upsert would either throw or link across a tenant boundary.
+  // Validate the FK target exists AND is explicitly delegated to this site's
+  // workspace, otherwise the upsert would either throw or cross a tenant
+  // boundary.
   if (incomingAccountId) {
     if (!existing.workspace_id || !isGoogleAccountAvailableToWorkspace(incomingAccountId, existing.workspace_id)) {
       return reply.status(400).send({
@@ -1600,6 +1879,48 @@ app.get('/api/url-failures', async (req) => {
   const ws = currentWorkspace(req);
   const siteIds = new Set(ws ? getSitesForWorkspace(ws).map(s => s.id) : []);
   return getAllUrlFailures().filter(f => siteIds.has(f.site_id));
+});
+
+// Re-check whether a failed URL is currently reachable. This does not spend a
+// search-engine submission quota; it gives the operator evidence before they
+// clear the backoff record and allow the next run to retry it.
+app.post('/api/url-failures/check', async (req, reply) => {
+  const ws = currentWorkspace(req);
+  const { siteId, url, api } = (req.body ?? {}) as { siteId?: string; url?: string; api?: string };
+  if (!ws || !siteId || !url || !api) return reply.status(400).send({ error: 'siteId, url and api are required.' });
+  const siteIds = new Set(getSitesForWorkspace(ws).map(s => s.id));
+  const failure = getAllUrlFailures().find(f => f.site_id === siteId && f.url === url && f.api === api && siteIds.has(f.site_id));
+  if (!failure) return reply.status(404).send({ error: 'Failure record not found.' });
+  try {
+    let res = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'SEO-Website-Indexer/1.0 failure-check' } });
+    if (res.status === 405) {
+      res = await fetch(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'SEO-Website-Indexer/1.0 failure-check', Range: 'bytes=0-1023' } });
+      await res.body?.cancel().catch(() => undefined);
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      finalUrl: res.url,
+      redirected: res.redirected,
+      contentType: res.headers.get('content-type'),
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { ok: false, status: null, error: e instanceof Error ? e.message : String(e), checkedAt: new Date().toISOString() };
+  }
+});
+
+app.delete('/api/url-failures', async (req, reply) => {
+  const ws = currentWorkspace(req);
+  if (!ws) return reply.status(400).send({ error: 'No active workspace.' });
+  const { siteId, url, api } = (req.body ?? {}) as { siteId?: string; url?: string; api?: string };
+  const siteIds = getSitesForWorkspace(ws).map(s => s.id);
+  if (siteId && !siteIds.includes(siteId)) return reply.status(404).send({ error: 'Site not found.' });
+  const cleared = clearUrlFailuresForSites(siteIds, { siteId, url, api });
+  recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws, action: 'url_failures.cleared',
+    detail: { siteId: siteId ?? null, url: url ?? null, api: api ?? null, cleared }, ipAddress: requestIp(req) });
+  return { ok: true, cleared };
 });
 
 // ── Backups ───────────────────────────────────────────────────────────────────

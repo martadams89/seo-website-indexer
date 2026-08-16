@@ -19,10 +19,14 @@ type DbMod = typeof import('../db/database.js');
 type OAuthMod = typeof import('../auth/google-oauth.js');
 let db: DbMod;
 let oauth: OAuthMod;
+let users: typeof import('../auth/users.js');
+let workspaces: typeof import('../auth/workspaces.js');
 
 beforeAll(async () => {
   db = await import('../db/database.js');
   oauth = await import('../auth/google-oauth.js');
+  users = await import('../auth/users.js');
+  workspaces = await import('../auth/workspaces.js');
 });
 
 afterEach(() => {
@@ -41,6 +45,25 @@ function seedExpiredAccount(): string {
 }
 
 describe('Google token refresh', () => {
+  it('isolates concurrent OAuth handshakes and consumes each state once', () => {
+    const user = users.createUser({ email: `oauth-${randomUUID()}@x.com`, password: 'password123' });
+    const workspace = workspaces.bootstrapUserWorkspace(user, false);
+    const firstUrl = oauth.createGoogleOAuthAuthorization({
+      userId: user.id, workspaceId: workspace.id, redirectUri: 'https://app.test/api/auth/google/callback',
+      clientId: 'first.apps.googleusercontent.com', clientSecret: 'first-secret',
+    });
+    const secondUrl = oauth.createGoogleOAuthAuthorization({
+      userId: user.id, workspaceId: workspace.id, redirectUri: 'https://app.test/api/auth/google/callback',
+      clientId: 'second.apps.googleusercontent.com', clientSecret: 'second-secret',
+    });
+    const firstState = new URL(firstUrl).searchParams.get('state')!;
+    const secondState = new URL(secondUrl).searchParams.get('state')!;
+    expect(firstState).not.toBe(secondState);
+    expect(oauth.consumeGoogleOAuthState(secondState)?.clientSecret).toBe('second-secret');
+    expect(oauth.consumeGoogleOAuthState(firstState)?.clientSecret).toBe('first-secret');
+    expect(oauth.consumeGoogleOAuthState(firstState)).toBeNull(); // replay rejected
+  });
+
   it('coalesces concurrent refreshes for the same account', async () => {
     const id = seedExpiredAccount();
     const fetchMock = vi.fn(async () => {

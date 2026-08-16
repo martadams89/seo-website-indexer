@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Smartphone, ChevronRight, Copy, Check, ExternalLink, Key } from 'lucide-react';
-import { api, getActiveWorkspaceId } from '../api';
+import { api } from '../api';
 import { useApp } from '../AppContext';
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export default function SetupPage() {
   // Listen for callback postMessage
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+      if (event.origin === window.location.origin && event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
         await refresh();
         setStep('done');
       }
@@ -65,23 +65,9 @@ export default function SetupPage() {
     setDfError('');
     setDfLoading(true);
     try {
-      // 1. Save custom credentials if not using builtin env fallback
-      if (!hasBuiltin) {
-        await api.saveCredentials(dfClientId.trim(), dfClientSecret.trim());
-      }
-
-      // 2. Fetch current client ID
-      const activeClientId = hasBuiltin ? (status?.auth?.clientId || '') : dfClientId.trim();
-      if (!activeClientId) {
-        throw new Error('Google OAuth Client ID is missing. Please save credentials first.');
-      }
-
-      // 3. Initiate Standard Web Application OAuth Flow
-      const scope = 'https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/userinfo.email';
-      // Attach the account to the workspace the user is in (OAuth `state`).
-      const ws = getActiveWorkspaceId();
-      const stateParam = ws ? `&state=${encodeURIComponent(ws)}` : '';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${activeClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account%20consent${stateParam}`;
+      const { authorizationUrl } = await api.beginGoogleAuth(hasBuiltin ? {} : {
+        clientId: dfClientId.trim(), clientSecret: dfClientSecret.trim(),
+      });
 
       // 4. Open in popup window
       const width = 600;
@@ -90,7 +76,7 @@ export default function SetupPage() {
       const top = window.screen.height / 2 - height / 2;
       
       const popup = window.open(
-        authUrl,
+        authorizationUrl,
         'google-auth',
         `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
       );
