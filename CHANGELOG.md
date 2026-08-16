@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/martadams89/seo-website-indexer/compare/v1.24.4...v1.25.0) (2026-08-16)
+
+
+### ✨ Features
+
+* add full multi-tenant user administration ([#247](https://github.com/martadams89/seo-website-indexer/issues/247)) ([f32acef](https://github.com/martadams89/seo-website-indexer/commit/f32acef55ee02069790853b0a1125488e7bcbce9))
+
 ## [1.24.4](https://github.com/martadams89/seo-website-indexer/compare/v1.24.3...v1.24.4) (2026-08-14)
 
 
