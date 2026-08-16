@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/martadams89/seo-website-indexer/compare/v1.26.0...v1.27.0) (2026-08-16)
+
+
+### ✨ Features
+
+* deliver organic operations platform ([#251](https://github.com/martadams89/seo-website-indexer/issues/251)) ([f635aa5](https://github.com/martadams89/seo-website-indexer/commit/f635aa51ff8a1f0f423cd0b91785e3221a9b66a9))
+
 ## [1.26.0](https://github.com/martadams89/seo-website-indexer/compare/v1.25.0...v1.26.0) (2026-08-16)
 
 
