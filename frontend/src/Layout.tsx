@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
-  ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut
-, BarChart3, Bot } from 'lucide-react';
+  ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut,
+  BarChart3, Bot, Search, Command, ArrowRight,
+} from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
 import { useWorkspace } from './workspace/WorkspaceContext';
@@ -13,14 +14,21 @@ import { ToastHost } from './components/Toast';
 
 // ── Sidebar Nav ───────────────────────────────────────────────────────────────
 
-const NAV = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/sites',    icon: Globe,           label: 'Sites' },
-  { to: '/analytics', icon: BarChart3,      label: 'Analytics' },
-  { to: '/citations', icon: Bot,            label: 'AI Citations' },
-  { to: '/logs',     icon: ScrollText,      label: 'Live Logs' },
-  { to: '/settings', icon: Settings,        label: 'Settings' },
+const NAV_GROUPS = [
+  { label: 'Operate', items: [
+    { to: '/', icon: LayoutDashboard, label: 'Command Centre' },
+    { to: '/sites', icon: Globe, label: 'Sites & Submissions' },
+    { to: '/logs', icon: ScrollText, label: 'Live Activity' },
+  ] },
+  { label: 'Measure', items: [
+    { to: '/analytics', icon: BarChart3, label: 'Search Analytics' },
+    { to: '/citations', icon: Bot, label: 'AI Visibility' },
+  ] },
+  { label: 'Configure', items: [
+    { to: '/settings', icon: Settings, label: 'Settings' },
+  ] },
 ];
+const NAV = NAV_GROUPS.flatMap(group => group.items);
 
 // ── Layout Component ──────────────────────────────────────────────────────────
 
@@ -32,6 +40,8 @@ export default function Layout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);   // desktop icon-only mode
   const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer open
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
 
   // Only force the Google-auth setup wizard on a genuinely empty workspace —
   // a member invited into a workspace that already has sites/content should
@@ -67,6 +77,17 @@ export default function Layout() {
     }
   }, [mobileOpen]);
 
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault(); setCommandOpen(open => !open);
+      }
+      if (event.key === 'Escape') setCommandOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const shellClass = [
     'app-shell',
     collapsed ? 'sidebar-collapsed' : '',
@@ -99,26 +120,23 @@ export default function Layout() {
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">🔍</div>
           <div>
-            <div className="sidebar-logo-text">SEO Indexer</div>
-            <div className="sidebar-logo-sub">Self-hosted</div>
+            <div className="sidebar-logo-text">Organic Command</div>
+            <div className="sidebar-logo-sub">SEO + GEO operations</div>
           </div>
         </div>
 
         <WorkspaceSwitcher collapsed={collapsed} />
 
         <nav className="sidebar-nav">
-          {NAV.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-              title={collapsed ? label : undefined}
-              onClick={() => setMobileOpen(false)}
-            >
-              <Icon size={15} />
-              <span className="nav-item-label">{label}</span>
-            </NavLink>
+          {NAV_GROUPS.map(group => (
+            <div className="nav-group" key={group.label}>
+              <span className="nav-group-label">{group.label}</span>
+              {group.items.map(({ to, icon: Icon, label }) => (
+                <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} title={collapsed ? label : undefined} onClick={() => setMobileOpen(false)}>
+                  <Icon size={15} /><span className="nav-item-label">{label}</span>
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -207,7 +225,7 @@ export default function Layout() {
         >
           {mobileOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
-        <span className="mobile-header-title">SEO Indexer</span>
+        <span className="mobile-header-title">Organic Command</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             type="button"
@@ -238,8 +256,26 @@ export default function Layout() {
 
       {/* ── Main ── */}
       <main className="main-content">
+        <div className="global-toolbar">
+          <div><span>{active?.name ?? 'Workspace'}</span><strong>{NAV.find(item => item.to === location.pathname)?.label ?? 'Workspace detail'}</strong></div>
+          <button type="button" className="command-trigger" onClick={() => setCommandOpen(true)}><Search size={14} /><span>Jump to anything…</span><kbd><Command size={11} />K</kbd></button>
+        </div>
         <Outlet />
       </main>
+
+      {commandOpen && (
+        <div className="command-overlay" onMouseDown={() => setCommandOpen(false)}>
+          <div className="command-palette" role="dialog" aria-modal="true" aria-label="Quick navigation" onMouseDown={event => event.stopPropagation()}>
+            <div className="command-search"><Search size={17} /><input autoFocus value={commandQuery} onChange={event => setCommandQuery(event.target.value)} placeholder="Search pages and sites…" /></div>
+            <div className="command-results">
+              {[...NAV.map(item => ({ label: item.label, detail: 'Page', to: item.to, icon: item.icon })), ...sites.map(site => ({ label: site.name, detail: site.domain, to: '/sites', icon: Globe }))]
+                .filter(item => `${item.label} ${item.detail}`.toLowerCase().includes(commandQuery.toLowerCase()))
+                .slice(0, 10).map(item => <button key={`${item.to}:${item.label}`} onClick={() => { navigate(item.to); setCommandOpen(false); setCommandQuery(''); }}><item.icon size={15} /><span><strong>{item.label}</strong><small>{item.detail}</small></span><ArrowRight size={14} /></button>)}
+            </div>
+            <div className="command-footer"><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span>Search your whole operating workspace</span></div>
+          </div>
+        </div>
+      )}
 
       {/* ── Toasts ── */}
       <ToastHost />

@@ -221,6 +221,46 @@ describe('workspace tenant isolation', () => {
     expect(citations.listPrompts(wsL.id).map(p => p.id)).toContain(liamPrompt.id); // still there
   });
 
+  it('AI run and conversation boundaries cannot be crossed with a guessed prompt id', async () => {
+    const ownerA = users.createUser({ email: `ai-a-${randomUUID()}@x.com`, password: 'password123' });
+    const ownerB = users.createUser({ email: `ai-b-${randomUUID()}@x.com`, password: 'password123' });
+    const workspaceA = ws.bootstrapUserWorkspace(ownerA, false);
+    const workspaceB = ws.bootstrapUserWorkspace(ownerB, false);
+    const prompt = citations.addPrompt('private buyer question', null, workspaceA.id, 'commercial');
+    db.getDb().prepare(`
+      INSERT INTO ai_results(prompt_id, provider, model, cited, domains, excerpt, citations)
+      VALUES(?, 'openai', 'test', 1, '["example.com"]', 'private answer', '["https://example.com/source"]')
+    `).run(prompt.id);
+
+    expect(citations.getThread(prompt.id, 'openai', workspaceA.id)).toHaveLength(1);
+    expect(citations.getThread(prompt.id, 'openai', workspaceB.id)).toHaveLength(0);
+    expect(citations.getResults(20, workspaceB.id).some(row => row.prompt_id === prompt.id)).toBe(false);
+    db.setWorkspaceSetting(workspaceA.id, 'openai_api_key', 'test-key');
+    db.setWorkspaceSetting(workspaceA.id, 'ai_competitor_domains', 'example.com');
+    const insights = citations.getAiInsights(workspaceA.id);
+    expect(insights.overview.visibility).toBe(100);
+    expect(insights.sources.find(row => row.domain === 'example.com')?.competitor).toBe(true);
+    expect(citations.getAiInsights(workspaceB.id).overview.checks).toBe(0);
+    await expect(citations.runPrompt(prompt.id, workspaceB.id)).rejects.toThrow('Prompt not found');
+    await expect(citations.replyInThread(prompt.id, 'openai', 'tell me more', workspaceB.id)).rejects.toThrow('Prompt not found');
+  });
+
+  it('workspace snapshots only update the selected tenant', async () => {
+    const ownerA = users.createUser({ email: `snap-a-${randomUUID()}@x.com`, password: 'password123' });
+    const ownerB = users.createUser({ email: `snap-b-${randomUUID()}@x.com`, password: 'password123' });
+    const workspaceA = ws.bootstrapUserWorkspace(ownerA, false);
+    const workspaceB = ws.bootstrapUserWorkspace(ownerB, false);
+    const siteA = `snap-a-${randomUUID().slice(0, 8)}`;
+    const siteB = `snap-b-${randomUUID().slice(0, 8)}`;
+    makeSite(siteA, workspaceA.id); makeSite(siteB, workspaceB.id);
+    const stats = await import('../analytics/stats.js');
+
+    expect(stats.snapshotAllSites(workspaceA.id).map(row => row.site_id)).toEqual([siteA]);
+    const recorded = db.getDb().prepare('SELECT site_id FROM site_stats_daily WHERE site_id IN (?, ?)').all(siteA, siteB) as Array<{ site_id: string }>;
+    expect(recorded.map(row => row.site_id)).toContain(siteA);
+    expect(recorded.map(row => row.site_id)).not.toContain(siteB);
+  });
+
   it('resolves the Bing key from the site’s own workspace', () => {
     const carol = users.createUser({ email: `carol-${randomUUID()}@x.com`, password: 'password123' });
     const wsC = ws.bootstrapUserWorkspace(carol, false);

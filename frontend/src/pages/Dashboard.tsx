@@ -1,386 +1,249 @@
-import { useEffect, useState } from 'react';
-import { Play, RefreshCw, CheckCircle2, XCircle, Zap, Globe2, TrendingUp, Unlock, Search, Trash2 } from 'lucide-react';
-import { useApp, useToast } from '../AppContext';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, Bot, CheckCircle2,
+  CircleAlert, Cloud, Globe2, MousePointerClick, Play, PlugZap, RefreshCw,
+  Search, ShieldCheck, Sparkles, Trash2, Unlock, XCircle, Zap,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { Link, useLocation } from 'react-router-dom';
+import { api, type CommandCenter, type UrlFailureCheck, type UrlFailureRecord } from '../api';
+import { useApp, useToast } from '../AppContext';
+import { useAuth } from '../auth/AuthGate';
 import { QuotaWidget } from '../components/QuotaWidget';
-import { Link } from 'react-router-dom';
-import { api, type AnalyticsOverview, type AlertRow, type UrlFailureRecord, type UrlFailureCheck } from '../api';
 import { useWorkspace } from '../workspace/WorkspaceContext';
+
+const PROVIDER_LABEL: Record<string, string> = {
+  openai: 'ChatGPT', anthropic: 'Claude', gemini: 'Gemini',
+  perplexity: 'Perplexity', xai: 'Grok', brave: 'Brave Search',
+};
+
+function ScoreRing({ value }: { value: number }) {
+  return (
+    <div className="command-score-ring" style={{ '--score': `${value * 3.6}deg` } as React.CSSProperties}>
+      <div><strong>{value}</strong><span>health</span></div>
+    </div>
+  );
+}
+
+function Delta({ value, suffix = '%' }: { value: number | null; suffix?: string }) {
+  if (value === null) return <span className="metric-delta neutral">Awaiting history</span>;
+  const up = value >= 0;
+  return (
+    <span className={`metric-delta ${up ? 'up' : 'down'}`}>
+      {up ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{Math.abs(value)}{suffix}
+    </span>
+  );
+}
+
+function VisibilitySparkline({ points }: { points: Array<{ visibility: number }> }) {
+  if (points.length < 2) return <div className="spark-empty">Run checks again to build a trend</div>;
+  const width = 320; const height = 84;
+  const path = points.map((point, index) => {
+    const x = index / Math.max(points.length - 1, 1) * width;
+    const y = height - point.visibility / 100 * (height - 10) - 5;
+    return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg className="visibility-spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="AI visibility trend">
+      <defs><linearGradient id="visibility-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--violet)" stopOpacity=".35" /><stop offset="1" stopColor="var(--violet)" stopOpacity="0" /></linearGradient></defs>
+      <path d={`${path} L${width},${height} L0,${height} Z`} fill="url(#visibility-fill)" />
+      <path d={path} fill="none" stroke="var(--violet)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 export default function Dashboard() {
   const { status, sites, runs, logs, refresh } = useApp();
+  const { user } = useAuth();
   const { active } = useWorkspace();
+  const location = useLocation();
   const canOperate = !!active?.permissions?.manage_sites;
   const toast = useToast();
+  const [center, setCenter] = useState<CommandCenter | null>(null);
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [runError, setRunError] = useState('');
-  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
-  const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [failures, setFailures] = useState<UrlFailureRecord[]>([]);
   const [failureChecks, setFailureChecks] = useState<Record<string, UrlFailureCheck>>({});
   const [failureBusy, setFailureBusy] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getAnalyticsOverview().then(setOverview).catch(() => null);
-    api.getAlerts().then(a => setAlerts(a.filter(x => !x.acked).slice(0, 5))).catch(() => null);
-    api.getUrlFailures().then(setFailures).catch(() => null);
+  const loadCenter = useCallback(async () => {
+    const [nextCenter, nextFailures] = await Promise.all([api.getCommandCenter(), api.getUrlFailures()]);
+    setCenter(nextCenter); setFailures(nextFailures);
   }, []);
 
-  const failureKey = (f: UrlFailureRecord) => `${f.site_id}\n${f.api}\n${f.url}`;
-
-  async function checkFailure(f: UrlFailureRecord) {
-    const key = failureKey(f); setFailureBusy(key);
-    try {
-      const result = await api.checkUrlFailure(f);
-      setFailureChecks(v => ({ ...v, [key]: result }));
+  useEffect(() => { loadCenter().catch(() => null); }, [loadCenter, active?.id]);
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('focus') === 'failures') {
+      setTimeout(() => document.getElementById('submission-failures')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
     }
-    catch (e) { toast('error', String(e).replace('Error: ', '')); }
+  }, [location.search, failures.length]);
+
+  const failureKey = (failure: UrlFailureRecord) => `${failure.site_id}\n${failure.api}\n${failure.url}`;
+  const siteNames = Object.fromEntries(sites.map(site => [site.id, site.name]));
+
+  async function checkFailure(failure: UrlFailureRecord) {
+    const key = failureKey(failure); setFailureBusy(key);
+    try { const result = await api.checkUrlFailure(failure); setFailureChecks(value => ({ ...value, [key]: result })); }
+    catch (error) { toast('error', String(error).replace('Error: ', '')); }
     setFailureBusy(null);
   }
 
-  async function clearFailure(f?: UrlFailureRecord) {
-    if (!confirm(f ? 'Clear this failure so the next indexing run can retry it?' : `Clear all ${failures.length} failure records in this workspace?`)) return;
-    const key = f ? failureKey(f) : 'all'; setFailureBusy(key);
+  async function clearFailure(failure?: UrlFailureRecord) {
+    if (!confirm(failure ? 'Clear this failure so the next indexing run can retry it?' : `Clear all ${failures.length} failure records in this workspace?`)) return;
+    const key = failure ? failureKey(failure) : 'all'; setFailureBusy(key);
     try {
-      const result = await api.clearUrlFailures(f ? { siteId: f.site_id, url: f.url, api: f.api } : {});
+      const result = await api.clearUrlFailures(failure ? { siteId: failure.site_id, url: failure.url, api: failure.api } : {});
       toast('success', `${result.cleared} failure record${result.cleared === 1 ? '' : 's'} cleared; the next run can retry them.`);
-      setFailures(await api.getUrlFailures());
-      setFailureChecks({});
-    } catch (e) { toast('error', String(e).replace('Error: ', '')); }
+      setFailureChecks({}); await loadCenter();
+    } catch (error) { toast('error', String(error).replace('Error: ', '')); }
     setFailureBusy(null);
   }
-
-  const todayRuns = runs.filter(r => r.started_at.slice(0, 10) === new Date().toISOString().slice(0, 10));
-  const totalSubmitted = todayRuns.reduce((s, r) => s + r.total_submitted, 0);
-  const totalFailed    = todayRuns.reduce((s, r) => s + r.total_failed, 0);
-  const siteNames = Object.fromEntries(sites.map(s => [s.id, s.name]));
 
   async function triggerRun(dryRun = false) {
-    setRunError('');
-    setRunning(true);
+    setRunError(''); setRunning(true);
     try {
       await api.triggerRun(dryRun ? { skipGoogle: true, skipIndexNow: true } : {});
-      toast('success', dryRun ? 'Dry-run started' : 'Run started');
-      setTimeout(refresh, 1500);
-    } catch (e) {
-      const msg = String(e).replace('Error: ', '');
-      setRunError(msg);
-      toast('error', msg);
-    }
+      toast('success', dryRun ? 'Audit run started' : 'Submission run started');
+      setTimeout(() => { refresh(); loadCenter().catch(() => null); }, 1500);
+    } catch (error) { const message = String(error).replace('Error: ', ''); setRunError(message); toast('error', message); }
     setRunning(false);
   }
 
   async function stopRun() {
-    setRunError('');
-    setStopping(true);
-    try {
-      await api.stopRun();
-      toast('info', 'Stop requested');
-      setTimeout(refresh, 1500);
-    } catch (e) {
-      const msg = String(e).replace('Error: ', '');
-      setRunError(msg);
-      toast('error', msg);
-    }
+    setStopping(true); setRunError('');
+    try { await api.stopRun(); toast('info', 'Stop requested'); setTimeout(refresh, 1200); }
+    catch (error) { const message = String(error).replace('Error: ', ''); setRunError(message); toast('error', message); }
     setStopping(false);
   }
 
   async function releaseLock() {
-    if (!confirm('Release the persistent run lock? Only do this if a previous run crashed and never released the lock — releasing while a run is genuinely active can cause overlapping submissions.')) return;
+    if (!confirm('Release the persistent run lock? Only do this if a previous run crashed.')) return;
     setUnlocking(true);
-    setRunError('');
-    try {
-      await api.releaseLock();
-      toast('success', 'Lock released');
-      setTimeout(refresh, 800);
-    } catch (e) {
-      const msg = String(e).replace('Error: ', '');
-      setRunError(msg);
-      toast('error', msg);
-    }
+    try { await api.releaseLock(); toast('success', 'Run lock released'); setTimeout(refresh, 800); }
+    catch (error) { toast('error', String(error).replace('Error: ', '')); }
     setUnlocking(false);
   }
 
-  const isCurrentlyRunning = status?.scheduler.running;
-  const persistentLock = status?.scheduler.lock ?? null;
-  // The persistent lock can outlive an in-process run when the previous server
-  // crashed before releasing it. We show a release affordance whenever a lock
-  // exists but no in-process run is active.
-  const showReleaseLock = !!persistentLock && !isCurrentlyRunning;
-  const lockErrorVisible = /persistent lock/i.test(runError);
+  const isRunning = !!status?.scheduler.running;
+  const showReleaseLock = !!status?.scheduler.lock && !isRunning;
+  const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const metrics = center?.metrics;
+  const integrations = center?.integrations;
+  const priorityAction = center?.actions[0];
 
   return (
-    <div>
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Overview of your SEO indexing pipeline</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn btn-secondary btn-sm" onClick={refresh}>
-            <RefreshCw size={13} /> Refresh
-          </button>
-          {showReleaseLock && (
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={unlocking || !canOperate}
-              onClick={releaseLock}
-              title={`Persistent lock held by run ${persistentLock?.runId ?? '?'}${persistentLock?.acquiredAt ? ` since ${persistentLock.acquiredAt}` : ''}`}
-            >
-              {unlocking ? <><span className="spinner" /> Releasing…</> : <><Unlock size={13} /> Release lock</>}
-            </button>
-          )}
-          {isCurrentlyRunning ? (
-            <button
-              className="btn btn-danger"
-              disabled={stopping || !canOperate}
-              onClick={stopRun}
-            >
-              {stopping ? <><span className="spinner" /> Stopping…</> : <><XCircle size={13} /> Stop Run</>}
-            </button>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                className="btn btn-secondary"
-                disabled={running || sites.length === 0 || !canOperate}
-                onClick={() => triggerRun(true)}
-              >
-                <Zap size={13} /> Dry Run (Audits Only)
+    <div className="command-center">
+      <section className="command-hero">
+        <div className="command-hero-copy">
+          <div className="eyebrow"><Sparkles size={13} /> {active?.name ?? 'Workspace'} command centre</div>
+          <h1>{greeting}, {user.name?.split(' ')[0] || 'there'}.</h1>
+          <p>One operating view for indexation, search demand, answer-engine visibility and the work that matters next.</p>
+          <div className="command-actions">
+            {isRunning ? (
+              <button className="btn btn-danger" disabled={stopping || !canOperate} onClick={stopRun}>
+                {stopping ? <><span className="spinner" /> Stopping…</> : <><XCircle size={15} /> Stop active run</>}
               </button>
-              <button
-                className="btn btn-primary"
-                disabled={running || !status?.auth.authenticated || sites.length === 0 || !canOperate}
-                onClick={() => triggerRun(false)}
-              >
-                <Play size={13} /> Run Now
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {runError && (
-        <div className="alert alert-error mb-4">
-          <div className="alert-content" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <span style={{ flex: 1, minWidth: 220 }}>{runError}</span>
-            {lockErrorVisible && (
-              <button
-                className="btn btn-secondary btn-sm"
-                disabled={unlocking}
-                onClick={releaseLock}
-              >
-                {unlocking ? <><span className="spinner" /> Releasing…</> : <><Unlock size={12} /> Release lock</>}
-              </button>
+            ) : (
+              <button className="btn btn-primary btn-command" disabled={running || !status?.auth.authenticated || sites.length === 0 || !canOperate} onClick={() => triggerRun(false)}><Play size={15} /> Run workspace</button>
             )}
+            <button className="btn btn-secondary" disabled={running || sites.length === 0 || !canOperate} onClick={() => triggerRun(true)}><Zap size={14} /> Audit only</button>
+            <button className="btn btn-ghost" onClick={() => { refresh(); loadCenter().catch(() => null); }}><RefreshCw size={14} /> Refresh</button>
+            {showReleaseLock && <button className="btn btn-ghost" disabled={unlocking || !canOperate} onClick={releaseLock}><Unlock size={14} /> Release lock</button>}
           </div>
         </div>
-      )}
+        <div className="command-score-block">
+          <ScoreRing value={center?.score.overall ?? 0} />
+          <div className="score-breakdown">
+            <span><i style={{ width: `${center?.score.indexation ?? 0}%` }} />Indexation <b>{center?.score.indexation ?? '—'}</b></span>
+            <span><i style={{ width: `${center?.score.aiVisibility ?? 0}%` }} />AI visibility <b>{center?.score.aiVisibility ?? '—'}</b></span>
+            <span><i style={{ width: `${center?.score.agentReadiness ?? 0}%` }} />Agent ready <b>{center?.score.agentReadiness ?? '—'}</b></span>
+            <span><i style={{ width: `${center?.score.operations ?? 0}%` }} />Operations <b>{center?.score.operations ?? '—'}</b></span>
+          </div>
+        </div>
+      </section>
 
-      {/* Setup prompts */}
-      {!status?.auth.authenticated && (
-        <div className="alert alert-warn mb-4">
-          <div className="alert-content">
-            <div className="alert-title">Authentication required</div>
-            <div>Configure Google authentication in <a href="/setup" style={{ color: 'var(--warn)' }}>Setup</a>.</div>
-          </div>
-        </div>
-      )}
-      {status?.auth.authenticated && sites.length === 0 && (
-        <div className="alert alert-info mb-4">
-          <div className="alert-content">
-            <div className="alert-title">No sites configured</div>
-            <div>Add your first site on the <a href="/sites" style={{ color: 'var(--info)' }}>Sites</a> page.</div>
-          </div>
-        </div>
-      )}
+      {runError && <div className="alert alert-error mb-4"><div className="alert-content">{runError}</div></div>}
+      {!status?.auth.authenticated && <div className="alert alert-warn mb-4"><div className="alert-content"><strong>Connect Google to start operating.</strong> Add a workspace or personal account in <Link to="/settings?tab=accounts">Settings</Link>.</div></div>}
 
-      {/* ── Stats ── */}
-      <div className="grid-4 mb-4">
-        <div className="stat-card" style={{ '--accent-color': 'var(--accent)' } as React.CSSProperties}>
-          <div className="stat-label">Sites</div>
-          <div className="stat-value text-accent">{sites.length}</div>
-          <div className="stat-sub">Enabled</div>
-        </div>
-        <div className="stat-card" style={{ '--accent-color': 'var(--ok)' } as React.CSSProperties}>
-          <div className="stat-label">Submitted Today</div>
-          <div className="stat-value text-ok">{totalSubmitted}</div>
-          <div className="stat-sub">across {todayRuns.length} run{todayRuns.length !== 1 ? 's' : ''}</div>
-        </div>
-        <div className="stat-card" style={{ '--accent-color': 'var(--warn)' } as React.CSSProperties}>
-          <div className="stat-label">Failed Today</div>
-          <div className="stat-value" style={{ color: totalFailed > 0 ? 'var(--warn)' : 'var(--text-dim)' }}>{totalFailed}</div>
-          <div className="stat-sub">{totalFailed > 0 ? 'Check logs' : 'All good'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Schedule</div>
-          <div style={{ fontSize: 14, fontWeight: 700, marginTop: 6, fontFamily: 'JetBrains Mono' }}>
-            {status?.scheduler.cronSchedule ?? '—'}
-          </div>
-          <div className="stat-sub">{isCurrentlyRunning ? '🟢 Running now' : 'Next run: scheduled'}</div>
-        </div>
-      </div>
+      <section className="command-metrics" aria-label="Workspace metrics">
+        <Link to="/analytics" className="command-metric"><span className="metric-icon cyan"><Globe2 size={17} /></span><div><small>Index coverage</small><strong>{metrics?.indexedRate ?? '—'}{metrics?.indexedRate != null ? '%' : ''}</strong><span>{(metrics?.indexed ?? 0).toLocaleString()} of {(metrics?.urls ?? 0).toLocaleString()} URLs</span></div></Link>
+        <Link to="/analytics" className="command-metric"><span className="metric-icon green"><MousePointerClick size={17} /></span><div><small>Organic clicks · 7d</small><strong>{(metrics?.clicks7d ?? 0).toLocaleString()}</strong><Delta value={metrics?.clicksChange ?? null} /></div></Link>
+        <Link to="/citations" className="command-metric"><span className="metric-icon violet"><Bot size={17} /></span><div><small>AI visibility</small><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><Delta value={metrics?.aiChange ?? null} /></div></Link>
+        <Link to="/analytics" className="command-metric"><span className={`metric-icon ${(metrics?.openAlerts ?? 0) ? 'amber' : 'green'}`}><ShieldCheck size={17} /></span><div><small>Open signals</small><strong>{metrics?.openAlerts ?? 0}</strong><span>{metrics?.failures ? `${metrics.failures} submission failures` : 'No active failures'}</span></div></Link>
+      </section>
 
-      {/* ── Index health (analytics engine) ── */}
-      {overview && overview.totals.urls_total > 0 && (
-        <Link to="/analytics" className="health-strip mb-4">
-          <div className="health-strip-item">
-            <span className="health-strip-value" style={{ color: 'var(--ok)' }}>
-              {Math.round((overview.totals.urls_indexed / Math.max(overview.totals.urls_total, 1)) * 100)}%
-            </span>
-            <span className="health-strip-label">indexed</span>
-          </div>
-          <div className="health-strip-item">
-            <span className="health-strip-value">{overview.totals.urls_total.toLocaleString()}</span>
-            <span className="health-strip-label">URLs tracked</span>
-          </div>
-          <div className="health-strip-item">
-            <span className="health-strip-value" style={{ color: overview.totals.urls_stale ? 'var(--warn)' : undefined }}>{overview.totals.urls_stale}</span>
-            <span className="health-strip-label">stale</span>
-          </div>
-          <div className="health-strip-item">
-            <span className="health-strip-value" style={{ color: overview.totals.failures ? 'var(--error)' : undefined }}>{overview.totals.failures}</span>
-            <span className="health-strip-label">failing</span>
-          </div>
-          <div className="health-strip-item">
-            <span className="health-strip-value" style={{ color: overview.totals.open_alerts ? 'var(--warn)' : undefined }}>{overview.totals.open_alerts}</span>
-            <span className="health-strip-label">open alerts</span>
-          </div>
-          <span className="health-strip-cta">Full analytics →</span>
-        </Link>
-      )}
-
-      {alerts.length > 0 && (
-        <div className="card mb-4" style={{ borderColor: 'var(--warn)' }}>
-          <div className="card-title">⚠ Open alerts</div>
-          {alerts.map(a => (
-            <div key={a.id} className="dash-alert-row">
-              <span className="alert-dot" style={{ background: a.severity === 'error' ? 'var(--error)' : 'var(--warn)' }} />
-              <span style={{ flex: 1, fontSize: 12.5 }}>{a.message}</span>
-              <span className="text-dim" style={{ fontSize: 11 }}>{a.domain ?? ''}</span>
+      <section className="command-grid command-main-grid">
+        <div className="command-panel action-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Prioritized work</span><h2>Action centre</h2></div><span className="signal-count">{center?.actions.length ?? 0} signals</span></div>
+          {center?.actions.length ? (
+            <div className="action-stack">
+              {center.actions.map((action, index) => (
+                <Link to={action.to} key={action.id} className={`action-row priority-${action.priority}`}><span className="action-rank">{String(index + 1).padStart(2, '0')}</span><span className="action-copy"><strong>{action.title}</strong><small>{action.description}</small></span>{action.count != null && <span className="action-count">{action.count}</span>}<ArrowRight size={15} /></Link>
+              ))}
             </div>
-          ))}
-          <Link to="/analytics" className="text-dim" style={{ fontSize: 11 }}>Manage in Analytics →</Link>
+          ) : <div className="command-empty"><CheckCircle2 size={26} /><strong>You’re clear to grow</strong><span>No urgent operational actions. Keep monitoring movement and expanding prompt coverage.</span></div>}
         </div>
-      )}
+
+        <div className="command-panel ai-pulse-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Generative discovery</span><h2>AI visibility pulse</h2></div><Link to="/citations">Open intelligence <ArrowRight size={13} /></Link></div>
+          <div className="visibility-headline"><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><div><span>of current answers cite you</span><Delta value={metrics?.aiChange ?? null} /></div></div>
+          <VisibilitySparkline points={center?.ai.trend ?? []} />
+          <div className="provider-pills">
+            {(center?.ai.providers ?? []).map(provider => <span key={provider.provider}><i style={{ '--provider-score': `${provider.visibility}%` } as React.CSSProperties} />{PROVIDER_LABEL[provider.provider] ?? provider.provider}<b>{provider.visibility}%</b></span>)}
+            {!center?.ai.providers.length && <span className="muted-pill">Connect a provider to establish your baseline</span>}
+          </div>
+        </div>
+      </section>
+
+      <section className="command-grid command-secondary-grid">
+        <div className="command-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Search demand</span><h2>Portfolio momentum</h2></div><Link to="/analytics">All analytics <ArrowRight size={13} /></Link></div>
+          <div className="momentum-list">
+            {center?.movers.length ? center.movers.map(site => <Link to={`/analytics/${site.site_id}`} key={site.site_id} className="momentum-row"><span className="site-monogram">{site.name.slice(0, 1).toUpperCase()}</span><span><strong>{site.name}</strong><small>{site.clicks.current.toLocaleString()} clicks · {site.impressions.current.toLocaleString()} impressions</small></span><Delta value={Math.round(site.clicks.changePct)} /></Link>) : <div className="command-empty compact"><Activity size={22} /><strong>No performance history yet</strong><span>Run the workspace to pull Search Console and Bing rollups.</span></div>}
+          </div>
+        </div>
+
+        <div className="command-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Data plane</span><h2>Connections</h2></div><Link to="/settings?tab=keys">Manage <ArrowRight size={13} /></Link></div>
+          <div className="connection-grid">
+            <Link to="/settings?tab=accounts" className={integrations?.google ? 'connected' : ''}><Cloud size={17} /><span><strong>Google</strong><small>{integrations?.google ? `${integrations.google} account${integrations.google === 1 ? '' : 's'}` : 'Connect account'}</small></span><i /></Link>
+            <Link to="/settings?tab=keys" className={integrations?.bing ? 'connected' : ''}><Globe2 size={17} /><span><strong>Bing</strong><small>{integrations?.bing ? `${integrations.bing} account${integrations.bing === 1 ? '' : 's'}` : 'Not connected'}</small></span><i /></Link>
+            <Link to="/settings?tab=keys" className={integrations?.aiProviders ? 'connected' : ''}><Sparkles size={17} /><span><strong>Answer engines</strong><small>{integrations?.aiProviders ? `${integrations.aiProviders} live` : 'Add API keys'}</small></span><i /></Link>
+            <Link to="/settings?tab=notifications" className={integrations?.notifications ? 'connected' : ''}><Bell size={17} /><span><strong>Notifications</strong><small>{integrations?.notifications ? `${integrations.notifications} channels` : 'Choose a route'}</small></span><i /></Link>
+          </div>
+          {priorityAction?.kind === 'integration' && <div className="connection-tip"><PlugZap size={14} /><span>{priorityAction.description}</span></div>}
+        </div>
+      </section>
 
       {failures.length > 0 && (
-        <div className="card mb-4" style={{ borderColor: 'var(--error)' }}>
-          <div className="card-title flex items-center justify-between">
-            <span><XCircle size={13} /> Submission failures ({failures.length})</span>
-            <button className="btn btn-secondary btn-sm" disabled={failureBusy === 'all' || !canOperate} onClick={() => clearFailure()}>
-              <Trash2 size={12} /> Clear all
-            </button>
-          </div>
-          <p className="text-dim" style={{ fontSize: 11, marginBottom: 10 }}>
-            Repeated failures are held in backoff to protect API quota. Check that a URL is reachable, then clear its record to make it eligible on the next run.
-          </p>
-          <div className="member-list">
-            {failures.slice(0, 12).map(f => {
-              const key = failureKey(f); const result = failureChecks[key];
-              return (
-                <div className="member-row" key={key}>
-                  <div className="member-info" style={{ flex: 1 }}>
-                    <span className="member-name" title={f.url}>{f.url}</span>
-                    <span className="member-role">
-                      {siteNames[f.site_id] ?? f.site_id} · {f.api.replaceAll('_', ' ')} · {f.fail_count} attempt{f.fail_count === 1 ? '' : 's'}
-                      {result && <> · <strong style={{ color: result.ok ? 'var(--ok)' : 'var(--error)' }}>{result.ok ? `${result.status} reachable` : (result.status ? `${result.status} ${result.statusText ?? ''}` : result.error ?? 'unreachable')}</strong></>}
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button className="btn btn-secondary btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => checkFailure(f)}><Search size={12} /> Check</button>
-                    <button className="btn btn-secondary btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => clearFailure(f)}><Trash2 size={12} /> Clear</button>
-                  </div>
-                </div>
-              );
+        <section className="command-panel failure-panel" id="submission-failures">
+          <div className="command-panel-head"><div><span className="eyebrow danger">Needs intervention</span><h2>Submission failures</h2><p>Check live reachability, clear repaired records, then retry on the next run.</p></div><button className="btn btn-secondary btn-sm" disabled={failureBusy === 'all' || !canOperate} onClick={() => clearFailure()}><Trash2 size={12} /> Clear all</button></div>
+          <div className="failure-list">
+            {failures.slice(0, 20).map(failure => {
+              const key = failureKey(failure); const result = failureChecks[key];
+              return <div className="failure-row" key={key}><CircleAlert size={16} /><span><strong title={failure.url}>{failure.url}</strong><small>{siteNames[failure.site_id] ?? failure.site_id} · {failure.api.replaceAll('_', ' ')} · {failure.fail_count} attempts{result && <> · <b className={result.ok ? 'text-ok' : 'text-error'}>{result.ok ? `${result.status} reachable` : result.status ? `${result.status} ${result.statusText ?? ''}` : result.error ?? 'unreachable'}</b></>}</small></span><div><button className="btn btn-secondary btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => checkFailure(failure)}><Search size={12} /> Check</button><button className="btn btn-ghost btn-sm" disabled={failureBusy === key || !canOperate} onClick={() => clearFailure(failure)}><Trash2 size={12} /></button></div></div>;
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      <div className="grid-2 mb-4">
-        {/* ── Sites overview ── */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><Globe2 size={13} /> Sites</div>
-          {sites.length === 0 ? (
-            <p className="text-dim text-sm">No sites added yet.</p>
-          ) : (
-            <div className="flex-col gap-3">
-              {sites.map(site => (
-                <div key={site.id} className="flex items-center gap-3">
-                  <div style={{
-                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                    background: site.indexNowVerified ? 'var(--ok)' : 'var(--warn)',
-                  }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{site.name}</div>
-                    <div className="text-dim text-xs truncate">{site.domain}</div>
-                  </div>
-                  {site.indexNowVerified
-                    ? <span className="badge badge-ok">IndexNow ✓</span>
-                    : <span className="badge badge-warn">Key unverified</span>}
-                </div>
-              ))}
-            </div>
-          )}
+      <section className="command-grid command-secondary-grid">
+        <div className="command-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Operations</span><h2>Recent runs</h2></div><span className="schedule-chip"><Zap size={11} /> {status?.scheduler.cronSchedule ?? 'Not scheduled'}</span></div>
+          <div className="run-timeline">
+            {runs.slice(0, 5).map(run => <div key={run.id}><span className={`run-dot ${run.status}`} /><span><strong>{run.total_submitted} submitted</strong><small>{formatDistanceToNow(new Date(run.started_at), { addSuffix: true })} · {run.trigger}{run.total_failed ? ` · ${run.total_failed} failed` : ''}</small></span></div>)}
+            {!runs.length && <div className="command-empty compact"><Play size={20} /><strong>No runs yet</strong><span>Your first audit will appear here.</span></div>}
+          </div>
         </div>
+        <div className="command-panel">
+          <div className="command-panel-head"><div><span className="eyebrow">Live system</span><h2>Activity stream</h2></div><Link to="/logs">View all <ArrowRight size={13} /></Link></div>
+          <div className="activity-stream">{logs.slice(0, 8).map((log, index) => <div key={log.id ?? index}><span className={`activity-dot ${log.level}`} /><time>{log.created_at?.slice(11, 16) ?? 'now'}</time><p>{log.message}</p></div>)}{!logs.length && <div className="command-empty compact">Waiting for activity…</div>}</div>
+        </div>
+      </section>
 
-        {/* ── Recent runs ── */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><TrendingUp size={13} /> Recent Runs</div>
-          {runs.length === 0 ? (
-            <p className="text-dim text-sm">No runs yet. Click "Run Now" to start.</p>
-          ) : (
-            <div className="flex-col gap-2">
-              {runs.slice(0, 6).map(run => (
-                <div key={run.id} className="flex items-center gap-3" style={{ fontSize: 13 }}>
-                  {run.status === 'completed'
-                    ? <CheckCircle2 size={14} style={{ color: 'var(--ok)', flexShrink: 0 }} />
-                    : run.status === 'failed'
-                    ? <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
-                    : <span className="spinner" style={{ flexShrink: 0 }} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="flex items-center gap-2">
-                      <span style={{ fontWeight: 600 }}>{run.total_submitted} submitted</span>
-                      {run.total_failed > 0 && <span className="text-warn text-xs">{run.total_failed} failed</span>}
-                      <span className="badge badge-info" style={{ fontSize: 10 }}>{run.trigger}</span>
-                    </div>
-                    <div className="text-dim text-xs">
-                      {formatDistanceToNow(new Date(run.started_at), { addSuffix: true })}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Quota widget ── */}
-      <div className="mb-4">
-        <QuotaWidget siteNames={siteNames} />
-      </div>
-
-      {/* ── Recent logs preview ── */}
-      <div className="card">
-        <div className="card-title flex items-center justify-between">
-          <span className="flex items-center gap-2"><Zap size={13} /> Recent Activity</span>
-          <a href="/logs" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>View all →</a>
-        </div>
-        <div className="log-panel" style={{ maxHeight: 240 }}>
-          {logs.length === 0 ? (
-            <div className="text-dim">No activity yet.</div>
-          ) : (
-            logs.slice(0, 30).map((log, i) => (
-              <div key={i} className={`log-line log-${log.level}`}>
-                <span className="log-ts">{log.created_at?.slice(11, 19) ?? ''}</span>
-                <span className="log-msg">{log.message}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <div className="command-quota"><QuotaWidget siteNames={siteNames} /></div>
     </div>
   );
 }

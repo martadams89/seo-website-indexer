@@ -336,6 +336,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/notifications/config', { method: 'PUT', body: JSON.stringify(data) }),
   testNotifications: () =>
     apiFetch<{ results: NotifyChannelResult[] }>('/api/notifications/test', { method: 'POST' }),
+  getNotificationDeliveries: () => apiFetch<NotificationDelivery[]>('/api/notifications/deliveries'),
 
   // Per-workspace API-key overrides (layered over platform defaults)
   getWorkspaceKeys: () => apiFetch<{ keys: Record<string, { override: boolean; platform: boolean }> }>('/api/workspace/keys'),
@@ -362,6 +363,7 @@ export const api = {
   releaseLock: () => apiFetch<{ ok: boolean }>('/api/scheduler/release-lock', { method: 'POST' }),
 
   // ── Analytics ──
+  getCommandCenter: () => apiFetch<CommandCenter>('/api/command-center'),
   getAnalyticsOverview: () => apiFetch<AnalyticsOverview>('/api/analytics/overview'),
   getSiteAnalytics: (siteId: string) => apiFetch<SiteAnalytics>(`/api/analytics/site/${siteId}`),
   snapshotStats: () => apiFetch<{ snapshots: number }>('/api/analytics/snapshot', { method: 'POST' }),
@@ -419,10 +421,13 @@ export const api = {
   // ── AI citations ──
   getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
   getAiPrompts: () => apiFetch<AiPrompt[]>('/api/ai/prompts'),
-  addAiPrompt: (prompt: string, site_id?: string | null) =>
-    apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id }) }),
+  addAiPrompt: (prompt: string, site_id?: string | null, category: AiPromptCategory = 'discovery') =>
+    apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id, category }) }),
   deleteAiPrompt: (id: number) => apiFetch<{ ok: boolean }>(`/api/ai/prompts/${id}`, { method: 'DELETE' }),
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
+  getAiInsights: () => apiFetch<AiInsights>('/api/ai/insights'),
+  getAiConfig: () => apiFetch<{ competitorDomains: string }>('/api/ai/config'),
+  saveAiConfig: (competitorDomains: string) => apiFetch<{ ok: boolean }>('/api/ai/config', { method: 'PUT', body: JSON.stringify({ competitorDomains }) }),
   runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
   runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
   getAiThread: (promptId: number, provider: string) =>
@@ -563,6 +568,27 @@ export interface BingAccount { id: string; name: string; created_at: string }
 
 export type NotifyChannel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
 export interface NotifyChannelResult { channel: NotifyChannel; configured: boolean; ok: boolean; error?: string }
+export interface NotificationDelivery {
+  id: number; workspace_id: string; event_type: string; channel: NotifyChannel;
+  status: 'sent' | 'failed'; title: string; error: string | null; created_at: string;
+}
+
+export interface CommandAction {
+  id: string; priority: 'critical' | 'high' | 'medium' | 'low';
+  kind: 'indexing' | 'search' | 'ai' | 'integration' | 'experience';
+  title: string; description: string; to: string; count?: number;
+}
+export interface CommandCenter {
+  generatedAt: string;
+  score: { overall: number; indexation: number | null; aiVisibility: number | null; agentReadiness: number | null; operations: number };
+  metrics: {
+    sites: number; urls: number; indexed: number; indexedRate: number | null; stale: number;
+    failures: number; openAlerts: number; clicks7d: number; clicksChange: number | null;
+    aiPrompts: number; aiChecks: number; aiVisibility: number | null; aiChange: number | null;
+  };
+  integrations: { google: number; bing: number; aiProviders: number; notifications: number };
+  actions: CommandAction[]; movers: SiteMover[]; ai: AiInsights;
+}
 export interface PasskeyInfo { id: string; name: string | null; created_at: string }
 
 // Minimal shapes of the WebAuthn JSON options the backend returns (subset used
@@ -651,7 +677,8 @@ export interface EnginePerformance {
   pages: PerfPageRow[];
 }
 export interface PerformanceResponse { days: number; google: EnginePerformance; bing: EnginePerformance }
-export interface AiPrompt { id: number; site_id: string | null; prompt: string; enabled: number; created_at: string }
+export type AiPromptCategory = 'discovery' | 'comparison' | 'commercial' | 'brand' | 'support';
+export interface AiPrompt { id: number; site_id: string | null; prompt: string; category: AiPromptCategory; enabled: number; created_at: string }
 export interface AiResult {
   id: number; prompt_id: number; prompt?: string; site_id?: string | null;
   provider: string; model: string | null; cited: number; domains: string; excerpt: string | null;
@@ -659,6 +686,22 @@ export interface AiResult {
   parent_id?: number | null; citations?: string | null; user_prompt?: string | null;
 }
 export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; excerpt?: string; error?: string }
+export interface AiInsights {
+  overview: {
+    prompts: number; configuredProviders: number; checks: number; cited: number; visibility: number;
+    previousVisibility: number | null; change: number | null; sourceDomains: number;
+  };
+  providers: Array<{ provider: string; checks: number; cited: number; visibility: number }>;
+  trend: Array<{ day: string; checks: number; cited: number; visibility: number }>;
+  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; providers: string[] }>;
+  opportunities: Array<{
+    promptId: number; prompt: string; category: AiPromptCategory; siteId: string | null;
+    citedProviders: string[]; missingProviders: string[];
+  }>;
+  movements: Array<{
+    promptId: number; prompt: string; provider: string; cited: boolean; previousCited: boolean; createdAt: string;
+  }>;
+}
 export interface ProviderModels {
   provider: string; configured: boolean; models: string[];
   selected: string; recommended: string; isOverride: boolean;

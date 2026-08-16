@@ -65,6 +65,8 @@ describe('per-workspace notification channels', () => {
     expect(calls.some(u => u.includes('hooks.slack.com'))).toBe(true);
     expect(calls.some(u => u.includes('api.telegram.org/botBOT/sendMessage'))).toBe(true);
     expect(calls.some(u => u === 'https://example.com/hook')).toBe(true);
+    const deliveries = notify.listNotificationDeliveries(WS);
+    expect(deliveries.slice(0, 3).every(row => row.status === 'sent' && row.event_type === 'test')).toBe(true);
   });
 
   it('reports per-channel failure without failing the others', async () => {
@@ -91,5 +93,13 @@ describe('per-workspace notification channels', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => { calls.push(String(url)); return { ok: true, status: 200, statusText: 'OK' } as Response; }));
     await notify.sendTestNotification(other);
     expect(calls).toHaveLength(0); // the other workspace has nothing configured
+  });
+
+  it('honours per-event routing preferences and keeps them tenant scoped', () => {
+    const other = newWorkspace();
+    expect(notify.notificationEventEnabled(WS, 'citation_changes')).toBe(true);
+    db.setWorkspaceSetting(WS, 'notify_citation_changes', 'false');
+    expect(notify.notificationEventEnabled(WS, 'citation_changes')).toBe(false);
+    expect(notify.notificationEventEnabled(other, 'citation_changes')).toBe(true);
   });
 });

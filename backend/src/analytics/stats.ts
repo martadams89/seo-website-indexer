@@ -3,7 +3,7 @@
  * run_history + quota tables, alert generation on day-over-day regressions,
  * and the aggregate queries behind the dashboard.
  */
-import { getDb, getAllSites, type Site } from '../db/database.js';
+import { getDb, getAllSites, getEnabledSitesForWorkspace, type Site } from '../db/database.js';
 
 export interface SiteSnapshot {
   site_id: string;
@@ -72,18 +72,23 @@ export function recordAlert(
   kind: string,
   message: string,
   severity: 'info' | 'warn' | 'error' = 'warn',
-  detail?: string
+  detail?: string,
+  workspaceId?: string | null,
 ): void {
+  const inferredWorkspace = workspaceId ?? (siteId
+    ? (getDb().prepare('SELECT workspace_id FROM sites WHERE id = ?').get(siteId) as { workspace_id: string | null } | undefined)?.workspace_id
+    : null);
   getDb().prepare(
-    'INSERT INTO alerts(site_id, kind, severity, message, detail) VALUES(?,?,?,?,?)'
-  ).run(siteId, kind, severity, message, detail ?? null);
+    'INSERT INTO alerts(site_id, workspace_id, kind, severity, message, detail) VALUES(?,?,?,?,?,?)'
+  ).run(siteId, inferredWorkspace ?? null, kind, severity, message, detail ?? null);
 }
 
-/** Snapshot every enabled site; emit alerts on day-over-day regressions. */
-export function snapshotAllSites(): SiteSnapshot[] {
+/** Snapshot enabled sites in one workspace (or all sites for maintenance jobs). */
+export function snapshotAllSites(workspaceId: string | null = null): SiteSnapshot[] {
   const db = getDb();
   const out: SiteSnapshot[] = [];
-  for (const site of getAllSites()) {
+  const targetSites = workspaceId ? getEnabledSitesForWorkspace(workspaceId) : getAllSites();
+  for (const site of targetSites) {
     const snap = computeSnapshot(site.id);
     const prev = db.prepare(
       'SELECT * FROM site_stats_daily WHERE site_id = ? AND day < ? ORDER BY day DESC LIMIT 1'
@@ -137,9 +142,8 @@ export function getOverview(workspaceId: string | null): {
     ).all(site.id).reverse() as Array<{ day: string; urls_indexed: number; urls_total: number }>;
     sites.push({ ...snap, name: site.name, domain: site.domain, trend });
   }
-  const siteIds = sites.map(s => s.site_id);
-  const openAlerts = siteIds.length
-    ? (db.prepare(`SELECT COUNT(*) AS c FROM alerts WHERE acked = 0 AND site_id IN (${siteIds.map(() => '?').join(',')})`).get(...siteIds) as { c: number }).c
+  const openAlerts = workspaceId
+    ? (db.prepare('SELECT COUNT(*) AS c FROM alerts WHERE acked = 0 AND workspace_id = ?').get(workspaceId) as { c: number }).c
     : 0;
   return {
     sites,
@@ -208,20 +212,21 @@ export function getSiteDetail(siteId: string): {
   };
 }
 
-// Alerts for a workspace's sites only (plus global site-less alerts).
+// Alerts for one workspace, including portfolio-level alerts with no site.
 export function getAlerts(workspaceId: string | null, limit = 100): Array<Record<string, unknown>> {
   return getDb().prepare(`
     SELECT a.*, s.domain FROM alerts a
-    JOIN sites s ON s.id = a.site_id
-    WHERE s.workspace_id = ?
+    LEFT JOIN sites s ON s.id = a.site_id
+    WHERE COALESCE(a.workspace_id, s.workspace_id) = ?
     ORDER BY a.created_at DESC LIMIT ?
   `).all(workspaceId, limit) as Array<Record<string, unknown>>;
 }
 
-// Authorize an ack: the alert must belong to a site in the given workspace.
+// Authorize an ack against the alert's explicit or inferred workspace.
 export function alertInWorkspace(id: number, workspaceId: string | null): boolean {
   const row = getDb().prepare(`
-    SELECT s.workspace_id AS ws FROM alerts a JOIN sites s ON s.id = a.site_id WHERE a.id = ?
+    SELECT COALESCE(a.workspace_id, s.workspace_id) AS ws
+    FROM alerts a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?
   `).get(id) as { ws: string | null } | undefined;
   return !!row && row.ws === workspaceId;
 }

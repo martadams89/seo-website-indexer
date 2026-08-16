@@ -100,6 +100,19 @@ describe('cross-tenant HTTP authorization', () => {
     const userSites = await json<unknown[]>(await req('GET', '/api/sites', { sid: userSid, ws: userWs }));
     expect(userSites).toHaveLength(0);
 
+    // AI provider configuration and prompt conversations are tenant data too.
+    expect((await req('PUT', '/api/workspace/keys', { sid: adminSid, ws: adminWs, body: { openai_api_key: 'admin-only-key' } })).status).toBe(200);
+    const adminProviders = await json<{ configured: string[] }>(await req('GET', '/api/ai/providers', { sid: adminSid, ws: adminWs }));
+    const userProviders = await json<{ configured: string[] }>(await req('GET', '/api/ai/providers', { sid: userSid, ws: userWs }));
+    expect(adminProviders.configured).toContain('openai');
+    expect(userProviders.configured).not.toContain('openai');
+    const createPrompt = await req('POST', '/api/ai/prompts', { sid: adminSid, ws: adminWs, body: { prompt: 'private agency prompt', site_id: siteId, category: 'commercial' } });
+    expect(createPrompt.status).toBe(200);
+    const promptId = (await json<{ id: number }>(createPrompt)).id;
+    expect(await json<unknown[]>(await req('GET', `/api/ai/prompts/${promptId}/thread/openai`, { sid: userSid, ws: userWs }))).toEqual([]);
+    expect((await req('POST', `/api/ai/run/${promptId}`, { sid: userSid, ws: userWs })).status).toBe(404);
+    expect((await req('POST', `/api/ai/prompts/${promptId}/reply`, { sid: userSid, ws: userWs, body: { provider: 'openai', message: 'leak it' } })).status).toBe(404);
+
     // Super-admin can attach an existing user to another workspace and inspect
     // their complete tenant/security profile.
     const addMember = await req('POST', `/api/workspaces/${adminWs}/members`, {
@@ -112,6 +125,19 @@ describe('cross-tenant HTTP authorization', () => {
     const adminAccess = detail.workspaces.find(w => w.workspace_id === adminWs);
     expect(adminAccess?.role).toBe('editor');
     expect(adminAccess?.permissions.manage_integrations).toBe(true);
+
+    // Editors operate normal workspace features by default; route-local owner
+    // checks must not accidentally override their granted capabilities.
+    expect((await req('PUT', '/api/workspace/keys', { sid: userSid, ws: adminWs, body: { perplexity_api_key: 'editor-key' } })).status).toBe(200);
+    expect((await req('PUT', '/api/notifications/config', { sid: userSid, ws: adminWs, body: { notify_run_complete: 'false' } })).status).toBe(200);
+    expect((await req('PUT', '/api/ai/models', { sid: userSid, ws: adminWs, body: { model_openai: 'gpt-test' } })).status).toBe(200);
+    expect((await json<{ metrics: { sites: number } }>(await req('GET', '/api/command-center', { sid: userSid, ws: adminWs }))).metrics.sites).toBe(1);
+
+    // A per-member override is enforced by the HTTP pre-handler.
+    expect((await req('PATCH', `/api/workspaces/${adminWs}/members/${createdUser.id}`, { sid: adminSid, ws: adminWs, body: { permissions: { manage_notifications: false } } })).status).toBe(200);
+    expect((await req('PUT', '/api/notifications/config', { sid: userSid, ws: adminWs, body: { notify_run_complete: 'true' } })).status).toBe(403);
+    expect((await req('PATCH', `/api/workspaces/${adminWs}/members/${createdUser.id}`, { sid: adminSid, ws: adminWs, body: { ai_citations: false } })).status).toBe(200);
+    expect((await req('POST', '/api/ai/prompts', { sid: userSid, ws: adminWs, body: { prompt: 'should be blocked' } })).status).toBe(403);
 
     // Impersonation uses a dedicated session that remembers the actor and can
     // safely return to the super-admin without knowing either password.

@@ -12,7 +12,7 @@
  *   webhook   notify_webhook_url                        (generic JSON {title, body})
  *   email     notify_email_to                           (comma-separated; needs SMTP)
  */
-import { getWorkspaceSetting } from '../db/database.js';
+import { getDb, getWorkspaceSetting } from '../db/database.js';
 import { sendEmail, emailConfigured } from './email.js';
 
 export type Channel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
@@ -22,9 +22,15 @@ export const NOTIFY_KEYS = [
   'notify_slack_webhook', 'notify_discord_webhook',
   'notify_ntfy_server', 'notify_ntfy_topic', 'notify_ntfy_token',
   'notify_telegram_token', 'notify_telegram_chat', 'notify_webhook_url', 'notify_email_to',
+  'notify_run_complete', 'notify_run_failed', 'notify_citation_changes',
 ] as const;
 
 export interface ChannelResult { channel: Channel; configured: boolean; ok: boolean; error?: string }
+export type NotificationEvent = 'run_complete' | 'run_failed' | 'citation_changes';
+export interface NotificationDelivery {
+  id: number; workspace_id: string; event_type: string; channel: Channel;
+  status: 'sent' | 'failed'; title: string; error: string | null; created_at: string;
+}
 
 const ws = (workspaceId: string, key: string) => getWorkspaceSetting(workspaceId, key);
 
@@ -118,22 +124,38 @@ export function configuredChannels(workspaceId: string): Channel[] {
   });
 }
 
-async function dispatch(workspaceId: string, title: string, body: string, only?: Channel[]): Promise<ChannelResult[]> {
+export function notificationEventEnabled(workspaceId: string, event: NotificationEvent): boolean {
+  // Existing installs keep receiving their run summaries. Operators can opt
+  // out explicitly; citation-change alerts are on by default once enabled.
+  return ws(workspaceId, `notify_${event}`) !== 'false';
+}
+
+function recordDelivery(workspaceId: string, eventType: string, title: string, result: ChannelResult): void {
+  getDb().prepare(`
+    INSERT INTO notification_deliveries(workspace_id, event_type, channel, status, title, error)
+    VALUES(?,?,?,?,?,?)
+  `).run(workspaceId, eventType, result.channel, result.ok ? 'sent' : 'failed', title.slice(0, 180), result.error?.slice(0, 300) ?? null);
+}
+
+async function dispatch(workspaceId: string, title: string, body: string, only?: Channel[], eventType = 'manual'): Promise<ChannelResult[]> {
   const targets = only ?? configuredChannels(workspaceId);
   return Promise.all(targets.map(async (channel): Promise<ChannelResult> => {
+    let result: ChannelResult;
     try {
       await SENDERS[channel](workspaceId, title, body);
-      return { channel, configured: true, ok: true };
+      result = { channel, configured: true, ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { channel, configured: msg !== 'not configured', ok: false, error: msg };
+      result = { channel, configured: msg !== 'not configured', ok: false, error: msg };
     }
+    recordDelivery(workspaceId, eventType, title, result);
+    return result;
   }));
 }
 
 /** Fan a notification out to every channel configured for a workspace. True if any succeeded. */
-export async function sendWorkspaceNotification(workspaceId: string, title: string, body: string): Promise<boolean> {
-  const results = await dispatch(workspaceId, title, body);
+export async function sendWorkspaceNotification(workspaceId: string, title: string, body: string, eventType = 'manual'): Promise<boolean> {
+  const results = await dispatch(workspaceId, title, body, undefined, eventType);
   return results.some(r => r.ok);
 }
 
@@ -146,5 +168,14 @@ export async function sendTestNotification(workspaceId: string): Promise<Channel
     'SEO Website Indexer — test notification',
     'If you can read this, notifications are working. 🎉',
     configured,
+    'test',
   );
+}
+
+export function listNotificationDeliveries(workspaceId: string, limit = 50): NotificationDelivery[] {
+  return getDb().prepare(`
+    SELECT id, workspace_id, event_type, channel, status, title, error, created_at
+    FROM notification_deliveries WHERE workspace_id = ?
+    ORDER BY id DESC LIMIT ?
+  `).all(workspaceId, Math.min(Math.max(limit, 1), 200)) as NotificationDelivery[];
 }

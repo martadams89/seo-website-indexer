@@ -5,7 +5,7 @@
  * real isitagentready.com scan (level 0-5), with a local fallback. Mirrors
  * perf-store.ts.
  */
-import { getDb, getAllSites, type Site } from '../db/database.js';
+import { getDb, getAllSites, getEnabledSitesForWorkspace, type Site } from '../db/database.js';
 import { checkAgentReadiness, type AgentReadinessResult, type AgentCheck } from '../indexer/agent-readiness.js';
 import { recordAlert } from './stats.js';
 import { logSystem } from '../utils/logger.js';
@@ -43,10 +43,11 @@ export async function snapshotSiteAgentReadiness(site: Site): Promise<AgentReadi
   return result;
 }
 
-/** Snapshot every site (called after each indexing run). Best-effort per site. */
-export async function snapshotAllAgentReadiness(): Promise<number> {
+/** Snapshot one workspace (or every site for explicit maintenance jobs). */
+export async function snapshotAllAgentReadiness(workspaceId: string | null = null): Promise<number> {
   let n = 0;
-  for (const site of getAllSites()) {
+  const targetSites = workspaceId ? getEnabledSitesForWorkspace(workspaceId) : getAllSites();
+  for (const site of targetSites) {
     try { await snapshotSiteAgentReadiness(site); n++; }
     catch (e) { logSystem('warn', `Agent-readiness snapshot failed for ${site.domain}: ${e instanceof Error ? e.message : e}`); }
   }

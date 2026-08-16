@@ -3,7 +3,7 @@ import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, C
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type AdminUserDetail, type BingAccount, type CurrentUser, type PasskeyInfo, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type AdminUserDetail, type BingAccount, type CurrentUser, type PasskeyInfo, type NotificationDelivery, type NotifyChannel, type NotifyChannelResult } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
@@ -957,13 +957,15 @@ function NotificationsTab() {
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [results, setResults] = useState<NotifyChannelResult[] | null>(null);
+  const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
 
   useEffect(() => {
     api.getNotifyConfig().then(rec => {
-      const keys = NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key));
+      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes'];
       const next: Record<string, string> = {};
       for (const k of keys) next[k] = rec[k] ?? '';
       setVals(next);
+      api.getNotificationDeliveries().then(setDeliveries).catch(() => setDeliveries([]));
     }).finally(() => setLoaded(true));
   }, [active?.id]);
 
@@ -976,7 +978,7 @@ function NotificationsTab() {
   }
   async function sendTest() {
     setTesting(true); setResults(null);
-    try { await save(); const r = await api.testNotifications(); setResults(r.results); }
+    try { await save(); const r = await api.testNotifications(); setResults(r.results); setDeliveries(await api.getNotificationDeliveries()); }
     finally { setTesting(false); }
   }
 
@@ -993,9 +995,22 @@ function NotificationsTab() {
         <div className="card-title"><Bell size={13} /> Notifications{active ? ` — ${active.name}` : ''}</div>
         <p className="text-dim" style={{ fontSize: 12 }}>
           These channels belong to the <strong>{active?.name ?? 'current'}</strong> workspace — each workspace notifies its own places.
-          Run summaries and alerts for this workspace's sites are pushed after every run; a notification is sent to <strong>all</strong> configured channels.
+          Select which operational events fan out to <strong>all</strong> configured channels. Delivery attempts are retained below for troubleshooting.
           {!canManage && <> <em>You can view these, but a workspace admin has revoked notification management for your role.</em></>}
         </p>
+      </div>
+
+      <div className="notification-events mb-4">
+        {[
+          ['notify_run_complete', 'Successful runs', 'A workspace run finishes normally.'],
+          ['notify_run_failed', 'Failed or stopped runs', 'A run fails, is stopped, or cannot complete.'],
+          ['notify_citation_changes', 'AI citation movement', 'A tracked answer engine gains or loses your domain.'],
+        ].map(([key, label, description]) => (
+          <label key={key}>
+            <input type="checkbox" checked={vals[key] !== 'false'} disabled={!canManage} onChange={event => set(key, event.target.checked ? 'true' : 'false')} />
+            <span><strong>{label}</strong><small>{description}</small></span>
+          </label>
+        ))}
       </div>
 
       {NOTIFY_PROVIDERS.map(p => (
@@ -1062,6 +1077,21 @@ function NotificationsTab() {
           )}
         </div>
       )}
+
+      <div className="card mt-3">
+        <div className="card-title"><Clock size={13} /> Recent deliveries</div>
+        {deliveries.length === 0 ? <div className="empty-note">No notification attempts recorded for this workspace yet.</div> : (
+          <div className="delivery-list">
+            {deliveries.slice(0, 20).map(delivery => (
+              <div key={delivery.id}>
+                <span className={`delivery-status ${delivery.status}`} />
+                <span><strong>{delivery.title}</strong><small>{delivery.event_type.replaceAll('_', ' ')} · {new Date(`${delivery.created_at}Z`).toLocaleString()}{delivery.error ? ` · ${delivery.error}` : ''}</small></span>
+                <span className="badge">{delivery.channel}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -1237,7 +1267,13 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const { status, refresh } = useApp();
   const { active } = useWorkspace();
-  const [tab, setTab] = useState<Tab>(user.is_super_admin ? 'schedule' : 'account');
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    const aliases: Record<string, Tab> = { accounts: 'google', notifications: 'notify' };
+    const candidate = requested ? (aliases[requested] ?? requested) : null;
+    const allowed: Tab[] = ['account', 'workspace', 'all-workspaces', 'users', 'schedule', 'google', 'keys', 'notify'];
+    return candidate && allowed.includes(candidate as Tab) ? candidate as Tab : user.is_super_admin ? 'schedule' : 'account';
+  });
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
   const [saving, setSaving] = useState<Tab | null>(null);

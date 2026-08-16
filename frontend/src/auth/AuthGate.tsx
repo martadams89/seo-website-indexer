@@ -204,14 +204,24 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
   }
 
   return (
-    <div className="auth-screen">
-      <form className="auth-card" onSubmit={submit}>
-        <div className="auth-logo">🔍</div>
-        <h1 className="auth-title">{mode === 'signup' ? 'Create the admin account' : 'Sign in'}</h1>
+    <div className="auth-screen auth-screen-premium">
+      <div className="auth-stage">
+        <section className="auth-story">
+          <div className="auth-brand"><span>O</span><strong>Organic Command</strong></div>
+          <div className="auth-story-copy">
+            <span className="auth-kicker">Search intelligence, unified</span>
+            <h2>Operate every search surface from one beautiful place.</h2>
+            <p>Indexation, search performance, AI visibility and the next best action — connected across every workspace.</p>
+          </div>
+          <div className="auth-proof"><span><ShieldCheck size={15} /> Self-hosted control</span><span><Fingerprint size={15} /> Passkey ready</span><span><SparklineMark /> Live intelligence</span></div>
+        </section>
+        <form className="auth-card" onSubmit={submit}>
+        <div className="auth-logo">O</div>
+        <h1 className="auth-title">{mode === 'signup' ? 'Create your command centre' : 'Welcome back'}</h1>
         <p className="auth-sub">
           {mode === 'signup'
             ? 'This is a fresh install — the first account becomes the super-admin.'
-            : 'SEO Website Indexer'}
+            : 'Sign in to your organic search workspace.'}
         </p>
 
         {!totpStep && (
@@ -274,7 +284,12 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
             )}
           </>
         )}
-      </form>
+        </form>
+      </div>
     </div>
   );
+}
+
+function SparklineMark() {
+  return <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><path d="M1 11 5 7l3 2 6-7" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
