@@ -259,6 +259,7 @@ export interface ContentAction {
   created_at: string; updated_at: string; published_at: string | null; verified_at: string | null;
 }
 export interface LocalEntity { id: string; site_id: string | null; name: string; market: string; locale: string; entity_type: string; primary_url: string | null; address: string | null; phone: string | null; identifiers: Record<string,string>; listings: Array<{provider:string;url?:string;status?:string;rating?:number;review_count?:number}>; knowledge: Record<string,unknown>; review_rating: number | null; review_count: number | null; consistency_score: number; created_at: string; updated_at: string }
+export interface EntityDiscovery { source_url: string; discovered_at: string; schema_types: string[]; sources: string[]; found_fields: string[]; warnings: string[]; data: { name: string; market: string; locale: string; entity_type: string; primary_url: string; address: string; phone: string; identifiers: Record<string,string>; listings: LocalEntity['listings']; knowledge: Record<string,unknown>; review_rating: number | null; review_count: number | null } }
 export interface PlatformOverview {
   generated_at: string; integrations: Array<{ provider: string; status: string; count: number; last_sync_at: string | null }>;
   work_items: Array<{ status: string; severity: string; count: number }>;
@@ -461,6 +462,7 @@ export const api = {
   advanceContentAction: (id: string, step: 'approve' | 'stage' | 'publish' | 'verify' | 'rollback') => apiFetch<ContentAction>(`/api/platform/content/actions/${id}/${step}`, { method: 'POST' }),
   auditContent: (site_id?: string) => apiFetch<{ sites: number; pages: number; issues: number }>('/api/platform/content/audit', { method: 'POST', body: JSON.stringify({ site_id, force: true }) }),
   getLocalEntities: () => apiFetch<LocalEntity[]>('/api/platform/entities'),
+  discoverLocalEntity: (site_id: string) => apiFetch<EntityDiscovery>('/api/platform/entities/discover', { method: 'POST', body: JSON.stringify({ site_id }) }),
   saveLocalEntity: (data: Partial<LocalEntity> & {name:string;market:string}) => apiFetch<LocalEntity>('/api/platform/entities', { method: 'POST', body: JSON.stringify(data) }),
   deleteLocalEntity: (id:string) => apiFetch<{ok:boolean}>(`/api/platform/entities/${id}`, { method: 'DELETE' }),
   runPlatformAutomation: () => apiFetch<Record<string, number>>('/api/platform/automation/run', { method: 'POST' }),

@@ -23,6 +23,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. |
 | AI visibility | Test a reusable set of questions across supported AI and search providers, record citations, compare competitors and review gains or losses. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
+| Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Every observation keeps its source and timestamp. |
 | Work and publishing | Turn findings into assigned actions and use approval-based publishing flows for WordPress, Shopify and Webflow. |
 | Reports | Build scheduled reports, send digests and provide a read-only client portal. |
@@ -64,6 +65,8 @@ After signing in:
 6. Run an audit first, review the result, then enable scheduled submissions.
 
 The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
+
+For brand and local knowledge, **Markets & Entities** can read public JSON-LD and page metadata from a configured site, turn the result into editable fields and keep the approved record as a workspace source of truth. See the [markets and entities guide](docs/MARKETS_AND_ENTITIES.md) for setup, examples and score semantics.
 
 ## Users and workspaces
 
@@ -201,6 +204,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Deployment, authentication and recovery](docs/DEPLOYMENT.md)
 - [Users, roles and workspaces](docs/USERS_AND_WORKSPACES.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
+- [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)
 - [Automation API and signed webhooks](docs/AUTOMATION_API.md)
 - [Product roadmap](docs/PRODUCT_STRATEGY.md)
 - [Commercialisation roadmap](docs/COMMERCIALIZATION.md)
