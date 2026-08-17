@@ -180,7 +180,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
               Paste this Redirect URI into your Google Cloud Credentials configuration under <strong>Authorized redirect URIs</strong>:
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
-              <code style={{ fontSize: 11, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)' }}>{redirectUri}</code>
+              <code style={{ fontSize: 12, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)' }}>{redirectUri}</code>
               <button
                 type="button"
                 className="btn-icon btn-icon-ghost"
@@ -198,7 +198,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
             <div>
               <strong>Auto-configure Google APIs</strong>
-              <div className="text-dim" style={{ fontSize: 11.5 }}>
+              <div className="text-dim" style={{ fontSize: 12 }}>
                 After you sign in, the tool enables the Search Console API on your project for you and can
                 provision a one-click Gemini key later. This requests broad Google
                 Cloud access on the consent screen. <strong>Managed (Google Workspace) accounts:</strong> leave
@@ -291,33 +291,33 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     {acc.email || 'Google Account'}
                     {!!acc.needs_reauth && <span className="badge badge-error">Reconnect required</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <span>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></span>
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
                     {acc.is_mine ? 'Connected by you' : `Shared workspace account${acc.owner_email ? ` · owned by ${acc.owner_email}` : ''}`}
                   </div>
                   {acc.refresh_token_expiry && (
-                    <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: 'var(--warn)', marginTop: 4 }}>
                       Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}.
                       Publish the OAuth app or make it Internal/Trusted before reconnecting.
                     </div>
                   )}
                   {acc.last_refreshed_at && !acc.needs_reauth && (
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
                       Last refreshed automatically {new Date(acc.last_refreshed_at).toLocaleString()}.
                     </div>
                   )}
                   {acc.granted_scopes?.split(' ').includes('https://www.googleapis.com/auth/cloud-platform') && (
-                    <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 3 }}>
+                    <div style={{ fontSize: 12, color: 'var(--warn)', marginTop: 3 }}>
                       This grant includes broad Google Cloud access and may be subject to your Workspace session-control policy.
                       Revoke the app in Google Account connections, then reconnect with Auto-configure disabled if periodic reauthentication continues.
                     </div>
                   )}
                   {!!acc.needs_reauth && (
-                    <div style={{ fontSize: 11, color: 'var(--error)', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 4 }}>
                       Its Google token can no longer be refreshed (revoked or a Workspace reauth policy). Click <strong>Reconnect</strong> to re-authorise — it reuses this account's credentials, so no need to disconnect or re-enter your client ID/secret.
                       {acc.last_refresh_error && <><br />Google response: <code>{acc.last_refresh_error}</code></>}
                     </div>

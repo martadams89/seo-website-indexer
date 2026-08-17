@@ -48,6 +48,8 @@ jobs:
         run: npm run lint
       - name: Theme contract
         run: npm run test:theme
+      - name: Typography readability contract
+        run: npm run test:typography
       - name: Dialog contract
         run: npm run test:ui
       - name: Integration guide contract

@@ -179,7 +179,7 @@ export default function Layout() {
           </div>
 
           {/* Scheduler / SSE status */}
-          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
             {status?.scheduler.running ? (
               <>
                 <Activity size={11} style={{ color: 'var(--ok)', flexShrink: 0 }} />
@@ -194,16 +194,16 @@ export default function Layout() {
           </div>
 
           {needsSetup && (
-            <div className="flex items-center gap-2 mt-2" style={{ fontSize: 11 }}>
+            <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12 }}>
               <AlertTriangle size={11} style={{ color: 'var(--warn)' }} />
-              <NavLink to="/setup" className="sidebar-footer-text" style={{ color: 'var(--warn)', textDecoration: 'none', fontSize: 11 }}>
+              <NavLink to="/setup" className="sidebar-footer-text" style={{ color: 'var(--warn)', textDecoration: 'none', fontSize: 12 }}>
                 Setup required
               </NavLink>
             </div>
           )}
 
           {/* SSE indicator */}
-          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
             <span style={{
               width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
               background: sseConnected ? 'var(--ok)' : 'var(--text-dim)',
@@ -249,7 +249,7 @@ export default function Layout() {
             background: status?.auth.authenticated ? 'var(--ok)' : 'var(--warn)',
             boxShadow: status?.auth.authenticated ? '0 0 6px var(--ok)' : 'none',
           }} />
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
             {status?.auth.authenticated ? 'Connected' : 'Not auth'}
           </span>
         </div>

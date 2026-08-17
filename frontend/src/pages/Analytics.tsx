@@ -112,7 +112,7 @@ export default function AnalyticsPage() {
               <div className="site-card-body">
                 <div className="site-card-rate">
                   <span className="site-card-rate-num" style={{ color: rate >= 70 ? 'var(--ok)' : rate >= 40 ? 'var(--warn)' : 'var(--error)' }}>{rate}%</span>
-                  <span className="text-dim" style={{ fontSize: 11 }}>indexed</span>
+                  <span className="text-dim" style={{ fontSize: 12 }}>indexed</span>
                 </div>
                 <Sparkline points={s.trend.map(t => t.urls_indexed)} />
               </div>

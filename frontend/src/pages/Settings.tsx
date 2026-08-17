@@ -462,7 +462,7 @@ function WorkspaceTab() {
                   {m.role === 'editor' && (
                     <div className="flex gap-2" style={{ width: '100%', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 2 }}>
                       {WORKSPACE_CAPABILITIES.map(cap => (
-                        <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 11, cursor: 'pointer' }} title={cap.label}>
+                        <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 12, cursor: 'pointer' }} title={cap.label}>
                           <input type="checkbox" checked={m.permissions[cap.id]} disabled={busyUserId === m.user_id}
                             onChange={e => toggleCapability(m.user_id, cap.id, e.target.checked)} />
                           {cap.label}
@@ -479,7 +479,7 @@ function WorkspaceTab() {
 
         {canManage && invites.length > 0 && (
           <div className="member-list mt-3">
-            <div className="text-dim" style={{ fontSize: 11, marginBottom: 4 }}>Pending invites</div>
+            <div className="text-dim" style={{ fontSize: 12, marginBottom: 4 }}>Pending invites</div>
             {invites.map(i => (
               <div key={i.id} className="member-row">
                 <div className="member-info">
@@ -512,7 +512,7 @@ function WorkspaceTab() {
             <button className="btn btn-secondary btn-sm" disabled={!memberEmail.trim() || inviting} onClick={invite}>
               <Send size={13} /> {inviting ? 'Sending…' : 'Send invite'}
             </button>
-            <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>
+            <p className="text-dim" style={{ fontSize: 12, marginTop: 8 }}>
               They'll get an email with a join link. If they already have sites/content here, they'll land straight on the dashboard — no setup wizard.
             </p>
           </div>
@@ -704,14 +704,14 @@ function UsersTab() {
             <button className="btn btn-secondary btn-sm" disabled={detail.user.id === me.id || actionBusy === 'impersonate'} onClick={impersonate}>Impersonate</button>
             <button className="btn btn-danger btn-sm" disabled={detail.user.id === me.id || actionBusy === 'delete'} onClick={() => remove(detail.user.id)}><Trash2 size={12} /> Delete</button>
           </div>
-          <div className="text-dim mb-3" style={{ fontSize: 11 }}>
+          <div className="text-dim mb-3" style={{ fontSize: 12 }}>
             Created {new Date(detail.user.created_at).toLocaleString()} · Last login {detail.user.last_login_at ? new Date(detail.user.last_login_at).toLocaleString() : 'never'} · {detail.user.totp_enabled ? '2FA enabled' : '2FA off'}
           </div>
           {generatedPassword && (
             <div className="alert alert-warn mb-4"><div className="alert-content">
               Temporary password: <code>{generatedPassword}</code>
               <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8 }} onClick={() => navigator.clipboard.writeText(generatedPassword)}><Copy size={12} /> Copy</button>
-              <div style={{ fontSize: 11, marginTop: 5 }}>The user is signed out everywhere and must replace this password after login.</div>
+              <div style={{ fontSize: 12, marginTop: 5 }}>The user is signed out everywhere and must replace this password after login.</div>
             </div></div>
           )}
 
@@ -730,7 +730,7 @@ function UsersTab() {
                     <button className="btn btn-secondary btn-sm" onClick={() => changeMembership(access.workspace_id, { disabled: !access.disabled })}>{access.disabled ? 'Enable' : 'Disable'}</button>
                     <button className="btn-icon btn-icon-ghost" title="Remove from workspace" onClick={() => removeMembership(access.workspace_id)}><Trash2 size={13} /></button>
                     {access.role === 'editor' && <div className="flex gap-2" style={{ width: '100%', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      {WORKSPACE_CAPABILITIES.map(cap => <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 11 }}>
+                      {WORKSPACE_CAPABILITIES.map(cap => <label key={cap.id} className="flex items-center gap-1" style={{ fontSize: 12 }}>
                         <input type="checkbox" checked={access.permissions[cap.id]} onChange={e => changeMembership(access.workspace_id, { permissions: { [cap.id]: e.target.checked } })} /> {cap.label}
                       </label>)}
                     </div>}
@@ -1227,7 +1227,7 @@ function KeysTab() {
         Leave a key blank to inherit the platform default{isAdmin ? ' (which you, as a super-admin, can set below each key for all workspaces)' : ' set by an administrator'}.
         Keys are write-only — stored server-side, never echoed back.
       </p>
-      <p className="text-dim" style={{ fontSize: 11.5, marginBottom: 14 }}>
+      <p className="text-dim" style={{ fontSize: 12, marginBottom: 14 }}>
         <strong>Bing Webmaster</strong> keys are managed just below (one or several — one per client property).
       </p>
       {KEY_GUIDES.map(g => (
@@ -1244,7 +1244,7 @@ function KeysTab() {
                 <li key={i}>{s.text}{s.href && <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>}</li>
               ))}
             </ol>
-            <label className="input-label" style={{ fontSize: 11 }}>For this workspace ({active?.name})</label>
+            <label className="input-label" style={{ fontSize: 12 }}>For this workspace ({active?.name})</label>
             <input
               className="input"
               type="password"
@@ -1256,7 +1256,7 @@ function KeysTab() {
             />
             {isAdmin && (
               <div style={{ marginTop: 8 }}>
-                <label className="input-label" style={{ fontSize: 11, color: 'var(--accent)' }}>Platform default (all workspaces)</label>
+                <label className="input-label" style={{ fontSize: 12, color: 'var(--accent)' }}>Platform default (all workspaces)</label>
                 <input
                   className="input"
                   type="password"
@@ -1277,7 +1277,7 @@ function KeysTab() {
                 }}>
                   {provisioning ? 'Provisioning…' : '⚡ Generate with linked Google account'}
                 </button>
-                {provisionMsg && <div style={{ fontSize: 11, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
+                {provisionMsg && <div style={{ fontSize: 12, marginTop: 4, color: provisionMsg.startsWith('Gemini key created') ? 'var(--ok)' : 'var(--warn)' }}>{provisionMsg}</div>}
               </div>
             )}
           </div>
@@ -1286,7 +1286,7 @@ function KeysTab() {
       <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={saving || !canManage} onClick={save}>
         <Save size={13} /> {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save keys'}
       </button>
-      {!canManage && <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>A workspace admin has revoked integration management for your access to {active?.name}.</p>}
+      {!canManage && <p className="text-dim" style={{ fontSize: 12, marginTop: 8 }}>A workspace admin has revoked integration management for your access to {active?.name}.</p>}
     </div>
     <BingAccounts />
     <ModelPicker />
@@ -1378,7 +1378,7 @@ export default function SettingsPage() {
           if (groupTabs.length === 0) return null;
           return (
             <div key={group}>
-              <div className="text-dim" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0' }}>
+              <div className="text-dim" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, margin: '4px 0' }}>
                 {TAB_GROUP_LABEL[group]}
               </div>
               <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>

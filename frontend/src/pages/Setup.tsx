@@ -129,7 +129,7 @@ export default function SetupPage() {
       return (
         <div style={{ textAlign: 'left' }}>
           <strong style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Error: Invalid Client Configuration</strong>
-          <span style={{ fontSize: 11, lineHeight: '1.4', display: 'block' }}>
+          <span style={{ fontSize: 12, lineHeight: '1.4', display: 'block' }}>
             It looks like Google did not recognize your Client ID, or the client type is incorrect.
             <br /><br />
             <strong>How to configure your Web OAuth Client:</strong>
@@ -139,7 +139,7 @@ export default function SetupPage() {
               <li>Under <strong>Application type</strong>, choose <strong>Web application</strong> (do not choose "Desktop app" or "TV app").</li>
               <li>Add this exact Authorized Redirect URI under <strong>Authorized redirect URIs</strong>:
                 <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-input)', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)' }}>
-                  <code style={{ fontSize: 10, color: 'var(--text-primary)' }}>{redirectUri}</code>
+                  <code style={{ fontSize: 12, color: 'var(--text-primary)' }}>{redirectUri}</code>
                 </div>
               </li>
               <li>Copy-paste the new Client ID and Secret and try again!</li>
@@ -296,7 +296,7 @@ export default function SetupPage() {
                 </ul>
                 
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
-                  <code style={{ fontSize: 11, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)', fontWeight: 600 }}>{redirectUri}</code>
+                  <code style={{ fontSize: 12, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)', fontWeight: 600 }}>{redirectUri}</code>
                   <button
                     type="button"
                     className="btn-icon btn-icon-ghost"

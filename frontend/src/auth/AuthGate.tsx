@@ -254,7 +254,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
             <span><ShieldCheck size={12} /> Two-factor code</span>
             <input className="input" value={totp} onChange={e => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))}
               placeholder="123456" inputMode="numeric" autoFocus autoComplete="one-time-code" />
-            <span className="text-dim" style={{ fontSize: 11 }}>Enter the 6-digit code from your authenticator app.</span>
+            <span className="text-dim" style={{ fontSize: 12 }}>Enter the 6-digit code from your authenticator app.</span>
           </label>
         )}
 

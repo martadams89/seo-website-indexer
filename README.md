@@ -196,7 +196,7 @@ Before opening a pull request:
 
 ```bash
 cd backend && npm test && npm run build
-cd frontend && npm run test:theme && npm run test:ui && npm run test:integrations && npm run test:intelligence && npm run lint && npm run build
+cd frontend && npm run test:theme && npm run test:typography && npm run test:ui && npm run test:integrations && npm run test:intelligence && npm run lint && npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
