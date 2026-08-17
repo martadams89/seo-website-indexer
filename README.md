@@ -21,7 +21,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
 | Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. |
-| AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, record citations, compare competitors and safely upgrade older prompt history. |
+| AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
@@ -67,6 +67,8 @@ After signing in:
 The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
 
 For brand and local knowledge, **Markets & Entities** can read public JSON-LD and page metadata from a configured site, turn the result into editable fields and keep the approved record as a workspace source of truth. See the [markets and entities guide](docs/MARKETS_AND_ENTITIES.md) for setup, examples and score semantics.
+
+AI visibility uses that reviewed identity when classifying stored and future answers. A citation can therefore count when it points to your own site, a known App Store/Google Play/review-marketplace profile, or names the tracked brand without linking the website. The interface keeps those evidence types separate so indirect visibility is not misreported as a direct backlink.
 
 ## Users and workspaces
 

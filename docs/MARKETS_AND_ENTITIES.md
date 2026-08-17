@@ -12,7 +12,7 @@ It does not publish changes to your website or directory accounts. Saving a reco
 4. Review every populated field, correct anything stale and mark a listing verified only after checking it.
 5. Save the source of truth.
 
-Discovery makes a read-only request to the selected site's public homepage. It looks for Organization, LocalBusiness, Person, Product and related JSON-LD, plus the canonical URL, language, description, Open Graph site name and image. It can also recognise common public profile and listing URLs from `sameAs`, including Google Business Profile, Bing Places, Yelp, Tripadvisor and Apple Business Connect.
+Discovery makes a read-only request to the selected site's public homepage. It looks for Organization, LocalBusiness, Person, Product and related JSON-LD, plus the canonical URL, language, description, Open Graph site name and image. It can also recognise common public profile and listing URLs from `sameAs`, including Google Business Profile, Google Play, the Apple App Store, G2, Capterra, GetApp, Software Advice, TrustRadius, Trustpilot, Product Hunt, SourceForge, the Chrome Web Store, Microsoft Store, Bing Places, Yelp, Tripadvisor and Apple Business Connect.
 
 Discovery never changes the website. If the site blocks automated requests or does not publish structured data, use the ordinary fields instead. No JSON writing is required.
 
@@ -25,7 +25,7 @@ Discovery never changes the website. If the site blocks automated requests or do
 | Locale | `en-GB`, `en-US`, `fr-FR`, or the language-region used for that record |
 | Contact | Canonical website, postal address and public phone number |
 | Profiles | Wikidata, Wikipedia, Crunchbase, LinkedIn and other authoritative identifiers or URLs |
-| Listings | Google Business Profile, Bing Places, Yelp, Tripadvisor, Apple Business Connect and relevant specialist directories |
+| Listings | Google Business Profile, app stores, G2/Gartner Digital Markets properties, review platforms and relevant specialist directories |
 | Reviews | Aggregate rating and review count, with provider-specific values on individual listings where available |
 
 Use one record per meaningfully different market or location. For example, a global software brand may need one record, while a business with separate London and Manchester locations should use two records with the correct local contact details and listings.
@@ -47,3 +47,13 @@ Use one record per meaningfully different market or location. For example, a glo
 The score is evidence completeness, not a search-engine ranking score. Core identity fields contribute half of the score. Verified or consistent listings contribute up to a quarter; discovered listings begin as **Needs review** and do not count until checked. Profiles and stored knowledge contribute up to 15 points, and review rating/count contribute the final 10.
 
 This deliberately avoids awarding a high score merely because a URL was found. Recheck records after a rebrand, move, phone-number change, domain migration or material review-count update.
+
+## How AI visibility uses this record
+
+AI Visibility reads the entity name, legal name, owned domain, identifiers and listing URLs from the active workspace. It classifies each stored or new provider answer as one or more of:
+
+- **Direct website citation** — the answer or source points to an owned domain.
+- **Third-party entity citation** — a source matches a recorded profile or marketplace listing, such as Google Play, the App Store, G2, Capterra, GetApp or Software Advice.
+- **Brand/entity mention** — the answer names a tracked entity but does not provide a recognised direct or third-party link.
+
+Add trading names, product names or previous names under **AI Visibility → Your citation identity**. Existing answer history is reclassified from its retained answer text and source URLs whenever it is viewed, so improving the entity record does not require rerunning paid prompts.

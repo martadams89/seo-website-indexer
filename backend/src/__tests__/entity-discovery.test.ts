@@ -48,6 +48,24 @@ describe('entity discovery', () => {
     expect(result.warnings[0]).toMatch(/No valid JSON-LD/);
   });
 
+  it('recognises app stores and Gartner Digital Markets profiles from sameAs', () => {
+    const result = parseEntityDiscovery(`<script type="application/ld+json">{
+      "@context":"https://schema.org","@type":"SoftwareApplication","name":"Acme Scout",
+      "sameAs":[
+        "https://play.google.com/store/apps/details?id=com.acme.scout",
+        "https://apps.apple.com/gb/app/acme-scout/id123",
+        "https://www.g2.com/products/acme-scout/reviews",
+        "https://www.capterra.com/p/123/acme-scout/",
+        "https://www.getapp.com/operations-management-software/a/acme-scout/",
+        "https://www.softwareadvice.com/project-management/acme-scout-profile/"
+      ]
+    }</script>`, { siteName: 'Acme Scout', siteUrl: 'https://acme.example.com/' });
+
+    expect(result.data.listings.map(item => item.provider)).toEqual([
+      'Google Play', 'Apple App Store', 'G2', 'Capterra', 'GetApp', 'Software Advice',
+    ]);
+  });
+
   it('normalizes configured domains into scannable homepages', () => {
     expect(siteHomepage({ domain: 'sc-domain:example.com' } as never)).toBe('https://example.com/');
     expect(siteHomepage({ domain: 'https://example.com/store' } as never)).toBe('https://example.com/store');

@@ -529,8 +529,8 @@ export const api = {
   deleteAiPrompt: (id: number) => apiFetch<{ ok: boolean }>(`/api/ai/prompts/${id}`, { method: 'DELETE' }),
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
   getAiInsights: () => apiFetch<AiInsights>('/api/ai/insights'),
-  getAiConfig: () => apiFetch<{ competitorDomains: string }>('/api/ai/config'),
-  saveAiConfig: (competitorDomains: string) => apiFetch<{ ok: boolean }>('/api/ai/config', { method: 'PUT', body: JSON.stringify({ competitorDomains }) }),
+  getAiConfig: () => apiFetch<AiCitationConfig>('/api/ai/config'),
+  saveAiConfig: (data: { competitorDomains: string; brandAliases: string }) => apiFetch<{ ok: boolean }>('/api/ai/config', { method: 'PUT', body: JSON.stringify(data) }),
   runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
   runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
   getAiThread: (promptId: number, provider: string) =>
@@ -807,16 +807,25 @@ export interface AiResult {
   provider: string; model: string | null; cited: number; domains: string; excerpt: string | null;
   error: string | null; created_at: string;
   parent_id?: number | null; citations?: string | null; user_prompt?: string | null;
+  attributions?: string | null; attribution_version?: number;
 }
-export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; excerpt?: string; error?: string }
+export type CitationAttributionKind = 'owned_site' | 'third_party_profile' | 'marketplace' | 'brand_mention';
+export interface CitationAttribution { kind: CitationAttributionKind; entity: string; matched: string; source: string; url?: string; domain?: string }
+export interface AiRunResult { provider: string; model: string | null; cited: boolean; domains: string[]; attributions?: CitationAttribution[]; excerpt?: string; error?: string }
+export interface AiCitationConfig {
+  competitorDomains: string; brandAliases: string;
+  identity: { aliases: string[]; ownedDomains: string[]; profiles: Array<{ entity: string; provider: string; domain: string; url: string }> };
+}
 export interface AiInsights {
   overview: {
     prompts: number; configuredProviders: number; checks: number; cited: number; visibility: number;
     previousVisibility: number | null; change: number | null; sourceDomains: number;
+    directCitations: number; thirdPartyCitations: number; mentionOnlyCitations: number;
   };
   providers: Array<{ provider: string; checks: number; cited: number; visibility: number }>;
   trend: Array<{ day: string; checks: number; cited: number; visibility: number }>;
-  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; providers: string[] }>;
+  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; attributed: boolean;
+    attributionKinds: CitationAttributionKind[]; entities: string[]; providers: string[] }>;
   opportunities: Array<{
     promptId: number; prompt: string; category: AiPromptCategory; siteId: string | null;
     citedProviders: string[]; missingProviders: string[];
