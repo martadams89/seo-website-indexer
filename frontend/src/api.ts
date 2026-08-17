@@ -267,6 +267,7 @@ export interface PlatformOverview {
   content_actions: Array<{ status: string; count: number }>;
   budgets: BudgetStatus[]; usage: { total_cost: number; rows: Array<Record<string, unknown>> };
   forecasts: Array<{ source: string; metric: string; unit: string | null; history_days: number; horizon_days: number; current: number; forecast: number; lower: number; upper: number; daily_slope: number; method: string; generated_at: string }>;
+  scope: { mode: 'all' | 'site' | 'workspace'; site_id: string | null };
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────────
@@ -417,7 +418,8 @@ export const api = {
   getMovers: () => apiFetch<SiteMover[]>('/api/analytics/movers'),
 
   // ── Organic operations platform ──
-  getPlatformOverview: () => apiFetch<PlatformOverview>('/api/platform/overview'),
+  getPlatformOverview: (filters: { site_id?: string; workspace_only?: boolean } = {}) =>
+    apiFetch<PlatformOverview>(`/api/platform/overview?${new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)]))}`),
   getIntegrations: () => apiFetch<PlatformIntegration[]>('/api/platform/integrations'),
   createIntegration: (data: { provider: IntegrationProvider; site_id?: string | null; name?: string; config?: Record<string, unknown>; cadence_minutes?: number }) =>
     apiFetch<PlatformIntegration>('/api/platform/integrations', { method: 'POST', body: JSON.stringify(data) }),
@@ -425,7 +427,7 @@ export const api = {
     apiFetch<PlatformIntegration>(`/api/platform/integrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteIntegration: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/integrations/${id}`, { method: 'DELETE' }),
   syncIntegration: (id: string) => apiFetch<{ ok: boolean; observations: number; message: string }>(`/api/platform/integrations/${id}/sync`, { method: 'POST' }),
-  getMetrics: (filters: { source?: string; metric?: string; site_id?: string; from?: string; to?: string; limit?: number } = {}) =>
+  getMetrics: (filters: { source?: string; metric?: string; site_id?: string; workspace_only?: boolean; from?: string; to?: string; limit?: number } = {}) =>
     apiFetch<MetricObservation[]>(`/api/platform/metrics?${new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)]))}`),
   getWorkItems: (filters: { status?: string; assignee?: string; include_snoozed?: boolean; limit?: number } = {}) =>
     apiFetch<WorkItem[]>(`/api/platform/work-items?${new URLSearchParams(Object.entries(filters).filter(([,v]) => v != null).map(([k,v]) => [k, String(v)]))}`),

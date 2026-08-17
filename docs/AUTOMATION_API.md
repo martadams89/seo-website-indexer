@@ -21,8 +21,8 @@ Tokens belong to one workspace. Site IDs and incoming records are checked agains
 
 | Endpoint | Scope | Purpose |
 | --- | --- | --- |
-| `GET /api/v1/workspace` | `workspace:read` | Read workspace health, action counts, forecasts and connector freshness. |
-| `GET /api/v1/metrics` | `metrics:read` | Read normalized metric observations. |
+| `GET /api/v1/workspace` | `workspace:read` | Read workspace health, action counts, forecasts and connector freshness. Supports website scope. |
+| `GET /api/v1/metrics` | `metrics:read` | Read normalized metric observations. Supports website scope. |
 | `POST /api/v1/events` | `events:write` | Add a custom numeric observation. |
 | `POST /api/v1/logs/ingest` | `logs:write` | Add origin, CDN or crawler request events. Maximum 1,000 per request. |
 
@@ -30,12 +30,21 @@ Calling an endpoint without its required scope returns `401`.
 
 ## Reading metrics
 
-Use `GET /api/v1/metrics` with optional source, metric and date filters. The response retains the observation time, source and any available dimensions so imported data can be distinguished from first-party connector data.
+Use `GET /api/v1/metrics` with optional `source`, `metric`, `site_id`, `from`, `to` and `limit` filters. The response retains the website ID, observation time, source and dimensions so readings from different websites never need to be combined.
 
 ```bash
 curl 'https://indexer.example.com/api/v1/metrics?source=ga4&metric=sessions' \
   -H 'Authorization: Bearer oc_your_token'
 ```
+
+Add `site_id=…` to return one website only. Use `workspace_only=true` instead to return readings that are intentionally unassigned or apply to the workspace as a whole. Omit both for the portfolio view. The same two filters work on `GET /api/v1/workspace`, where they also scope freshness, work-item counts, content-action evidence and additive forecasts.
+
+```bash
+curl 'https://indexer.example.com/api/v1/workspace?site_id=site-id' \
+  -H 'Authorization: Bearer oc_your_token'
+```
+
+Supplying a site that does not belong to the token's workspace returns `404`. If both filters are supplied, `workspace_only=true` takes precedence after the site access check; clients should normally send only one.
 
 ## Adding a custom observation
 

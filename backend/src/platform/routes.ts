@@ -47,7 +47,11 @@ function csvCell(value: unknown): string {
 }
 
 export function registerPlatformRoutes(app: FastifyInstance): void {
-  app.get('/api/platform/overview', async req => platformOverview(workspace(req)));
+  app.get('/api/platform/overview', async req => {
+    const query = req.query as { site_id?: string; workspace_only?: string };
+    if (query.site_id) assertSite(req, query.site_id);
+    return platformOverview(workspace(req), { siteId: query.site_id, workspaceOnly: query.workspace_only === 'true' });
+  });
 
   app.get('/api/platform/integrations', async req => listIntegrations(workspace(req)).map(publicIntegration));
   app.post('/api/platform/integrations', async (req, reply) => {
@@ -70,12 +74,14 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/platform/metrics', async req => {
-    const query = req.query as { source?: string; metric?: string; site_id?: string; from?: string; to?: string; limit?: string };
+    const query = req.query as { source?: string; metric?: string; site_id?: string; workspace_only?: string; from?: string; to?: string; limit?: string };
     if (query.site_id) assertSite(req, query.site_id);
-    return listMetrics(workspace(req), { source: query.source, metric: query.metric, siteId: query.site_id, from: query.from, to: query.to, limit: Number(query.limit) || 1000 });
+    return listMetrics(workspace(req), { source: query.source, metric: query.metric, siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: Number(query.limit) || 1000 });
   });
   app.get('/api/platform/metrics/export.csv', async (req, reply) => {
-    const query = req.query as { from?: string; to?: string }; const rows = listMetrics(workspace(req), { from: query.from, to: query.to, limit: 5000 });
+    const query = req.query as { site_id?: string; workspace_only?: string; from?: string; to?: string };
+    if (query.site_id) assertSite(req, query.site_id);
+    const rows = listMetrics(workspace(req), { siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: 5000 });
     const columns = ['observed_at','source','site_id','metric','dimension','value','unit','provenance'];
     reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="organic-evidence.csv"');
     return [columns.join(','), ...rows.map(row => columns.map(column => csvCell((row as unknown as Record<string, unknown>)[column])).join(','))].join('\n');
@@ -246,10 +252,16 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
 
   // Stable, scoped automation API. Cookie auth and CSRF are intentionally not
   // involved: every route requires a hashed bearer token with a matching scope.
-  app.get('/api/v1/workspace', async (req, reply) => { const token = serviceContext(req, reply, 'workspace:read'); return token ? platformOverview(token.workspaceId) : undefined; });
+  app.get('/api/v1/workspace', async (req, reply) => {
+    const token = serviceContext(req, reply, 'workspace:read'); if (!token) return;
+    const query = req.query as { site_id?: string; workspace_only?: string };
+    if (query.site_id && !getSitesForWorkspace(token.workspaceId).some(site => site.id === query.site_id)) return reply.code(404).send({ error: 'Site not found' });
+    return platformOverview(token.workspaceId, { siteId: query.site_id, workspaceOnly: query.workspace_only === 'true' });
+  });
   app.get('/api/v1/metrics', async (req, reply) => {
-    const token = serviceContext(req, reply, 'metrics:read'); if (!token) return; const query = req.query as { source?: string; metric?: string; from?: string; to?: string; limit?: string };
-    return listMetrics(token.workspaceId, { source: query.source, metric: query.metric, from: query.from, to: query.to, limit: Number(query.limit) || 1000 });
+    const token = serviceContext(req, reply, 'metrics:read'); if (!token) return; const query = req.query as { source?: string; metric?: string; site_id?: string; workspace_only?: string; from?: string; to?: string; limit?: string };
+    if (query.site_id && !getSitesForWorkspace(token.workspaceId).some(site => site.id === query.site_id)) return reply.code(404).send({ error: 'Site not found' });
+    return listMetrics(token.workspaceId, { source: query.source, metric: query.metric, siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: Number(query.limit) || 1000 });
   });
   app.post('/api/v1/events', async (req, reply) => {
     const token = serviceContext(req, reply, 'events:write'); if (!token) return; const body = (req.body ?? {}) as { site_id?: string; source?: string; metric?: string; dimension?: string; value?: number; unit?: string; observed_at?: string; provenance?: Record<string, unknown> };

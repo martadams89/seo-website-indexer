@@ -24,7 +24,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, record citations, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
-| Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Every signal explains its source, scope, trend and suggested next step. |
+| Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
 | Work and publishing | Turn findings into assigned actions and use approval-based publishing flows for WordPress, Shopify and Webflow. |
 | Reports | Build scheduled reports, send digests and provide a read-only client portal. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
@@ -154,8 +154,8 @@ Create a service token under **Governance & Usage → API & Webhooks**. The toke
 
 | Endpoint | Required scope | Purpose |
 | --- | --- | --- |
-| `GET /api/v1/workspace` | `workspace:read` | Workspace health, actions, forecasts and connector freshness. |
-| `GET /api/v1/metrics` | `metrics:read` | Read normalized observations with source, metric and date filters. |
+| `GET /api/v1/workspace` | `workspace:read` | Workspace health, actions, forecasts and connector freshness, optionally filtered by `site_id` or `workspace_only=true`. |
+| `GET /api/v1/metrics` | `metrics:read` | Read normalized observations with source, metric, site and date filters. |
 | `POST /api/v1/events` | `events:write` | Add custom numeric observations with provenance. |
 | `POST /api/v1/logs/ingest` | `logs:write` | Ingest up to 1,000 origin or CDN request events per call. |
 
@@ -196,7 +196,7 @@ Before opening a pull request:
 
 ```bash
 cd backend && npm test && npm run build
-cd frontend && npm run test:theme && npm run test:ui && npm run test:integrations && npm run lint && npm run build
+cd frontend && npm run test:theme && npm run test:ui && npm run test:integrations && npm run test:intelligence && npm run lint && npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
