@@ -64,6 +64,26 @@ describe('organic operations platform', () => {
     expect(reopened.id).not.toBe(first.id);
   });
 
+  it('hydrates work with copyable website and page context and preserves remediation proof', () => {
+    const { user, workspace } = tenant('page-work');
+    const siteId = `site-${randomUUID()}`;
+    database.upsertSite({ id: siteId, name: 'DampApp', domain: 'dampapp.pro', sitemap_url: 'https://dampapp.pro/sitemap.xml',
+      gsc_url: 'sc-domain:dampapp.pro', enabled: 1, workspace_id: workspace.id });
+    const item = store.createWorkItem({ workspaceId: workspace.id, siteId, source: 'content_audit', sourceRef: 'duplicate:title',
+      title: 'Duplicate title', evidence: { urls: ['https://dampapp.pro/pricing', 'https://dampapp.pro/plans'], title: 'Damp reports' } });
+    expect(item.site_name).toBe('DampApp');
+    expect(item.site_domain).toBe('dampapp.pro');
+    expect(item.page_url).toBe('https://dampapp.pro/pricing');
+    expect(store.workItemPageUrls(item)).toEqual(['https://dampapp.pro/pricing', 'https://dampapp.pro/plans']);
+
+    const updated = store.updateWorkItem(workspace.id, item.id, { status: 'in_progress', evidence: { remediation: {
+      fix_status: 'deployed', fixed_by: user.id, fixed_at: new Date().toISOString(), note: 'Titles made unique',
+    } } });
+    expect(updated?.evidence.title).toBe('Damp reports');
+    expect((updated?.evidence.remediation as Record<string, unknown>).fix_status).toBe('deployed');
+    expect(updated?.status).toBe('in_progress');
+  });
+
   it('keeps intelligence readings, freshness, and forecasts isolated by website scope', () => {
     const { workspace } = tenant('site-intelligence');
     const firstSite = `site-${randomUUID()}`; const secondSite = `site-${randomUUID()}`;

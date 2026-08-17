@@ -56,5 +56,7 @@ jobs:
         run: npm run test:integrations
       - name: Unified Intelligence scope contract
         run: npm run test:intelligence
+      - name: Action Centre remediation contract
+        run: npm run test:action-centre
       - name: Typecheck & build
         run: npm run build

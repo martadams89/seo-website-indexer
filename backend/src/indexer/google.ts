@@ -128,8 +128,12 @@ function sleep(ms: number): Promise<void> {
 export interface GscInspectionResult {
   indexingState: string;
   verdict: string;
+  coverageState?: string;
   lastCrawlTime?: string;
   pageFetchState?: string;
+  robotsTxtState?: string;
+  googleCanonical?: string;
+  userCanonical?: string;
   success: boolean;
   statusCode: number;
   message?: string;
@@ -185,8 +189,12 @@ export async function inspectGoogleUrl(
         indexStatusResult?: {
           indexingState?: string;
           verdict?: string;
+          coverageState?: string;
           lastCrawlTime?: string;
           pageFetchState?: string;
+          robotsTxtState?: string;
+          googleCanonical?: string;
+          userCanonical?: string;
         }
       }
     };
@@ -195,8 +203,12 @@ export async function inspectGoogleUrl(
     return {
       indexingState: statusResult?.indexingState ?? 'UNKNOWN',
       verdict: statusResult?.verdict ?? 'NEUTRAL',
+      coverageState: statusResult?.coverageState,
       lastCrawlTime: statusResult?.lastCrawlTime,
       pageFetchState: statusResult?.pageFetchState,
+      robotsTxtState: statusResult?.robotsTxtState,
+      googleCanonical: statusResult?.googleCanonical,
+      userCanonical: statusResult?.userCanonical,
       success: true,
       statusCode: res.status
     };

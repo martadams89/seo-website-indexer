@@ -25,7 +25,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
-| Work and publishing | Turn findings into assigned actions and use approval-based publishing flows for WordPress, Shopify and Webflow. |
+| Work and publishing | Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
 | Reports | Build scheduled reports, send digests and provide a read-only client portal. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
@@ -65,6 +65,8 @@ After signing in:
 6. Run an audit first, review the result, then enable scheduled submissions.
 
 The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
+
+The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair flow, copyable issue briefs and the supported Search Console sitemap plus URL Inspection check.
 
 For brand and local knowledge, **Markets & Entities** can read public JSON-LD and page metadata from a configured site, turn the result into editable fields and keep the approved record as a workspace source of truth. See the [markets and entities guide](docs/MARKETS_AND_ENTITIES.md) for setup, examples and score semantics.
 
@@ -198,7 +200,7 @@ Before opening a pull request:
 
 ```bash
 cd backend && npm test && npm run build
-cd frontend && npm run test:theme && npm run test:typography && npm run test:ui && npm run test:integrations && npm run test:intelligence && npm run lint && npm run build
+cd frontend && npm run test:theme && npm run test:typography && npm run test:ui && npm run test:integrations && npm run test:intelligence && npm run test:action-centre && npm run lint && npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
@@ -209,6 +211,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Users, roles and workspaces](docs/USERS_AND_WORKSPACES.md)
 - [Integration permissions and setup](docs/INTEGRATIONS.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
+- [Page-level Action Centre and Google verification](docs/ACTION_CENTRE.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)
 - [Automation API and signed webhooks](docs/AUTOMATION_API.md)
 - [Product roadmap](docs/PRODUCT_STRATEGY.md)
