@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.0](https://github.com/martadams89/seo-website-indexer/compare/v1.31.0...v1.32.0) (2026-08-17)
+
+
+### ✨ Features
+
+* explain intelligence and upgrade legacy citations ([#267](https://github.com/martadams89/seo-website-indexer/issues/267)) ([f337f5d](https://github.com/martadams89/seo-website-indexer/commit/f337f5df9cbdcca6f3964fe29e1c92da70907874))
+
 ## [1.31.0](https://github.com/martadams89/seo-website-indexer/compare/v1.30.0...v1.31.0) (2026-08-17)
 
 
