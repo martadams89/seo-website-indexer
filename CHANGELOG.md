@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.3](https://github.com/martadams89/seo-website-indexer/compare/v1.27.2...v1.27.3) (2026-08-17)
+
+
+### 🐛 Bug Fixes
+
+* **theme:** ensure light and dark control parity ([#257](https://github.com/martadams89/seo-website-indexer/issues/257)) ([01e0f44](https://github.com/martadams89/seo-website-indexer/commit/01e0f449ae8968c69f57b2bba4a74c86002385f9))
+
 ## [1.27.2](https://github.com/martadams89/seo-website-indexer/compare/v1.27.1...v1.27.2) (2026-08-17)
 
 
