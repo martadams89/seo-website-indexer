@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/martadams89/seo-website-indexer/compare/v1.27.1...v1.27.2) (2026-08-17)
+
+
+### 📚 Documentation
+
+* simplify project documentation ([#255](https://github.com/martadams89/seo-website-indexer/issues/255)) ([0e3fea7](https://github.com/martadams89/seo-website-indexer/commit/0e3fea76c9c167e2f7fe13f3cf9b5ff931d9ec4d))
+
 ## [1.27.1](https://github.com/martadams89/seo-website-indexer/compare/v1.27.0...v1.27.1) (2026-08-17)
 
 
