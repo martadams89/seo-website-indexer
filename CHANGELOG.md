@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.1](https://github.com/martadams89/seo-website-indexer/compare/v1.34.0...v1.34.1) (2026-08-17)
+
+
+### 🐛 Bug Fixes
+
+* update content-audit section ([#279](https://github.com/martadams89/seo-website-indexer/issues/279)) ([50e924a](https://github.com/martadams89/seo-website-indexer/commit/50e924ab727b5507fa8ff1df0d3ff522ba57d25b))
+
 ## [1.34.0](https://github.com/martadams89/seo-website-indexer/compare/v1.33.3...v1.34.0) (2026-08-17)
 
 
