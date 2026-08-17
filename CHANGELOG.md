@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/martadams89/seo-website-indexer/compare/v1.28.0...v1.29.0) (2026-08-17)
+
+
+### ✨ Features
+
+* **citations:** overhaul prompt workflow ([#261](https://github.com/martadams89/seo-website-indexer/issues/261)) ([cad8582](https://github.com/martadams89/seo-website-indexer/commit/cad858289e3b9c6e7b2f9beb565d96eb8e9df57f))
+
 ## [1.28.0](https://github.com/martadams89/seo-website-indexer/compare/v1.27.3...v1.28.0) (2026-08-17)
 
 
