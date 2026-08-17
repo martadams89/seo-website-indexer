@@ -1,761 +1,210 @@
 <div align="center">
 
-# 🔍 SEO Website Indexer
+# SEO Website Indexer
 
-**Self-hosted SEO & GEO automation for all your sites — indexing, analytics and AI-citation tracking in one container.**
-
-Submit changed sitemaps to Google and changed URLs to Bing/IndexNow, watch index coverage as living dashboards, and measure whether ChatGPT, Claude, Gemini, Perplexity and Grok actually cite you.
+**A self-hosted dashboard for indexing, search performance, AI visibility and website operations across multiple clients or teams.**
 
 [![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
-[![Docker](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/docker-publish.yml)
-[![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github&color=blueviolet)](https://github.com/martadams89/seo-website-indexer/releases)
-[![ghcr.io](https://img.shields.io/badge/ghcr.io-seo--website--indexer-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
-[![Renovate](https://img.shields.io/badge/maintained%20by-renovate-1f8ceb?logo=renovate)](https://docs.renovatebot.com)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github)](https://github.com/martadams89/seo-website-indexer/releases)
+[![Container](https://img.shields.io/badge/container-ghcr.io-blue?logo=docker)](https://github.com/martadams89/seo-website-indexer/pkgs/container/seo-website-indexer)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
-`docker run` → open the dashboard → link Google → done. No external database, no cloud dependencies, your keys never leave your box.
+It runs as one Docker container with a built-in SQLite database. There is no separate database, queue or worker service to maintain.
 
 </div>
 
----
+## What it does
 
-## Why this exists
+SEO Website Indexer brings the routine work around technical SEO and AI search visibility into one place. It watches sitemaps, submits changes, records what happened, joins data from connected services and gives teams a clear list of work that needs attention.
 
-Search engines only recrawl what they can discover, and AI answer engines only cite what they can retrieve. Doing that properly across multiple sites means juggling Search Console, IndexNow, Bing Webmaster, quota limits, `lastmod` diffing, `robots.txt`/`llms.txt` upkeep — and you still can't see whether any of it *works*. This container does all of it on a schedule and shows you the results as per-site dashboards: coverage funnels, freshness gaps, Core Web Vitals, and a prompt-by-prompt matrix of which AI engines cite your domains.
+| Area | What you can do |
+| --- | --- |
+| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. |
+| AI visibility | Test a reusable set of questions across supported AI and search providers, record citations, compare competitors and review gains or losses. |
+| Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
+| Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Every observation keeps its source and timestamp. |
+| Work and publishing | Turn findings into assigned actions and use approval-based publishing flows for WordPress, Shopify and Webflow. |
+| Reports | Build scheduled reports, send digests and provide a read-only client portal. |
+| Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
-## Features
+All external services are optional. A basic install can run sitemap checks and IndexNow without connecting an analytics or AI provider.
 
-- **Google Search Console** — automatic sitemap submission per site
-- **IndexNow** — instantly alert Bing, Yandex, Yahoo, and other participating engines (all via one API call)
-- **Bing Webmaster URL Submission** — direct, quota-aware submission of changed pages into your verified Bing Webmaster property (complements IndexNow; opt-in with a Bing API key)
-- **robots.txt sitemap auto-discovery** — automatically finds every `Sitemap:` declared in `robots.txt` (not just the one you configured), so secondary sitemaps like `llms-sitemap.xml` are covered with zero extra setup
-- **GEO-aware routing** — non-HTML URLs (e.g. `llms.txt`, `llms-full.txt`) are pushed to **IndexNow only** and deliberately kept out of Search Console, where they'd just be noise
-- **Google URL Inspection API** — daily automated verification of indexing status, mobile usability, and actual search crawl time logs for sitemapped pages
-- **AI & Crawler GEO Audits** — automated rules auditing for key AI bots (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) in `robots.txt` + `llms.txt` existence validation
-- **Semantic JSON-LD Structured Schema Auditing** — extracts and catalogs page schemas (`SoftwareApplication`, `LocalBusiness`, etc.) during sitemap crawls
-- **Zero-Touch Key Deployments** — built-in pure-JS FTP/SFTP passive client + dynamic POST webhook callbacks to push IndexNow keys automatically
-- **Delta sitemap submission** — submits sitemaps to GSC only when changes (new/modified URLs) are detected to conserve Google quotas
-- **Multi-site scheduling** — reconciles and processes every enabled site's live sitemap in one run
-- **lastmod change detection** — fetches your live sitemap and only queues URLs whose `<lastmod>` has changed since the last run
-- **SQLite persistence** — URL state, submission history, and credentials survive container restarts
-- **React dashboard** — onboarding wizard, per-site status, live log stream, cron scheduler, dynamic URL indexing table
-- **Organic-search command centre** — a responsive daily operating view that joins workspace health, index coverage, organic momentum, AI visibility, connection health and a prioritized action centre; includes a global keyboard quick-switcher and full dark/light themes
-- **Unified evidence plane** — normalizes GA4, PageSpeed, Cloudflare, Plausible, Matomo, Search Console, server-log and rank-feed observations with provenance, freshness, saved views, exports and explainable forecast ranges
-- **Accountable action inbox** — turns regressions and opportunities into assignable, severity-ranked work with owners, due dates, snooze, deep-linked evidence, bulk previews and a causal deployment/annotation timeline
-- **Governed content delivery** — WordPress, Shopify and Webflow workflows require propose → approve → draft/stage → explicit publish → live verify, retain before-state evidence and support audited rollback
-- **Reports and client portal** — scheduled branded report templates, email delivery, severity-routed daily/weekly digests and a white-labelled read-only executive portal
-- **Markets and entities** — local-market entity facts, listing consistency, ratings/reviews and regional knowledge tracking alongside site and AI visibility evidence
-- **Metering and governance** — append-only per-user/workspace usage, estimated provider cost, soft/hard budgets, billback CSV, workspace MFA and retention policies, signed webhooks and hashed scoped automation tokens
-- **Stable automation API** — service-token endpoints for workspace evidence, metrics, custom events and server-log ingestion without sharing a human session
-- **Analytics engine** — daily per-site rollups with a portfolio dashboard: coverage funnel (sitemap → submitted → indexed), 60-day trends, GSC indexing-state breakdown, and day-over-day regression **alerts** (index drops, structured-data loss)
-- **Freshness radar** — every page whose sitemap `lastmod` moved *after* Google's last crawl, surfaced as a resubmission worklist
-- **AI visibility intelligence (GEO)** — run categorized, site-linked prompts against **ChatGPT, Claude, Gemini, Perplexity, Grok and Brave Search**; track portfolio/provider visibility, gains and losses, source-domain leaders, a competitor watchlist, prompt opportunities, full answer excerpts and follow-up conversations
-- **One-click Gemini key** — provisions a service-restricted Gemini API key on *your* Google Cloud project using the already-linked account; no console visit, no copy-paste, free tier
-- **Bing Webmaster API** — URL batch submission + quota on Bing's own (separate) submission allowance, alongside IndexNow
-- **llms.txt lifecycle** — live-fetch, structural lint, drift detection, one-click deploy (webhook/FTP), plus **AI generation**: a configured LLM writes a comprehensive, spec-compliant `llms.txt` from your site's real pages (with an auto-built `llms-sitemap.xml`)
-- **Core Web Vitals** — origin-level p75 LCP/INP/CLS via the free CrUX API, snapshotted daily
-- **Site hygiene checks** — sampled broken-link and redirect-chain probes across your sitemap URLs
-- **Notifications** — event-controlled run summaries, failures and AI citation movement to Slack, Discord, ntfy, Telegram, email or any generic webhook; each delivery is recorded per workspace for audit and troubleshooting
-- **Multi-tenant workspaces** — one install can manage many clients under fully segregated *workspaces* (each with its own Google + Bing accounts, sites and analytics); users own or join workspaces and switch between them, a super-admin sees all
-- **Full user administration** — super-admin profile editing, cross-workspace membership and permission management, generated one-time passwords, reset email, 2FA recovery, global disable, audited impersonation and security history
-- **Submission-failure recovery** — inspect persistent IndexNow/Bing failures on the dashboard, check live URL reachability, then clear one or all backoff records so the next run can retry
-- **Modern auth** — email + password with **TOTP 2FA**, passwordless **passkeys (WebAuthn)**, and optional **SSO / OpenID Connect** (Google or any OIDC provider); DB-backed sessions, scrypt hashing, per-route brute-force limits
-- **Layered per-workspace settings** — every API key (AI providers, CrUX, Bing) and notification channel can be set **per workspace**, overriding an optional **platform default** a super-admin sets for the whole install (or allocates to specific workspaces). True segregation with the flexibility for shared or per-client billing
-- **Single container** — no external database, no Redis, no separate workers
-
----
-
-## Quick Start
+## Quick start
 
 ```bash
 docker run -d \
   --name seo-indexer \
+  --restart unless-stopped \
   -p 3000:3000 \
   -v seo-indexer-data:/data \
   ghcr.io/martadams89/seo-website-indexer:latest
 ```
 
-Or with Docker Compose:
+Open [http://localhost:3000](http://localhost:3000). The first account created on a new installation becomes the super-admin.
+
+You can also use the supplied Compose file:
 
 ```bash
 curl -O https://raw.githubusercontent.com/martadams89/seo-website-indexer/main/docker-compose.yml
 docker compose up -d
 ```
 
-Then open **http://localhost:3000** and follow the three-step setup wizard.
+For an internet-facing installation, set a stable `APP_SECRET`, keep `/data` on persistent storage, put the app behind HTTPS and configure backups before adding credentials. See the [deployment guide](docs/DEPLOYMENT.md).
 
----
+## First setup
 
-## Accounts, workspaces & sign-in
+After signing in:
 
-The dashboard is protected by its own login. On a **fresh install the first account you create becomes the super-admin** — after that, signup is closed and further users are added from **Settings → Users**.
+1. Create or select a workspace.
+2. Add a site and its sitemap URL under **Sites & Submissions**.
+3. Connect a Google account if you want Search Console data and submissions.
+4. Put the site's IndexNow key file in place if you want URL submissions.
+5. Add any analytics, AI, publishing or notification services you need.
+6. Run an audit first, review the result, then enable scheduled submissions.
 
-### Workspaces (multi-tenancy)
+The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
 
-Everything is organised into **workspaces** — the tenant boundary, i.e. one "client base":
+## Users and workspaces
 
-```
-Users ─┬─ own / belong to ─▶ Workspaces ─┬─▶ Google accounts
-       │                                  ├─▶ Bing accounts
-       └─ super-admin sees all            └─▶ Sites (+ analytics, alerts)
-```
+A workspace is the tenant boundary. Sites, connected accounts, API keys, analytics, reports, notifications, usage and audit records belong to a workspace. A user sees only the active workspace unless they are a super-admin.
 
-- Every site, Google/Bing account, alert and quota figure is **partitioned by workspace** — a user only ever sees data for the workspace that's currently **active** (picked in the sidebar switcher), not just "any workspace they can reach". Switching the active workspace never leaves a stale page (e.g. a site's Analytics) showing another tenant's data — every site-scoped request is checked against the active workspace, not just general access.
-- Switch the active workspace from the **switcher in the sidebar**; create more with **+ New workspace**.
-- The **Settings** page makes the current scope explicit: a banner at the top of each tab shows either "Managing workspace: *Name*" or "Platform setting — applies to the whole installation" so it's never ambiguous which one you're editing. Tabs are grouped the same way: *Your account* / *This workspace* / *Platform (super-admin)*.
-- **Upgrading from a single-tenant install is automatic**: the first user to sign in claims all pre-existing sites/accounts (and the legacy global Bing key) into their *Default* workspace — nothing is lost.
-- Deleting a user **reassigns their owned workspaces to you** (the acting admin) rather than orphaning that client's data.
-- **Super-admins** manage every workspace in the install from **Settings → All Workspaces**: rename, delete, or reassign the owner of any workspace, regardless of who owns it — no need to first switch into it (previously only the actual owner could manage a workspace from the UI).
-
-### Roles & granular permissions (per workspace)
-
-Every member of a workspace (besides its owner) has a **role**, which sets their default capabilities, plus optional **individual overrides**:
-
-| Role | Can do |
+| Role | Access within a workspace |
 | --- | --- |
-| **Owner** (implicit) | Everything, including deleting the workspace. One per workspace — whoever created it. |
-| **Admin** | Everything operational in that workspace plus members, invitations and workspace-local access disable. Global identity recovery (password/2FA) stays super-admin-only; ownership and deletion remain owner/super-admin actions. |
-| **Editor** | Operates workspace features by default: sites/submissions, connected accounts, integrations, notifications, content actions, reports and governance. Each capability can be individually revoked for a constrained editor. Membership/security administration remains admin-only. |
-| **Viewer** | Strictly read-only. Every mutating action is blocked at the API, not just hidden in the UI. |
+| Owner | Full control, including ownership and deletion. Each workspace has one owner. |
+| Admin | Runs the workspace and manages its members. Platform-wide user recovery and workspace ownership remain super-admin functions. |
+| Editor | Can operate sites, integrations, notifications, publishing, reports and governance by default. Individual capabilities can be removed. |
+| Viewer | Read-only. Write operations are blocked by the API as well as the interface. |
 
-A **super-admin** always has full access to every workspace, and can additionally:
+Workspace owners, admins and editors can do normal day-to-day work according to their capabilities. Super-admins can manage every user and workspace, including memberships, permissions, profile details, generated temporary passwords, reset emails, 2FA recovery, account disablement and audited impersonation.
 
-- **Reset a member's password** (emails a reset link, or hands back a shareable link if SMTP isn't configured) or **clear their 2FA** — scoped to one workspace's members, or globally for any user.
-- **Disable a member's access to just one workspace** (their account and other workspaces are untouched) via that workspace's Members list, or **disable a user's account entirely** (blocks login everywhere) from **Settings → Users**.
-- **Edit user properties**, add/remove access across any workspace, change every per-workspace role/capability, generate a one-time password that forces replacement, and inspect the user's owned Google credentials and recent audit events.
-- **Impersonate a user** through a dedicated, visibly-bannered session, then return to the administrator without either person's password. Start/stop events and subsequent administration actions are retained in the audit trail.
+Google connections belong to the person who adds them and can be shared with workspaces they can access. Members may use a connection already shared with their workspace or connect their own Google account when their role allows it.
 
-**AI Citations** access is a separate toggle per member (independent of role) — some members may be trusted to edit sites but not spend the workspace's AI-provider API budget on citation checks. On top of the toggle, non-owners are rate-limited to a configurable number of citation checks per day (`AI_CITATION_DAILY_LIMIT`, default 25) so one click-happy teammate can't exhaust the budget; owners and super-admins are never limited.
+See [users and workspaces](docs/USERS_AND_WORKSPACES.md) for invitations, capability overrides, account sharing, recovery and tenant rules.
 
-### Inviting people (email)
+## Connected services
 
-From **Settings → Workspace**, an owner/admin can **invite by email** with a preset role and AI-citations access. The invitee gets a link (`/accept-invite`) to set a password (or, if they already have an account, just add the workspace to it) — they land straight in that workspace's existing content, **never a forced setup wizard**, since they're joining an existing tenant rather than getting a brand-new empty one.
+Connections are configured in the dashboard and scoped to the active workspace unless clearly marked as a platform setting.
 
-The **Settings → Users** area (super-admin only) now includes a complete user inspector. The creation form can either give the new account **its own workspace** or add it straight to an **existing workspace**; created passwords are temporary and must be replaced at first login. Select any existing user to edit their profile/security, manage all workspace memberships and granular capabilities, or impersonate them for support.
-
-### Per-workspace settings (API keys & notifications)
-
-Settings are **layered** so one install can serve many clients with full flexibility:
-
-- Each **workspace** can set its own AI-provider keys (OpenAI/Anthropic/Gemini/xAI/Perplexity), CrUX key, Bing key and notification channels under **Settings → API Keys / Notifications**. These apply only to that workspace.
-- A **super-admin** can set a **platform default** for any key (Settings → API Keys, "Platform default" field) that every workspace inherits unless it overrides — or "allocate" a key to a specific client by editing that workspace's override.
-- Resolution is always *workspace override → platform default*. So you can run entirely on shared platform keys, entirely on per-client keys, or any mix — the foundation for reselling, add-on services or per-client billback.
-- Instance-wide settings (indexing schedule, Google project id) remain **super-admin only**; workspace owners/admins and editors with the relevant capability manage that workspace's integrations and notifications.
-
-See the [organic-search command-centre product strategy](docs/PRODUCT_STRATEGY.md) for the prioritized data, integration, workflow and UX roadmap. Planning to sell managed or self-hosted access? The [commercialisation roadmap](docs/COMMERCIALIZATION.md) covers the recommended entitlement, metering, billback and optional Stripe sequence.
-
-### Automation API and service tokens
-
-Create a write-once service token under **Governance & Usage → API &
-Webhooks**. Tokens are stored as hashes, belong to exactly one workspace, can
-be revoked or expired, and must carry the specific scope used by an endpoint:
-
-| Endpoint | Scope | Purpose |
-| --- | --- | --- |
-| `GET /api/v1/workspace` | `workspace:read` | Workspace health, actions, forecasts and connector freshness |
-| `GET /api/v1/metrics` | `metrics:read` | Normalized observations with optional source/metric/date filters |
-| `POST /api/v1/events` | `events:write` | Add a custom numeric observation with provenance |
-| `POST /api/v1/logs/ingest` | `logs:write` | Ingest up to 1,000 origin/CDN request events per call |
-
-Send the token as `Authorization: Bearer oc_…`. Event and log ingestion is
-metered in the append-only usage ledger and respects configured hard budgets.
-Site IDs in incoming data are checked against the token's workspace.
-
-Outbound webhooks use `X-Organic-Event` plus an
-`X-Organic-Signature: sha256=<HMAC>` header so receivers can authenticate the
-exact request body.
-
-### Sign-in methods
-
-| Method | Setup |
+| Purpose | Supported services |
 | --- | --- |
-| **Password + TOTP 2FA** | Always available. Enable 2FA under Settings → Account & Security (any authenticator app). |
-| **Passkeys (WebAuthn)** | Register one under Settings → Account & Security, then use "Sign in with a passkey". **Requires HTTPS** in production (browsers only allow WebAuthn on secure origins; `localhost` is exempt for testing). |
-| **SSO / OpenID Connect** | Opt-in via env vars (below). Buttons appear on the login screen automatically once configured. |
+| Search and indexing | Google Search Console, IndexNow, Bing Webmaster |
+| Analytics and performance | Google Analytics 4, PageSpeed and CrUX, Cloudflare, Plausible, Matomo |
+| AI visibility | OpenAI, Anthropic, Gemini, Perplexity, xAI, Brave Search |
+| Publishing | WordPress, Shopify, Webflow |
+| Notifications | Slack, Discord, ntfy, Telegram, email, generic webhooks |
+| Other data | Server-log ingestion and external rank feeds through the API |
 
-#### SSO / OIDC environment variables
+Workspace-specific API keys override any platform default set by a super-admin. This allows one installation to use shared keys, client-owned keys or a mixture of both.
 
-Set these on the container to enable SSO. Nothing is exposed until configured.
+## How indexing works
 
-```bash
-# Google
-SSO_GOOGLE_CLIENT_ID=...            # from a Google OAuth 2.0 "Web application" client
-SSO_GOOGLE_CLIENT_SECRET=...        # redirect URI: https://<host>/api/auth/sso/google/callback
+Each scheduled run reads a site's configured sitemap and any additional `Sitemap:` entries in `robots.txt`. It compares the current URLs and `lastmod` values with the previous run, then submits only new or changed content where the receiving service supports it.
 
-# Any generic OIDC provider (Authentik, Keycloak, Okta, Entra ID, …)
-SSO_OIDC_CLIENT_ID=...
-SSO_OIDC_CLIENT_SECRET=...
-SSO_OIDC_AUTH_URL=https://idp.example.com/authorize
-SSO_OIDC_TOKEN_URL=https://idp.example.com/token
-SSO_OIDC_USERINFO_URL=https://idp.example.com/userinfo
-SSO_OIDC_NAME="Company SSO"         # optional label on the button
-SSO_OIDC_SCOPE="openid email profile"   # optional, this is the default
-# redirect URI: https://<host>/api/auth/sso/oidc/callback
+| Content | Google Search Console | Bing Webmaster | IndexNow |
+| --- | :---: | :---: | :---: |
+| HTML pages | Yes | Yes | Yes |
+| `llms.txt`, `llms-full.txt` and other non-HTML files | No | No | Yes |
 
-# By default only users that already exist may sign in via SSO (email match).
-# Set this to auto-create a standard user on first SSO login:
-SSO_AUTO_PROVISION=true
-```
+Google's URL-level Indexing API is not used for ordinary pages because Google limits it to specific content types. This project uses sitemaps for normal pages and the URL Inspection API to record coverage information.
 
-> The very first user to sign in via SSO on an empty install becomes the super-admin (bootstraps the instance), regardless of `SSO_AUTO_PROVISION`.
-
-### Email-based password reset (optional)
-
-Configure SMTP and a **"Forgot password?"** link appears on the sign-in page; users get a one-hour, single-use reset link by email. Without SMTP the link is hidden (use the recovery CLI below instead).
-
-```bash
-SMTP_HOST=smtp.example.com          # required to enable email
-SMTP_PORT=587                       # default 587 (use 465 with SMTP_SECURE=true)
-SMTP_SECURE=false                   # true for implicit TLS (port 465)
-SMTP_USER=apikey                    # optional auth
-SMTP_PASS=...                       # optional auth
-SMTP_FROM="SEO Indexer <no-reply@example.com>"   # optional; sensible default otherwise
-```
-
-Works with any SMTP provider (SendGrid, Mailgun, SES, Postmark, Gmail app-password, self-hosted…).
-
-### Locked out? Recover from the command line
-
-If SMTP reset mail is unavailable and no other super-admin can recover the account, reset it directly against the database with the bundled admin CLI (it respects `DATA_DIR`):
-
-```bash
-# Docker
-docker exec <container> node dist/cli/admin.js list                       # show accounts
-docker exec <container> node dist/cli/admin.js reset-password you@example.com          # prints a new random password
-docker exec <container> node dist/cli/admin.js reset-password you@example.com 'newpass' # or set your own
-docker exec <container> node dist/cli/admin.js disable-2fa you@example.com # lost your authenticator
-docker exec <container> node dist/cli/admin.js make-admin you@example.com  # grant super-admin
-docker exec <container> node dist/cli/admin.js disable-account you@example.com # lock an account out entirely
-docker exec <container> node dist/cli/admin.js enable-account you@example.com  # restore it
-
-# From source (dev): npm run admin -- reset-password you@example.com
-```
-
----
-
-## Connecting Google Search Console
-
-> This is about linking a **Google account to a workspace** so the tool can call the Search Console API on its behalf — separate from how *you* sign in to the dashboard (above).
-
-Google credentials are **owned by the user who connects them** and explicitly delegated to workspaces. Any editor with integration permission can connect their own Google account to the active workspace, while every member can use accounts already shared there. A credential owner can reuse the same connection in another accessible workspace without another Google login. Removing it from one workspace unlinks only that tenant; deleting the credential everywhere remains limited to its owner or a super-admin. OAuth handshakes use encrypted, single-use state bound to the initiating user and workspace, so simultaneous account connections cannot collide.
-
-This application uses the standard **Google OAuth 2.0 Web Application Flow** with offline access, so ordinary one-hour access tokens are renewed automatically from a stored refresh token. Google can still time-limit or revoke the refresh grant according to the OAuth project's publishing status and Workspace policy.
-
-> **Default scopes requested**: Search Console (`webmasters`) and your email address. **Google Cloud (`cloud-platform`)** is requested only when you explicitly select Auto-configure Google APIs; leave that option off for managed Workspace accounts unless you need it.
-
-Because Service Accounts are highly restricted and often fail verification on Google Search Console (especially for modern Domain properties), authenticating as your **regular Google user account** is the recommended and standard path. It grants the indexing container direct, seamless API access to all Search Console properties that your account already owns—with **zero configuration changes** inside Google Search Console!
-
-### How to set up your Google Cloud API credentials (Foolproof Step-by-Step):
-
-If you don't have a pre-configured container, follow this simple guide to set up your credentials in less than 2 minutes.
-
-#### 1️⃣ Step 1: Create a Google Cloud Project
-- Open the [Google Cloud Project Creation Console](https://console.cloud.google.com/projectcreate).
-- Give your project a name (e.g., `SEO Website Indexer`) and click **Create**.
-- Make sure your new project is selected in the top project dropdown bar of the Cloud Console.
-
-#### 2️⃣ Step 2: Enable the required Search API
-Enable the Google API that this tool communicates with:
-- 👉 Go to the [Google Search Console API Page](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com) and click **Enable**.
-
-#### 3️⃣ Step 3: Configure the OAuth Consent Screen for durable access
-Google requires you to describe how your app authorizes users:
-- Open the [OAuth Consent Screen Configuration Page](https://console.cloud.google.com/apis/credentials/consent).
-- If every connected account belongs to your Google Workspace organisation, choose **Internal**. Otherwise choose **External**.
-- Enter your **App Name** (e.g., `SEO Indexer`) and your **User Support Email** (your Google email).
-- During initial setup of an External app, add each account under **Test users** so you can complete authorization.
-- Before relying on unattended refresh, change the External app's publishing status from **Testing** to **In production**. Google deliberately expires non-basic refresh grants from External/Testing apps after seven days.
-- For Workspace accounts, an administrator can instead mark the OAuth app **Trusted**. Workspace session-control policies can still force reauthentication when broad Cloud scopes are granted, so leave **Auto-configure Google APIs** off unless required.
-- After changing the publishing/trust configuration, reconnect each account once so Google issues a new grant.
-
-The Accounts screen records any `refresh_token_expires_in` value Google returns and shows the exact last refresh error. A normal durable grant has no scheduled refresh-token expiry; its one-hour access tokens continue to renew automatically.
-
-#### 4️⃣ Step 4: Create your Web OAuth Client ID
-- Open the [Credentials Management Page](https://console.cloud.google.com/apis/credentials).
-- Click **+ Create Credentials** at the top, and select **OAuth client ID**.
-- Under **Application type**, select **Web application** (do *not* choose "Desktop app" or "TV app").
-- Give it a name (e.g. `SEO Indexer Client`).
-- Scroll down to **Authorized redirect URIs** and click **+ Add URI**.
-- Paste your exact container redirect callback URI:
-  - Default local: `http://localhost:3000/api/auth/google/callback`
-  - (If you are running the dashboard on custom ports or reverse proxies, use your custom domain equivalent, which is dynamically calculated and displayed on your Setup wizard screen!).
-- Click **Create**.
-
-#### 5️⃣ Step 5: Configure the Container & Connect
-- Copy your new **Client ID** and **Client Secret**.
-- Paste them directly into the onboarding Setup wizard, OR save them directly in your environment variables inside `docker-compose.yml`:
-  ```yaml
-  environment:
-    - GOOGLE_OAUTH_CLIENT_ID=your-client-id
-    - GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
-  ```
-- Click **Start Google Sign-In**. A secure Google authentication popup will open.
-- Log in with your Google account.
-- Once authorized, the popup will communicate success back to your browser tab, automatically self-close, and your container is fully configured and connected!
-
----
-
-## IndexNow — Setting Up the Key File
-
-> **If you're seeing `403 UserForbiddedToAccessSite`** — this section is exactly why.
-
-IndexNow works like a challenge/response: before Bing will accept your submission, it fetches a small text file from your website to confirm you own it.
-
-```
-GET https://yourdomain.com/{your-key}.txt
-Expected response body: your-key     (plain text, nothing else)
-```
-
-Your unique key per site is shown in the dashboard under **Sites → IndexNow Setup**.
-
-There are two ways to get that file in place:
-
----
-
-### Method 1 — Proxy the key file through this container (zero-deploy)
-
-If you already run a reverse proxy (nginx, Caddy, Traefik, Cloudflare Tunnel) in front of this container and your website, you can forward `.txt` key-file requests to the container. **The container serves the correct file automatically for every registered site** — no manual file creation needed.
-
-**nginx:**
-```nginx
-# Add inside your server {} block for the site
-location ~* ^/[a-f0-9]{8,128}\.txt$ {
-    proxy_pass http://seo-indexer:3000;
-    proxy_set_header Host $host;
-}
-```
-
-**Caddy:**
-```caddyfile
-yourdomain.com {
-    @indexnow path_regexp ^/[a-f0-9]{8,128}\.txt$
-    reverse_proxy @indexnow seo-indexer:3000
-
-    # ... rest of your config
-}
-```
-
-**Traefik (labels on the seo-indexer service):**
-```yaml
-labels:
-  - "traefik.http.routers.indexnow-key.rule=Host(`yourdomain.com`) && PathRegexp(`^/[a-f0-9]{8,128}\\.txt$`)"
-  - "traefik.http.routers.indexnow-key.service=seo-indexer"
-```
-
-After adding the proxy rule, click **Verify Key File** in the dashboard to confirm it works.
-
----
-
-### Method 2 — Place a static file on your website
-
-Find your key in the dashboard (**Sites → IndexNow Setup → copy key**), then follow the instructions for your platform:
-
-#### Next.js (App Router)
-Create `public/{YOUR_KEY}.txt` containing just the key:
-```bash
-echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-```
-Deploy normally. The file is served at `https://yourdomain.com/YOUR_KEY_HERE.txt`.
-
-#### Next.js (Pages Router)
-Same as App Router — the `public/` directory is served as static files at the root path.
-
-#### Astro
-```bash
-echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-```
-Astro copies everything in `public/` to the build output root. Deploy as normal.
-
-#### Nuxt
-```bash
-echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-```
-Nuxt's `public/` directory maps to `/` in production.
-
-#### SvelteKit
-```bash
-echo -n "YOUR_KEY_HERE" > static/YOUR_KEY_HERE.txt
-```
-SvelteKit serves the `static/` directory at the root.
-
-#### Gatsby
-```bash
-echo -n "YOUR_KEY_HERE" > static/YOUR_KEY_HERE.txt
-```
-
-#### Hugo
-```bash
-echo -n "YOUR_KEY_HERE" > static/YOUR_KEY_HERE.txt
-```
-
-#### Create React App / Vite (plain SPA)
-```bash
-echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-```
-
-#### Jekyll
-```bash
-echo -n "YOUR_KEY_HERE" > YOUR_KEY_HERE.txt
-# Add to front matter or just leave it as-is — Jekyll copies unknown files
-```
-
-#### WordPress
-Upload the file via FTP/SFTP to your WordPress root directory (same folder as `wp-config.php`):
-```
-/var/www/html/YOUR_KEY_HERE.txt
-```
-Or use a file manager plugin. The file should be accessible at `https://yourdomain.com/YOUR_KEY_HERE.txt`.
-
-#### Webflow
-Webflow → **Project Settings → SEO → Meta Tags**. Webflow doesn't support arbitrary file uploads directly.  
-Use **Method 1 (proxy)** instead, or add a custom redirect rule if your plan supports it.
-
-#### Shopify
-In Shopify Admin → **Online Store → Themes → Actions → Edit code**, create a new file in the root of your theme. Note: Shopify serves theme files under `/` only for a limited set of file types. **Method 1 (proxy via a CDN/edge worker) is recommended for Shopify**.
-
-#### Squarespace / Wix / Framer / other hosted builders
-These platforms do not support arbitrary file placement.  
-Use **Method 1** (proxy through nginx/Caddy/Cloudflare Worker) or host the key file on a subdomain that redirects:
-
-```
-# Cloudflare Worker — place on your domain
-addEventListener('fetch', event => {
-  const url = new URL(event.request.url)
-  if (/^\/[a-f0-9]{8,128}\.txt$/.test(url.pathname)) {
-    event.respondWith(fetch('https://your-seo-indexer.example.com' + url.pathname))
-  }
-})
-```
-
-#### Plain HTML / static hosting (Netlify, Vercel, Cloudflare Pages, GitHub Pages)
-
-Create the file in your `public/` or output directory:
-```bash
-echo -n "YOUR_KEY_HERE" > public/YOUR_KEY_HERE.txt
-```
-
-**Netlify** — add a redirect to serve from a different origin if needed:
-```toml
-# netlify.toml
-[[redirects]]
-  from = "/:key.txt"
-  to = "https://your-seo-indexer.example.com/:key.txt"
-  status = 200
-  force = true
-```
-
-**Vercel** — `vercel.json` rewrite:
-```json
-{
-  "rewrites": [
-    {
-      "source": "/:key(\[a-f0-9\]{8,128}).txt",
-      "destination": "https://your-seo-indexer.example.com/:key.txt"
-    }
-  ]
-}
-```
-
-**Cloudflare Pages** — `_redirects` file:
-```
-/:key.txt  https://your-seo-indexer.example.com/:key.txt  200
-```
-
----
-
-### Method 3 — Zero-Touch Auto-Deployment (FTP or Webhooks)
-
-This is the easiest option! Click **Edit Site** on any site in your dashboard, expand the **⚙️ Auto-Deploy Verification Key** settings details block, and choose one of these automated deployment methods:
-
-#### 1. FTP Key Upload
-Enter your FTP credentials (Host, Username, Password, Port, and Path to public root). On every site verification or IndexNow run, the indexer will connect via a secure standard FTP connection and upload the `{key}.txt` file directly into your website's root directory automatically!
-
-#### 2. Deployment Webhooks
-If your website uses a static site builder (Next.js/Astro/WP), a Headless CMS (Strapi/Sanity), or is hosted on modern hosts (Vercel/Netlify/GitHub Pages), enter your custom deploy trigger webhook URL. We will trigger an HTTP POST request to that URL containing the key details in the body:
-```json
-{
-  "key": "29e9ff3cfd814c8fb239c4a861ad9f81",
-  "filename": "29e9ff3cfd814c8fb239c4a861ad9f81.txt",
-  "content": "29e9ff3cfd814c8fb239c4a861ad9f81"
-}
-```
-You can capture this request inside your webhook handlers to trigger an automated rebuild or save the key dynamically!
-
----
-
-### Enterprise SEO & GEO Audits
-
-The indexer also includes advanced enterprise-grade automation features to audit and validate your site's SEO/GEO friendliness:
-
-#### 📈 Google URL Inspection Audit logs
-When configured with GSC, the scheduler automatically inspects the 5 oldest URLs per site daily. It fetches:
-- **Indexing Verdict**: e.g., `Indexed`, `Crawled - currently not indexed`, or `Discovered - currently not indexed`.
-- **Crawl Timestamps**: The exact date and time the Googlebot crawler last crawled your page.
-- **Rich Results & Usability**: Full verification of mobile-friendliness.
-These audits are tracked dynamically inside the **Sitemap Crawl & Indexing Audit logs** table under each site's expanded card in the dashboard.
-
-#### 🤖 AI Crawler Robots.txt Audits
-Generates daily audits testing if standard AI parsers (`GPTBot`, `Gemini` via `Google-Extended`, `ClaudeBot`, `PerplexityBot`) are allowed to scrape your domain or if they are blocked. Status badges are shown directly on each site card.
-
-#### 📄 /llms.txt AI Specifications Audit
-Validates whether your website serves an `/llms.txt` file at the root to declare custom prompts and semantic datasets for Large Language Models.
-
-#### 🏷️ Semantic JSON-LD Structured Schema Auditing
-Automatically scans and identifies Inline JSON-LD schemas (such as `SoftwareApplication`, `LocalBusiness`, `Organization`, `FAQPage`, etc.) on all sitemap crawl runs. These extracted schemas are cataloged next to each sitemap URL in your logs.
-
----
-
-### Checking verification status
-
-After placing the key file, go to **Sites → your site → IndexNow Setup → Verify Key File**.  
-The dashboard will fetch the URL and confirm the content matches. If it fails, it shows exactly what went wrong.
-
-**Once verified, IndexNow submissions will succeed automatically on every subsequent run.** You don't need to re-verify unless you delete and regenerate the key.
-
----
-
-## Bing Webmaster URL Submission
-
-IndexNow already notifies Bing (it's Bing's own protocol), so for most people **IndexNow is enough**. Enable this *additional* direct channel if you want submissions to land straight in your verified Bing Webmaster property and want the tool to report your remaining Bing quota.
-
-**One-time setup:**
-
-1. Verify each site in [Bing Webmaster Tools](https://www.bing.com/webmasters) — the fastest way is **Import from Google Search Console**.
-2. In Bing Webmaster, open **Settings → API access → API Key** and generate a key. One key covers every site verified under that Bing account.
-3. In this tool, go to **Settings → Bing API key**, paste it, and save. (Stored encrypted-at-rest in SQLite; the API never returns it in plaintext.)
-
-That's it. On each run, the scheduler submits **new and changed HTML pages** to Bing via `SubmitUrlBatch`, batched at 500/call, and respects your live daily quota (`GetUrlSubmissionQuota`). `llms.txt` and other non-HTML URLs are **not** sent here — they go via IndexNow.
-
-> Set it via the API instead of the UI:
-> ```bash
-> curl -X PUT http://localhost:3000/api/settings \
->   -H 'Content-Type: application/json' \
->   -d '{"bing_api_key":"YOUR_BING_KEY"}'
-> ```
-
-To skip Bing for a single manual run, POST `/api/runs` with `{"skipBing": true}`.
-
----
-
-## How `llms-sitemap.xml` is handled (GEO)
-
-You don't have to configure anything. On every run the indexer reads each site's `robots.txt`, collects **all** declared `Sitemap:` URLs, and merges them with the sitemap you configured. So if your `robots.txt` has:
-
-```
-Sitemap: https://example.com/sitemap.xml
-Sitemap: https://example.com/llms-sitemap.xml
-```
-
-…both are crawled. URLs are then routed by type:
-
-| URL type | GSC sitemap | Bing Webmaster | IndexNow |
-|----------|:---:|:---:|:---:|
-| HTML pages | ✅ | ✅ | ✅ |
-| `llms.txt`, `llms-full.txt`, other non-HTML | ❌ | ❌ | ✅ |
-
-Non-HTML files are intentionally kept out of Google/Bing search submission (they aren't indexable pages and would just create "Excluded" noise), but **are** pushed to IndexNow so Bing and AI answer engines re-crawl your latest AI index. Their change-state is tracked the same way as pages, so they're only re-submitted when their `<lastmod>` changes.
-
-### Generate `llms.txt` with AI
-
-Under a site's **Delivery & GEO** tab, click **Generate with AI** to have a configured LLM (any of your OpenAI / Anthropic / Gemini / xAI / Perplexity keys) write a **comprehensive, spec-compliant `llms.txt`** for you — instead of the minimal built-in template. It scrapes your site's own pages (titles + descriptions from the URLs the crawler already knows) and feeds them to the model with a detailed prompt, so the result reflects your actual content and structure.
-
-Review/edit the generated Markdown, then **Save**. In *Managed* mode the saved `llms.txt` (plus an auto-generated `llms-sitemap.xml`) is deployed to your site root on every run via your webhook/FTP delivery method. Clear it to fall back to the built-in template.
-
----
-
-## Sitemap `<lastmod>` — Why it matters
-
-The scheduler compares each URL's `<lastmod>` against the last known value. **Only changed or new URLs are submitted**, so you don't waste quota re-submitting pages that haven't changed.
-
-Without `<lastmod>`, all URLs are rotated (the tool still works, but it's less efficient).
-
-### Adding `<lastmod>` by framework
-
-**Next.js (App Router):**
-```ts
-// app/sitemap.ts
-export default function sitemap(): MetadataRoute.Sitemap {
-  return pages.map(page => ({
-    url: `https://yourdomain.com/${page.slug}`,
-    lastModified: page.updatedAt,  // Date object or ISO string
-  }));
-}
-```
-
-**Astro (`@astrojs/sitemap`):**
-```js
-// astro.config.mjs
-import sitemap from '@astrojs/sitemap';
-export default defineConfig({
-  site: 'https://yourdomain.com',
-  integrations: [sitemap()],
-  // astro-sitemap uses page.lastModified if available, or build time
-});
-```
-
-**WordPress — Yoast SEO or Rank Math:**
-Both automatically add `<lastmod>` using the post's modified date. No configuration needed.
-
-**Hugo:**
-```toml
-# config.toml
-[sitemap]
-  changefreq = "weekly"
-  filename   = "sitemap.xml"
-  priority   = 0.5
-# Hugo includes <lastmod> from .Lastmod (git commit date or front matter)
-```
-
-**Jekyll (`jekyll-sitemap` gem):**
-```yaml
-# _config.yml — the plugin includes lastmod from page.last_modified_at or date
-plugins:
-  - jekyll-sitemap
-```
-
----
-
-## Adding Multiple Sites
-
-There is no limit to the number of sites you can add. Each site gets:
-- Its own IndexNow key (stored in SQLite)
-- Its own URL state and lastmod tracking
-- Its own Search Console sitemap and URL Inspection state
-
-To add a site: **Dashboard → Sites → Add Site**, enter the domain, sitemap URL, and Google Search Console property URL.
-
-Google's URL-level Indexing API is intentionally not used: Google restricts it to `JobPosting` and livestream `BroadcastEvent` pages. Ordinary sites are handled through canonical sitemaps, crawlable links and Search Console coverage inspection.
-
----
-
-## API Keys — Analytics, CWV & AI Citation Tracking
-
-Everything below is **optional** — the core indexing loop needs none of it. Keys are **write-only**: the API stores them server-side and never echoes them back; the UI shows a "configured" badge instead.
-
-| Key | Where to get it | Cost | Unlocks |
-|-----|-----------------|------|---------|
-| Gemini | **One-click button in Settings** (or [AI Studio](https://aistudio.google.com/apikey)) | **Free tier** | Grounded-AI citation checks |
-| Brave Search | [brave.com/search/api](https://brave.com/search/api/) | **Free** (~2k queries/mo, no card) | Retrieval-layer presence — Brave grounds Claude's web search |
-| Bing Webmaster | Bing Webmaster Tools → Settings → API access | Free | URL submission + quota via Bing's own allowance |
-| CrUX | [Google Cloud credentials](https://console.cloud.google.com/apis/credentials) | Free | Core Web Vitals (p75 LCP/INP/CLS) |
-| OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) | Paid (pennies/sweep) | ChatGPT citation checks (web search) |
-| Anthropic | [console.anthropic.com](https://console.anthropic.com/settings/keys) | Paid | Claude citation checks (web search) |
-| Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Paid | Perplexity (sonar) citation checks |
-| xAI | [console.x.ai](https://console.x.ai/) | Paid | Grok citation checks (live search) |
-
-**Zero-cost recommended setup**: link your Google account → Settings → *⚡ Generate with linked Google account* (Gemini) → paste a free Brave key. That gives you one real grounded-LLM answer engine *and* retrieval-layer tracking without spending anything.
-
-**Why no headless-browser scraping of the chat UIs?** It violates those services' terms, requires maintaining logged-in sessions against active bot defences (risking the accounts), and logged-out answers are personalised/experiment-bucketed anyway — the API + retrieval-layer approach gives a cleaner signal with none of the exposure.
-
-**AI citation sweeps are manual by design** (the *Run all* button) so provider costs never accrue unattended. Wire `runAllPrompts()` into the scheduler if you want them recurring.
-
----
-
-## Notifications
-
-Run summaries and alerts (index drops, structured-data regressions, quota exhaustion, hygiene issues) are pushed after every run. Configure any number of channels under **Settings → Notifications** — each is an independent, first-class provider, and every notification fans out to **all** configured channels in parallel. Use **Save & send test** to verify each one.
-
-| Channel | What you need | Notes |
-| --- | --- | --- |
-| **Slack** | Incoming Webhook URL | api.slack.com → create an Incoming Webhook, pick the channel. |
-| **Discord** | Channel Webhook URL | Channel → Integrations → Webhooks → New Webhook. |
-| **ntfy** | A topic (+ optional server & token) | Free push to phone/desktop; defaults to `https://ntfy.sh`. Set a server URL + token for private/self-hosted. |
-| **Telegram** | Bot token + chat ID | Create a bot with [@BotFather](https://t.me/BotFather); get your chat id from `getUpdates`. |
-| **Generic webhook** | Any URL | Receives `POST {"title": "…", "body": "…"}`. Slack/Discord/ntfy URLs in this field are still auto-detected for backwards compatibility. |
-| **Email** | Recipient address(es) | Requires SMTP (see [Email](#email-based-password-reset-optional)). |
-
-All channel config lives in the dashboard (stored in SQLite) — no env vars needed except SMTP for the email channel.
-
----
+If a submission keeps failing, open the **Submission failures** panel on the Command Centre. You can check whether the URL is currently reachable without spending submission quota, clear one repaired record or clear all backoff records, then let the next run retry them.
 
 ## Configuration
 
-| Variable       | Default     | Description                   |
-|----------------|-------------|-------------------------------|
-| `PORT`         | `3000`      | HTTP port                     |
-| `HOST`         | `0.0.0.0`   | Bind address                  |
-| `DATA_DIR`     | `/data`     | SQLite database directory     |
-| `APP_SECRET`   | *(auto)*    | Encryption key for secrets at rest (Google OAuth secrets/tokens, FTP passwords, Bing keys and pending OAuth state). Auto-generated into `DATA_DIR/.key` if unset; **set explicitly in production** so backups/restores stay portable. |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW` | `300` / `1 minute` | Global per-IP API rate limit |
-| `AUTH_RATE_LIMIT_MAX` / `AUTH_RATE_LIMIT_WINDOW` | `10` / `1 minute` | Tighter per-IP limit on credential endpoints (login, signup, passkey login) |
-| `SSO_GOOGLE_*`, `SSO_OIDC_*`, `SSO_AUTO_PROVISION` | — | Optional SSO / OpenID Connect — see [Sign-in methods](#sso--oidc-environment-variables) |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Optional email (enables password-reset links) — see [Email-based password reset](#email-based-password-reset-optional) |
+Most settings live in the dashboard. These environment variables control the container and authentication around it:
 
-All other settings (cron schedule, API keys, etc.) are configured via the UI and stored in SQLite.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP port inside the container. |
+| `HOST` | `0.0.0.0` | Bind address. |
+| `DATA_DIR` | `/data` | SQLite database, encryption key and backup directory. |
+| `APP_SECRET` | generated | Encrypts OAuth tokens and delivery credentials. Set a stable value in production so restores remain portable. |
+| `CORS_ORIGIN` | request origin | Comma-separated allowed browser origins when the frontend is hosted separately. |
+| `BACKUP_KEEP` | `7` | Number of nightly SQLite backups to keep. |
+| `RATE_LIMIT_MAX` | `300` | General requests allowed per `RATE_LIMIT_WINDOW`. |
+| `AUTH_RATE_LIMIT_MAX` | `10` | Sign-in requests allowed per `AUTH_RATE_LIMIT_WINDOW`. |
+| `AI_CITATION_DAILY_LIMIT` | `25` | Daily citation checks for non-owner members. Owners and super-admins are exempt. |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Optional deployment-level Google connection credentials. They can also be entered during setup. |
+| `SSO_GOOGLE_*`, `SSO_OIDC_*` | unset | Optional Google or generic OpenID Connect sign-in. |
+| `SMTP_*` | unset | Optional email delivery and password-reset links. |
 
----
+The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, recovery, update and backup instructions.
 
-## Releases & Self-Maintenance
+## Security and data
 
-This repo looks after itself:
+- The application stores its SQLite database at `/data/indexer.db` and creates nightly backups under `/data/backups`.
+- OAuth tokens, OAuth client secrets and delivery passwords are encrypted at rest. Provider API keys are write-only through the application API and remain inside the local database.
+- Passwords use scrypt. Sign-in supports TOTP 2FA, passkeys and optional OpenID Connect.
+- Human sessions are stored in the database and authentication routes have a stricter rate limit.
+- Workspace access is checked by the API, not only hidden in the interface.
+- Service tokens are hashed, scoped to one workspace and can be expired or revoked.
+- Administrative actions, impersonation and security changes are recorded in the audit history.
 
-- **Automated releases** — [release-please](https://github.com/googleapis/release-please) turns [Conventional Commits](CONTRIBUTING.md#commit-messages--conventional-commits-required) into a rolling release PR with a generated changelog. Merging it tags `vX.Y.Z`, publishes a GitHub Release with notes, and the Docker workflow ships `latest`, `X.Y.Z` and `X.Y` image tags automatically. The running version is visible at `/api/status`.
-- **Automated dependency updates** — [Renovate](https://docs.renovatebot.com) opens grouped weekly PRs; patch/minor updates, action pins and lockfile maintenance **auto-merge once CI is green** (unit tests + typecheck + lint + build + Docker build). Majors — and `better-sqlite3` majors especially, which track the Node ABI — wait for a human.
-- **Self-hosted Renovate** — runs as a [workflow](.github/workflows/renovate.yml) (Mondays + manual dispatch), no third-party app. One-time setup on a fork: add a fine-grained PAT as the `RENOVATE_TOKEN` secret (Contents, Pull requests, Workflows — read/write), allow auto-merge in repo settings, and require the status checks **`backend`**, **`frontend`** and **`build-and-push`** on `main` so auto-merge is gated on green CI. Renovate updates its own action pin, so the bot maintains itself too.
+Use HTTPS in production, protect access to the data volume, keep `APP_SECRET` out of source control and back up both the database and the key needed to decrypt stored credentials.
 
----
+## Automation API
+
+Create a service token under **Governance & Usage → API & Webhooks**. The token is shown once and belongs to one workspace.
+
+| Endpoint | Required scope | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/workspace` | `workspace:read` | Workspace health, actions, forecasts and connector freshness. |
+| `GET /api/v1/metrics` | `metrics:read` | Read normalized observations with source, metric and date filters. |
+| `POST /api/v1/events` | `events:write` | Add custom numeric observations with provenance. |
+| `POST /api/v1/logs/ingest` | `logs:write` | Ingest up to 1,000 origin or CDN request events per call. |
+
+Send the token as `Authorization: Bearer oc_…`. See the [automation API guide](docs/AUTOMATION_API.md) for request examples and webhook verification.
+
+## Updating and backups
+
+To update a Compose installation:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The app creates an online SQLite backup at 02:30 each day and keeps seven by default. These files are useful, but they are still inside the same `/data` volume. Copy that volume, including its `.key` file when `APP_SECRET` is not supplied explicitly, to separate storage.
+
+Database migrations run automatically when a new version starts. Read the [release notes](https://github.com/martadams89/seo-website-indexer/releases) before updating and keep a fresh backup available.
 
 ## Development
 
+The backend and frontend run separately during development:
+
 ```bash
-# Backend (tsx watch — auto-restarts on change)
 cd backend
 npm install
-npm run dev       # http://localhost:3000
+npm run dev
+```
 
-# Frontend (Vite HMR)
+```bash
 cd frontend
 npm install
-npm run dev       # http://localhost:5173 (proxies /api/* to :3000)
+npm run dev
 ```
 
----
+The backend runs on `http://localhost:3000`. Vite runs on `http://localhost:5173` and proxies `/api` to the backend.
 
-## Architecture
+Before opening a pull request:
 
-```
-┌─────────────────────────────────────────────┐
-│              React + Vite SPA               │
-│ Setup | Dashboard | Analytics | Citations | │
-│        Sites | Accounts | Logs | Settings   │
-└──────────────────┬──────────────────────────┘
-                   │ HTTP REST + SSE
-┌──────────────────▼──────────────────────────┐
-│              Fastify (Node.js)              │
-│                                             │
-│  /api/*        REST endpoints               │
-│  /api/logs/stream  SSE live log feed        │
-│  /{key}.txt    IndexNow key file (auto)     │
-│  /*            Serve built frontend SPA     │
-│                                             │
-│  ┌─────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ google- │  │scheduler │  │ indexnow  │  │
-│  │ oauth   │  │(cron +   │  │(key mgmt +│  │
-│  │ .ts     │  │ round-   │  │ submit)   │  │
-│  │         │  │ robin)   │  │           │  │
-│  └─────────┘  └──────────┘  └───────────┘  │
-│  ┌─────────────────────────────────────┐    │
-│  │          SQLite (WAL mode)          │    │
-│  │  sites | url_state | runs | logs    │    │
-│  │  settings | indexnow_keys           │    │
-│  └─────────────────────────────────────┘    │
-└────┬──────────────────┬──────────────────────┘
-     │                  │
-     ▼                  ▼
-Google Search       IndexNow API
-Console API        (api.indexnow.org →
-                   Bing, Yandex, Yahoo…)
+```bash
+cd backend && npm test && npm run build
+cd frontend && npm run lint && npm run build
 ```
 
----
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 
-## Contributing
+## Documentation
 
-Contributions are very welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for the two-minute setup, and note that commit messages follow Conventional Commits because they *become* the release notes. Bugs and ideas → [issues](https://github.com/martadams89/seo-website-indexer/issues) (templates provided).
-
----
+- [Deployment, authentication and recovery](docs/DEPLOYMENT.md)
+- [Users, roles and workspaces](docs/USERS_AND_WORKSPACES.md)
+- [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
+- [Automation API and signed webhooks](docs/AUTOMATION_API.md)
+- [Product roadmap](docs/PRODUCT_STRATEGY.md)
+- [Commercialisation roadmap](docs/COMMERCIALIZATION.md)
 
 ## License
 
-This project is licensed under the [GPL-3.0 License](LICENSE).
+SEO Website Indexer is available under the [GPL-3.0 license](LICENSE).
