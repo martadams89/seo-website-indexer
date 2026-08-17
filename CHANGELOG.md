@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.33.2](https://github.com/martadams89/seo-website-indexer/compare/v1.33.1...v1.33.2) (2026-08-17)
+
+
+### 🐛 Bug Fixes
+
+* recognize third-party AI citations ([35091fc](https://github.com/martadams89/seo-website-indexer/commit/35091fc478055c1e568dacb55a1d183277e950a6))
+* recognize third-party AI citations ([1ca3618](https://github.com/martadams89/seo-website-indexer/commit/1ca3618123f077108c6dbe10e6f8139740848530))
+
 ## [1.33.1](https://github.com/martadams89/seo-website-indexer/compare/v1.33.0...v1.33.1) (2026-08-17)
 
 
