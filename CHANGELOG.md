@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.0](https://github.com/martadams89/seo-website-indexer/compare/v1.27.3...v1.28.0) (2026-08-17)
+
+
+### ✨ Features
+
+* **entities:** add guided website discovery ([#259](https://github.com/martadams89/seo-website-indexer/issues/259)) ([b63f5bf](https://github.com/martadams89/seo-website-indexer/commit/b63f5bf2bb290800d9aa118a386ec2e516e4e264))
+
 ## [1.27.3](https://github.com/martadams89/seo-website-indexer/compare/v1.27.2...v1.27.3) (2026-08-17)
 
 
