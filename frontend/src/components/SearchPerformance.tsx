@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { BarChart3, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, X, LineChart } from 'lucide-react';
 import { api, type PerformanceResponse, type EnginePerformance } from '../api';
 import { MetricChart, StatCard } from './Charts';
+import { Modal } from './Modal';
 import { useSort, SortTh } from './SortableTable';
 import { useApp } from '../AppContext';
 
@@ -232,12 +233,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
 
       {/* Query position-over-time */}
       {trendQuery && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setTrendQuery(null)}>
-          <div className="modal" style={{ maxWidth: 560 }}>
-            <div className="flex items-center gap-2" style={{ justifyContent: 'space-between' }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>Position trend — "{trendQuery}"</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setTrendQuery(null)}><X size={14} /></button>
-            </div>
+        <Modal onClose={() => setTrendQuery(null)} size="sm" title={`Position trend — “${trendQuery}”`} eyebrow="Search visibility history" description="Average Google position over time. Lower is better." icon={<LineChart/>}>
             {trend === null ? <div className="empty-note" style={{ marginTop: 12 }}>Loading…</div>
               : trend.length < 2 ? <div className="empty-note" style={{ marginTop: 12 }}>Not enough history yet — trends build over the days after this query first shows.</div>
               : (
@@ -251,8 +247,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
                 </div>
               </div>
             )}
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

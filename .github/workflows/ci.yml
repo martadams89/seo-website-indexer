@@ -48,5 +48,7 @@ jobs:
         run: npm run lint
       - name: Theme contract
         run: npm run test:theme
+      - name: Dialog contract
+        run: npm run test:ui
       - name: Typecheck & build
         run: npm run build

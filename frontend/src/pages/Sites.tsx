@@ -7,6 +7,7 @@ import {
 import { Link } from 'react-router-dom';
 import { useApp } from '../AppContext';
 import { api, type Site, type GSCSite, type GoogleAccount, type BingAccount, type UrlState } from '../api';
+import { Modal } from '../components/Modal';
 import { useSort, SortTh } from '../components/SortableTable';
 import { InfoTooltip } from '../components/Tooltip';
 
@@ -60,11 +61,16 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
   }
 
   return (
-    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
-        <h2 className="modal-title">Add Site</h2>
-        <p className="modal-subtitle">Import from Search Console or enter details manually. Delivery (FTP/webhook) and GEO options live in the site's Delivery tab afterwards.</p>
-
+    <Modal
+      onClose={onClose}
+      size="lg"
+      className="add-site-modal"
+      title="Add a website"
+      eyebrow="Workspace setup"
+      description="Import a verified Search Console property or enter the website details manually. Delivery and GEO settings can be added afterwards."
+      icon={<Globe2/>}
+      footer={<><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!name || !domain || !sitemapUrl || !gscUrl || loading} onClick={save}>{loading ? <><span className="spinner" /> Saving…</> : 'Add website'}</button></>}
+    >
         <div className="flex-col gap-3">
           {accounts.length > 0 && (
             <div className="input-group">
@@ -146,14 +152,7 @@ function AddSiteModal({ accounts, onClose, onSaved }: { accounts: GoogleAccount[
           {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
         </div>
 
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={!name || !domain || !sitemapUrl || !gscUrl || loading} onClick={save}>
-            {loading ? <><span className="spinner" /> Saving…</> : 'Add Site'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

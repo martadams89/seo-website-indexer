@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, BarChart3, Check, Cloud, Code2, Database, Gauge, Globe2, Link2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Store, Trash2, Webhook, X } from 'lucide-react';
+import { Activity, BarChart3, Check, Cloud, Code2, Database, Gauge, Globe2, Link2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Store, Trash2, Webhook } from 'lucide-react';
 import { api, type GoogleAccount, type IntegrationProvider, type PlatformIntegration, type Site } from '../api';
 import { useToast } from '../AppContext';
+import { Modal } from '../components/Modal';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 
 type Field={key:string;label:string;placeholder?:string;secret?:boolean;help?:string;type?:'text'|'url'|'select';options?:Array<{value:string;label:string}>};
@@ -34,6 +35,46 @@ export default function IntegrationsPage(){
   return <div className="ops-page integrations-page"><header className="ops-page-header"><div><span className="eyebrow"><Link2 size={13}/> Connected operating system</span><h1>Integrations</h1><p>Add a source only when it contributes unique evidence or closes a safe action loop.</p></div><div className="trust-chip"><ShieldCheck/><span><strong>Tenant encrypted</strong><small>Secrets are write-only and workspace scoped</small></span></div></header>
     {integrations.length>0&&<section className="ops-card connections-panel"><div className="ops-card-head"><div><span className="eyebrow">Live data plane</span><h2>Your connections</h2></div><span>{integrations.filter(i=>i.status==='connected').length}/{integrations.length} healthy</span></div><div className="connection-list">{integrations.map(row=>{const def=defs[row.provider];const Icon=def.icon;return <article key={row.id}><span className={`integration-logo ${def.color}`}><Icon/></span><div><strong>{row.name}</strong><small>{def.label}{row.site_id?` · ${sites.find(s=>s.id===row.site_id)?.name||'Site'}`:' · Workspace'}</small></div><span className={`connection-status ${row.status}`}><i/>{row.status}</span><div className="freshness"><small>Last refresh</small><span>{row.last_sync_at?new Date(row.last_sync_at).toLocaleString():'Not synced yet'}</span>{row.last_error&&<em title={row.last_error}>{row.last_error}</em>}</div><button className="btn btn-secondary btn-sm" disabled={busy===row.id||!canManage} onClick={()=>sync(row)}>{busy===row.id?<RefreshCw className="spin" size={12}/>:<RefreshCw size={12}/>} Sync</button><button className="btn-icon btn-icon-ghost" disabled={!canManage} onClick={()=>open(row.provider,row)} title="Configure"><Code2 size={14}/></button><button className="btn-icon btn-icon-ghost danger" disabled={!canManage} onClick={()=>remove(row)} title="Remove"><Trash2 size={14}/></button></article>})}</div></section>}
     {groups.map(group=><section className="integration-group" key={group}><div className="section-heading"><div><span className="eyebrow">{group}</span><h2>{group==='Analytics'?'Connect visibility to business outcomes':group==='Experience'?'Make regressions actionable':group==='Publishing'?'Close the change loop safely':'See what search crawlers actually receive'}</h2></div></div><div className="integration-catalog">{(Object.entries(defs) as Array<[IntegrationProvider,ProviderDef]>).filter(([,def])=>def.group===group).map(([provider,def])=>{const Icon=def.icon;const count=integrations.filter(i=>i.provider===provider).length;return <button key={provider} onClick={()=>open(provider)} disabled={!canManage}><span className={`integration-logo ${def.color}`}><Icon/></span><span className="catalog-value">{def.value}</span><h3>{def.label}</h3><p>{def.description}</p><footer>{count?<span className="connected-count"><Check size={12}/>{count} connected</span>:<span>Add connection</span>}<Plus size={15}/></footer></button>})}</div></section>)}
-    {selected&&<div className="ops-modal-backdrop" onMouseDown={()=>setSelected(null)}><div className="ops-modal integration-modal" onMouseDown={e=>e.stopPropagation()}><header><div><span className="eyebrow">{editing?'Configure connection':'New connection'}</span><h2>{defs[selected].label}</h2><p>{defs[selected].description}</p></div><button className="btn-icon btn-icon-ghost" onClick={()=>setSelected(null)}><X/></button></header><div className="secret-notice"><LockKeyhole/><span>Credentials are encrypted at rest and never returned after saving. Leave a secret blank while editing to keep its current value.</span></div><div className="form-grid"><label className="full">Connection name<input value={name} onChange={e=>setName(e.target.value)}/></label>{defs[selected].site&&<label className="full">Site<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">Workspace-wide</option>{sites.map(site=><option key={site.id} value={site.id}>{site.name} · {site.domain}</option>)}</select></label>}{defs[selected].fields.map(field=><label className={field.help?'full':''} key={field.key}>{field.label}{field.type==='select'?<select value={config[field.key]||''} onChange={e=>setConfig({...config,[field.key]:e.target.value})}><option value="">Choose…</option>{field.options?.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select>:<input type={field.secret?'password':field.type==='url'?'url':'text'} value={config[field.key]||''} placeholder={field.secret&&editing?.configured_secrets.includes(field.key)?'•••••••• saved':field.placeholder} onChange={e=>setConfig({...config,[field.key]:e.target.value})}/>} {field.help&&<small>{field.help}</small>}</label>)}<label>Refresh cadence<select value={cadence} onChange={e=>setCadence(Number(e.target.value))}><option value={60}>Hourly</option><option value={360}>Every 6 hours</option><option value={1440}>Daily</option><option value={10080}>Weekly</option></select></label></div><footer><button className="btn btn-ghost" onClick={()=>setSelected(null)}>Cancel</button><button className="btn btn-primary" disabled={busy==='save'||!name.trim()} onClick={save}>{busy==='save'?'Saving…':editing?'Save connection':'Connect source'}</button></footer></div></div>}
+    {selected&&<Modal
+      onClose={()=>setSelected(null)}
+      size="lg"
+      className="integration-modal"
+      eyebrow={editing?'Configure connection':'New connection'}
+      title={defs[selected].label}
+      description={defs[selected].description}
+      icon={(()=>{const Icon=defs[selected].icon;return <Icon/>})()}
+      footer={<><button className="btn btn-ghost" onClick={()=>setSelected(null)}>Cancel</button><button className="btn btn-primary" disabled={busy==='save'||!name.trim()} onClick={save}>{busy==='save'?'Saving…':editing?'Save connection':'Connect source'}</button></>}
+    >
+      <div className="integration-setup-layout">
+        <main>
+          <section className="modal-form-section">
+            <header><span>01</span><div><h3>Name and scope</h3><p>Choose where this connection can contribute data or actions.</p></div></header>
+            <div className="form-grid">
+              <label className="full">Connection name<input data-autofocus value={name} onChange={e=>setName(e.target.value)} placeholder={`e.g. ${defs[selected].label} · Production`}/><small>Use a name your team will recognise in reports and approval flows.</small></label>
+              {defs[selected].site&&<label className="full">Website scope<select value={siteId} onChange={e=>setSiteId(e.target.value)}><option value="">All websites in this workspace</option>{sites.map(site=><option key={site.id} value={site.id}>{site.name} · {site.domain}</option>)}</select><small>Workspace-wide connections can be reused across every website you manage.</small></label>}
+            </div>
+          </section>
+          <section className="modal-form-section">
+            <header><span>02</span><div><h3>{defs[selected].fields.length?'Authentication and source details':'Connection details'}</h3><p>{defs[selected].fields.length?'Add the minimum credentials needed for this source.':'This source uses a generated workspace endpoint after it is connected.'}</p></div></header>
+            {defs[selected].fields.length?<div className="form-grid integration-field-grid">{defs[selected].fields.map(field=><label className={field.help?'full':''} key={field.key}>{field.label}{field.type==='select'?<select value={config[field.key]||''} onChange={e=>setConfig({...config,[field.key]:e.target.value})}><option value="">Choose an account…</option>{field.options?.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select>:<input autoComplete={field.secret?'new-password':undefined} type={field.secret?'password':field.type==='url'?'url':'text'} value={config[field.key]||''} placeholder={field.secret&&editing?.configured_secrets.includes(field.key)?'•••••••• saved — leave blank to keep':field.placeholder} onChange={e=>setConfig({...config,[field.key]:e.target.value})}/>} {field.help&&<small>{field.help}</small>}</label>)}</div>:<div className="integration-generated-note"><Webhook/><div><strong>No credentials needed here</strong><span>Save the connection first. The scoped ingest endpoint and setup instructions will then appear with the connection.</span></div></div>}
+          </section>
+          <section className="modal-form-section">
+            <header><span>03</span><div><h3>Refresh policy</h3><p>Control how often this source updates the workspace evidence layer.</p></div></header>
+            <label className="integration-cadence">Refresh cadence<select value={cadence} onChange={e=>setCadence(Number(e.target.value))}><option value={60}>Hourly</option><option value={360}>Every 6 hours</option><option value={1440}>Daily</option><option value={10080}>Weekly</option></select><small>You can always run an immediate sync from the connections list.</small></label>
+          </section>
+        </main>
+        <aside className="integration-setup-aside">
+          <div className="integration-preview">
+            <span className={`integration-logo ${defs[selected].color}`}>{(()=>{const Icon=defs[selected].icon;return <Icon/>})()}</span>
+            <span className="eyebrow">What this adds</span>
+            <strong>{defs[selected].value}</strong>
+            <p>{defs[selected].description}</p>
+            <dl><div><dt>Scope</dt><dd>{defs[selected].site?(siteId?sites.find(site=>site.id===siteId)?.name||'Selected website':'Whole workspace'):'Whole workspace'}</dd></div><div><dt>Refresh</dt><dd>{cadence===60?'Hourly':cadence===360?'Every 6 hours':cadence===1440?'Daily':'Weekly'}</dd></div><div><dt>Secrets</dt><dd>{defs[selected].fields.some(field=>field.secret)?'Encrypted':'Not required'}</dd></div></dl>
+          </div>
+          <div className="secret-notice"><LockKeyhole/><span><strong>Credentials stay private</strong>Secrets are encrypted at rest, write-only and isolated to this workspace. {editing?'Leave a saved secret blank to keep it unchanged.':''}</span></div>
+          <div className="integration-safety-note"><ShieldCheck/><span><strong>Safe by default</strong>Adding a source does not publish changes. Action integrations still use the approval queue.</span></div>
+        </aside>
+      </div>
+    </Modal>}
   </div>
 }
