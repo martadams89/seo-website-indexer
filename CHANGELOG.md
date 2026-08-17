@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.33.1](https://github.com/martadams89/seo-website-indexer/compare/v1.33.0...v1.33.1) (2026-08-17)
+
+
+### 🐛 Bug Fixes
+
+* raise minimum interface font size ([d1c4675](https://github.com/martadams89/seo-website-indexer/commit/d1c467572d2f11a0b851041558c91db134bed16f))
+* raise minimum interface font size ([a2caf3f](https://github.com/martadams89/seo-website-indexer/commit/a2caf3fe143ec82f4ab668b331c449d1af5af3fc))
+
 ## [1.33.0](https://github.com/martadams89/seo-website-indexer/compare/v1.32.0...v1.33.0) (2026-08-17)
 
 
