@@ -1,15 +1,16 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getSiteById, getSitesForWorkspace, getWorkspaceSettings, setWorkspaceSetting } from '../db/database.js';
+import { getQuotaUsage, getSiteById, getSitesForWorkspace, getWorkspaceSettings, incrementQuota, setWorkspaceSetting, upsertUrlState } from '../db/database.js';
 import { canAccessSiteInWorkspace, listWorkspaceMembers } from '../auth/workspaces.js';
 import { recordAuditEvent, type User } from '../auth/users.js';
+import { inspectGoogleUrl, submitSitemapToGSC } from '../indexer/google.js';
 import {
   INTEGRATION_PROVIDERS, addAnnotation, assertWithinBudget, authenticateServiceToken, budgetStatus, bulkUpdateWorkItems,
   createContentAction, createIntegration, createServiceToken, createWebhook, createWorkItem, deleteBudget,
   deleteDashboardView, deleteIntegration, deleteLocalEntity, deleteWebhook, getContentAction, getIntegration, listBudgets,
   listContentActions, listDashboardViews, listIntegrations, listLocalEntities, listMetrics, listServiceTokens, listTimeline,
-  listUsage, listWebhooks, listWorkItems, platformOverview, publicIntegration, recordMetric, recordUsage,
+  getWorkItem, listUsage, listWebhooks, listWorkItems, platformOverview, publicIntegration, recordMetric, recordUsage,
   revokeServiceToken, saveDashboardView, saveLocalEntity, updateContentAction, updateIntegration, updateWorkItem,
-  upsertBudget, usageSummary, type IntegrationProvider,
+  upsertBudget, usageSummary, workItemPageUrls, type IntegrationProvider,
 } from './store.js';
 import { publishContentAction, rollbackContentAction, stageContentAction, syncIntegrationById, verifyContentAction } from './connectors.js';
 import { auditContentInventory } from './content-audit.js';
@@ -44,6 +45,29 @@ function serviceContext(req: FastifyRequest, reply: FastifyReply, scope: string)
 function csvCell(value: unknown): string {
   const text = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+export function pageBelongsToSite(pageUrl: string, site: { domain: string; gsc_url: string }): boolean {
+  let page: URL;
+  try { page = new URL(pageUrl); } catch { return false; }
+  if (!['http:', 'https:'].includes(page.protocol)) return false;
+  if (site.gsc_url.startsWith('sc-domain:')) {
+    const root = site.gsc_url.slice('sc-domain:'.length).trim().toLowerCase().replace(/^www\./, '');
+    const host = page.hostname.toLowerCase().replace(/^www\./, '');
+    return !!root && (host === root || host.endsWith(`.${root}`));
+  }
+  try {
+    const property = new URL(site.gsc_url || (/^https?:\/\//i.test(site.domain) ? site.domain : `https://${site.domain}`));
+    const prefixPath = property.pathname.endsWith('/') ? property.pathname : `${property.pathname}/`;
+    return page.origin === property.origin && (property.pathname === '/' || page.pathname === property.pathname || page.pathname.startsWith(prefixPath));
+  } catch {
+    const host = site.domain.replace(/^https?:\/\//i, '').split('/')[0].toLowerCase().replace(/^www\./, '');
+    return page.hostname.toLowerCase().replace(/^www\./, '') === host;
+  }
 }
 
 export function registerPlatformRoutes(app: FastifyInstance): void {
@@ -92,12 +116,18 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
     return listWorkItems(workspace(req), { status: query.status, assignee: query.assignee, includeSnoozed: query.include_snoozed === 'true', limit: Number(query.limit) || 200 });
   });
   app.post('/api/platform/work-items', async (req, reply) => {
-    const ws = workspace(req); const body = (req.body ?? {}) as { site_id?: string; title?: string; description?: string; severity?: string; assignee_user_id?: string; due_at?: string; deep_link?: string };
+    const ws = workspace(req); const body = (req.body ?? {}) as { site_id?: string; page_url?: string; title?: string; description?: string; severity?: string; assignee_user_id?: string; due_at?: string; deep_link?: string };
     if (!body.title?.trim()) return reply.code(400).send({ error: 'Title is required.' });
     if (body.severity && !WORK_ITEM_SEVERITIES.includes(body.severity)) return reply.code(400).send({ error: 'Severity is invalid.' });
-    if (body.site_id) assertSite(req, body.site_id);
+    if (body.site_id) {
+      assertSite(req, body.site_id);
+      const site = getSiteById(body.site_id);
+      if (body.page_url && (!site || !pageBelongsToSite(body.page_url, site))) return reply.code(400).send({ error: 'Page URL must belong to the selected website.' });
+    } else if (body.page_url) return reply.code(400).send({ error: 'Choose a website before adding a page URL.' });
     if (body.assignee_user_id && !listWorkspaceMembers(ws).some(member => member.user_id === body.assignee_user_id)) return reply.code(400).send({ error: 'Assignee is not a workspace member.' });
-    return createWorkItem({ workspaceId: ws, siteId: body.site_id, source: 'manual', title: body.title, description: body.description, severity: body.severity, assigneeUserId: body.assignee_user_id, dueAt: body.due_at, deepLink: body.deep_link });
+    return createWorkItem({ workspaceId: ws, siteId: body.site_id, source: 'manual', title: body.title,
+      description: body.description, evidence: body.page_url ? { url: body.page_url } : {}, severity: body.severity,
+      assigneeUserId: body.assignee_user_id, dueAt: body.due_at, deepLink: body.deep_link });
   });
   app.patch('/api/platform/work-items/:id', async (req, reply) => {
     const ws = workspace(req); const body = (req.body ?? {}) as { status?: string; assignee_user_id?: string | null; due_at?: string | null; snoozed_until?: string | null; severity?: string };
@@ -116,6 +146,70 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
     const current = listWorkItems(ws, { includeSnoozed: true, limit: 500 }).filter(item => ids.includes(item.id));
     if (body.preview) return { preview: true, affected: current.length, items: current };
     const changes = body.changes ?? {}; return { updated: bulkUpdateWorkItems(ws, ids, { status: changes.status, assigneeUserId: changes.assignee_user_id, dueAt: changes.due_at, snoozedUntil: changes.snoozed_until, severity: changes.severity }) };
+  });
+
+  app.post('/api/platform/work-items/:id/remediation', async (req, reply) => {
+    const ws = workspace(req); const actor = user(req); const id = (req.params as { id: string }).id;
+    const body = (req.body ?? {}) as { action?: 'mark_fixed' | 'google_validate' | 'resolve' | 'reopen'; note?: string; page_url?: string };
+    if (!body.action || !['mark_fixed', 'google_validate', 'resolve', 'reopen'].includes(body.action)) {
+      return reply.code(400).send({ error: 'Choose a supported remediation action.' });
+    }
+    const item = getWorkItem(ws, id);
+    if (!item) return reply.code(404).send({ error: 'Work item not found' });
+    if (item.site_id) assertSite(req, item.site_id);
+    const now = new Date().toISOString();
+    const currentRemediation = recordValue(item.evidence.remediation);
+
+    if (body.action !== 'google_validate') {
+      const status = body.action === 'resolve' ? 'done' : body.action === 'reopen' ? 'open' : 'in_progress';
+      const fixStatus = body.action === 'resolve' ? 'resolved' : body.action === 'reopen' ? 'needs_attention' : 'deployed';
+      const eventKey = body.action === 'resolve' ? 'resolved' : body.action === 'reopen' ? 'reopened' : 'fixed';
+      const remediation = { ...currentRemediation, fix_status: fixStatus, [`${eventKey}_at`]: now, [`${eventKey}_by`]: actor.id,
+        ...(body.note?.trim() ? { note: body.note.trim() } : {}) };
+      const updated = updateWorkItem(ws, id, { status, evidence: { remediation } })!;
+      const title = body.action === 'resolve' ? 'Action resolved' : body.action === 'reopen' ? 'Action reopened' : 'Fix marked as deployed';
+      addAnnotation({ workspaceId: ws, siteId: item.site_id, userId: actor.id, kind: 'remediation', title: `${title}: ${item.title}`,
+        note: body.note?.trim() || null, metadata: { work_item_id: id, page_url: item.page_url, action: body.action } });
+      recordAuditEvent({ actorUserId: actor.id, targetUserId: actor.id, workspaceId: ws, action: `work_item.${body.action}`,
+        detail: { work_item_id: id, site_id: item.site_id, page_url: item.page_url } });
+      return { item: updated, remediation: updated.evidence.remediation };
+    }
+
+    if (!item.site_id) return reply.code(422).send({ error: 'This is a workspace-wide action. Link it to a website and page before checking Google.' });
+    const site = getSiteById(item.site_id);
+    if (!site) return reply.code(404).send({ error: 'Website not found' });
+    if (!site.google_account_id) return reply.code(422).send({ error: 'Connect a Google account to this website before checking Search Console.' });
+    const pageUrl = body.page_url || workItemPageUrls(item)[0];
+    if (!pageUrl) return reply.code(422).send({ error: 'No page URL is attached to this action.' });
+    if (!pageBelongsToSite(pageUrl, site)) return reply.code(400).send({ error: 'Page URL must belong to the action website.' });
+
+    assertWithinBudget({ workspaceId: ws, userId: actor.id, provider: 'google_search_console', quantity: 2 });
+    const parsedLimit = Number.parseInt(process.env.GSC_INSPECTION_DAILY_LIMIT ?? '', 10);
+    const dailyLimit = Number.isFinite(parsedLimit) ? Math.max(parsedLimit, 1) : 2000;
+    const quotaBucket = `property:${site.gsc_url}`; const usedToday = getQuotaUsage('gsc_inspection', quotaBucket);
+    if (usedToday >= dailyLimit) return reply.code(429).send({ error: `Search Console inspection limit reached for this property today (${usedToday}/${dailyLimit}).` });
+
+    const sitemap = await submitSitemapToGSC(site.google_account_id, site.gsc_url, site.sitemap_url);
+    recordUsage({ workspace_id: ws, user_id: actor.id, provider: 'google_search_console', operation: 'sitemap_resubmit', quantity: 1,
+      unit: 'request', estimated_cost: 0, metadata: { work_item_id: id, site_id: site.id, success: sitemap.success, status_code: sitemap.statusCode } });
+    const inspection = await inspectGoogleUrl(site.google_account_id, site.gsc_url, pageUrl);
+    recordUsage({ workspace_id: ws, user_id: actor.id, provider: 'google_search_console', operation: 'url_inspection', quantity: 1,
+      unit: 'request', estimated_cost: 0, metadata: { work_item_id: id, site_id: site.id, page_url: pageUrl, success: inspection.success, status_code: inspection.statusCode } });
+    if (inspection.success) {
+      incrementQuota('gsc_inspection', quotaBucket);
+      upsertUrlState({ url: pageUrl, site_id: site.id, gsc_indexing_state: inspection.indexingState, gsc_last_inspected: now });
+    }
+    const verified = inspection.success && inspection.verdict === 'PASS';
+    const google = { checked_at: now, page_url: pageUrl, sitemap, inspection, verified };
+    const remediation = { ...currentRemediation, fix_status: verified ? 'verified' : 'needs_attention', google };
+    const updated = updateWorkItem(ws, id, { status: item.status === 'open' ? 'in_progress' : item.status, evidence: { remediation } })!;
+    addAnnotation({ workspaceId: ws, siteId: site.id, userId: actor.id, kind: 'google_verification',
+      title: `${verified ? 'Google verification passed' : 'Google verification needs attention'}: ${item.title}`,
+      note: inspection.success ? `${inspection.coverageState || inspection.indexingState} · ${pageUrl}` : `${inspection.message || 'Inspection failed'} · ${pageUrl}`,
+      metadata: { work_item_id: id, page_url: pageUrl, verdict: inspection.verdict, sitemap_submitted: sitemap.success } });
+    recordAuditEvent({ actorUserId: actor.id, targetUserId: actor.id, workspaceId: ws, action: 'work_item.google_validate',
+      detail: { work_item_id: id, site_id: site.id, page_url: pageUrl, verdict: inspection.verdict, verified, sitemap_submitted: sitemap.success } });
+    return { item: updated, remediation, google, verified };
   });
 
   app.get('/api/platform/timeline', async req => listTimeline(workspace(req), Number((req.query as { limit?: string }).limit) || 200));

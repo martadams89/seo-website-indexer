@@ -240,8 +240,15 @@ export interface WorkItem {
   id: string; workspace_id: string; site_id: string | null; source: string; source_ref: string | null;
   title: string; description: string | null; evidence: Record<string, unknown>; severity: 'critical' | 'high' | 'medium' | 'low';
   status: 'open' | 'in_progress' | 'done' | 'dismissed'; assignee_user_id: string | null;
-  assignee_name?: string | null; assignee_email?: string | null; due_at: string | null; snoozed_until: string | null;
+  assignee_name?: string | null; assignee_email?: string | null; site_name?: string | null; site_domain?: string | null;
+  page_url?: string | null; google_connected?: number; due_at: string | null; snoozed_until: string | null;
   deep_link: string | null; created_at: string; updated_at: string; resolved_at: string | null;
+}
+export interface WorkItemRemediationResult {
+  item: WorkItem; remediation: Record<string, unknown>; verified?: boolean;
+  google?: { checked_at: string; page_url: string; verified: boolean; sitemap: { success: boolean; statusCode: number; message?: string };
+    inspection: { success: boolean; statusCode: number; verdict: string; indexingState: string; coverageState?: string; pageFetchState?: string;
+      robotsTxtState?: string; lastCrawlTime?: string; googleCanonical?: string; userCanonical?: string; message?: string } };
 }
 export interface ReportTemplate {
   id: string; workspace_id: string; name: string; sections: string[];
@@ -434,6 +441,8 @@ export const api = {
   createWorkItem: (data: Partial<WorkItem> & { title: string }) => apiFetch<WorkItem>('/api/platform/work-items', { method: 'POST', body: JSON.stringify(data) }),
   updateWorkItem: (id: string, data: { status?: string; assignee_user_id?: string | null; due_at?: string | null; snoozed_until?: string | null; severity?: string }) =>
     apiFetch<WorkItem>(`/api/platform/work-items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  remediateWorkItem: (id: string, data: { action: 'mark_fixed' | 'google_validate' | 'resolve' | 'reopen'; note?: string; page_url?: string }) =>
+    apiFetch<WorkItemRemediationResult>(`/api/platform/work-items/${id}/remediation`, { method: 'POST', body: JSON.stringify(data) }),
   bulkWorkItems: (ids: string[], changes: Record<string, unknown>, preview = false) =>
     apiFetch<{ preview?: boolean; affected?: number; items?: WorkItem[]; updated?: WorkItem[] }>('/api/platform/work-items/bulk', { method: 'POST', body: JSON.stringify({ ids, changes, preview }) }),
   getTimeline: () => apiFetch<Array<{ id: string; site_id: string | null; kind: string; title: string; note: string | null; event_at: string; metadata: Record<string, unknown> }>>('/api/platform/timeline'),

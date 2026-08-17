@@ -211,8 +211,32 @@ export interface WorkItem {
   id: string; workspace_id: string; site_id: string | null; source: string; source_ref: string | null;
   title: string; description: string | null; evidence: Record<string, unknown>; severity: string;
   status: string; assignee_user_id: string | null; assignee_name?: string | null; assignee_email?: string | null;
+  site_name?: string | null; site_domain?: string | null; page_url?: string | null; google_connected?: number;
   due_at: string | null; snoozed_until: string | null; deep_link: string | null;
   created_at: string; updated_at: string; resolved_at: string | null;
+}
+
+function validPageUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+  } catch { return null; }
+}
+
+/** Return every page URL carried by a work item's normalized evidence. */
+export function workItemPageUrls(item: Pick<WorkItem, 'evidence' | 'source_ref'>): string[] {
+  const evidence = item.evidence ?? {};
+  const candidates: unknown[] = [evidence.url, evidence.target];
+  if (Array.isArray(evidence.urls)) candidates.push(...evidence.urls);
+  candidates.push(item.source_ref);
+  return [...new Set(candidates.map(validPageUrl).filter((value): value is string => !!value))];
+}
+
+function hydrateWorkItem(row: Omit<WorkItem, 'evidence' | 'page_url'> & { evidence: string }): WorkItem {
+  const evidence = parseJson<Record<string, unknown>>(row.evidence, {});
+  const item = { ...row, evidence } as WorkItem;
+  return { ...item, page_url: workItemPageUrls(item)[0] ?? null };
 }
 
 export function createWorkItem(input: {
@@ -235,9 +259,11 @@ export function createWorkItem(input: {
 }
 
 export function getWorkItem(workspaceId: string, id: string): WorkItem | null {
-  const row = getDb().prepare(`SELECT wi.*,u.name assignee_name,u.email assignee_email FROM work_items wi
-    LEFT JOIN users u ON u.id=wi.assignee_user_id WHERE wi.workspace_id=? AND wi.id=?`).get(workspaceId, id) as (Omit<WorkItem, 'evidence'> & { evidence: string }) | undefined;
-  return row ? { ...row, evidence: parseJson(row.evidence, {}) } : null;
+  const row = getDb().prepare(`SELECT wi.*,u.name assignee_name,u.email assignee_email,
+      s.name site_name,s.domain site_domain,CASE WHEN s.google_account_id IS NULL THEN 0 ELSE 1 END google_connected
+    FROM work_items wi LEFT JOIN users u ON u.id=wi.assignee_user_id LEFT JOIN sites s ON s.id=wi.site_id
+    WHERE wi.workspace_id=? AND wi.id=?`).get(workspaceId, id) as (Omit<WorkItem, 'evidence' | 'page_url'> & { evidence: string }) | undefined;
+  return row ? hydrateWorkItem(row) : null;
 }
 
 export function listWorkItems(workspaceId: string, filters: { status?: string; assignee?: string; includeSnoozed?: boolean; limit?: number } = {}): WorkItem[] {
@@ -246,22 +272,25 @@ export function listWorkItems(workspaceId: string, filters: { status?: string; a
   if (filters.assignee) { clauses.push('wi.assignee_user_id=?'); params.push(filters.assignee); }
   if (!filters.includeSnoozed) clauses.push("(wi.snoozed_until IS NULL OR julianday(wi.snoozed_until) <= julianday('now'))");
   params.push(Math.min(Math.max(filters.limit ?? 200, 1), 500));
-  return (getDb().prepare(`SELECT wi.*,u.name assignee_name,u.email assignee_email FROM work_items wi
-    LEFT JOIN users u ON u.id=wi.assignee_user_id WHERE ${clauses.join(' AND ')}
+  return (getDb().prepare(`SELECT wi.*,u.name assignee_name,u.email assignee_email,
+      s.name site_name,s.domain site_domain,CASE WHEN s.google_account_id IS NULL THEN 0 ELSE 1 END google_connected
+    FROM work_items wi LEFT JOIN users u ON u.id=wi.assignee_user_id LEFT JOIN sites s ON s.id=wi.site_id WHERE ${clauses.join(' AND ')}
     ORDER BY CASE wi.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, wi.created_at DESC LIMIT ?`)
-    .all(...params) as Array<Omit<WorkItem, 'evidence'> & { evidence: string }>).map(row => ({ ...row, evidence: parseJson(row.evidence, {}) }));
+    .all(...params) as Array<Omit<WorkItem, 'evidence' | 'page_url'> & { evidence: string }>).map(hydrateWorkItem);
 }
 
 export function updateWorkItem(workspaceId: string, id: string, changes: {
   status?: string; assigneeUserId?: string | null; dueAt?: string | null; snoozedUntil?: string | null; severity?: string;
+  evidence?: Record<string, unknown>;
 }): WorkItem | null {
   const item = getWorkItem(workspaceId, id); if (!item) return null;
   const status = changes.status ?? item.status;
-  getDb().prepare(`UPDATE work_items SET status=?,assignee_user_id=?,due_at=?,snoozed_until=?,severity=?,
+  const evidence = changes.evidence ? { ...item.evidence, ...changes.evidence } : item.evidence;
+  getDb().prepare(`UPDATE work_items SET status=?,assignee_user_id=?,due_at=?,snoozed_until=?,severity=?,evidence=?,
     resolved_at=CASE WHEN ? IN ('done','dismissed') THEN datetime('now') ELSE NULL END,updated_at=datetime('now')
     WHERE workspace_id=? AND id=?`).run(status, changes.assigneeUserId === undefined ? item.assignee_user_id : changes.assigneeUserId,
       changes.dueAt === undefined ? item.due_at : changes.dueAt, changes.snoozedUntil === undefined ? item.snoozed_until : changes.snoozedUntil,
-      changes.severity ?? item.severity, status, workspaceId, id);
+      changes.severity ?? item.severity, JSON.stringify(evidence), status, workspaceId, id);
   void dispatchWorkspaceEvent(workspaceId, 'work_item.updated', { id, status });
   return getWorkItem(workspaceId, id);
 }

@@ -147,9 +147,25 @@ describe('cross-tenant HTTP authorization', () => {
     expect(await json<unknown[]>(await req('GET', '/api/platform/integrations', { sid: userSid, ws: userWs }))).toHaveLength(0);
 
     const work = await req('POST', '/api/platform/work-items', {
-      sid: userSid, ws: adminWs, body: { title: 'Review organic visibility movement', severity: 'high', assignee_user_id: createdUser.id },
+      sid: userSid, ws: adminWs, body: { site_id: siteId, page_url: 'https://adminsite.com/pricing',
+        title: 'Review organic visibility movement', severity: 'high', assignee_user_id: createdUser.id },
     });
     expect(work.status).toBe(200);
+    const workItem = await json<{ id: string; status: string; site_name: string; page_url: string; evidence: Record<string, unknown> }>(work);
+    expect(workItem).toMatchObject({ site_name: 'Admin Site', page_url: 'https://adminsite.com/pricing' });
+    const fixed = await req('POST', `/api/platform/work-items/${workItem.id}/remediation`, {
+      sid: userSid, ws: adminWs, body: { action: 'mark_fixed', note: 'Production change deployed' },
+    });
+    expect(fixed.status).toBe(200);
+    const fixedItem = (await json<{ item: { status: string; evidence: { remediation: { fix_status: string; note: string } } } }>(fixed)).item;
+    expect(fixedItem.status).toBe('in_progress');
+    expect(fixedItem.evidence.remediation).toMatchObject({ fix_status: 'deployed', note: 'Production change deployed' });
+    expect((await req('POST', `/api/platform/work-items/${workItem.id}/remediation`, {
+      sid: userSid, ws: adminWs, body: { action: 'google_validate' },
+    })).status).toBe(422);
+    expect((await req('POST', `/api/platform/work-items/${workItem.id}/remediation`, {
+      sid: userSid, ws: userWs, body: { action: 'resolve' },
+    })).status).toBe(404);
     expect(await json<unknown[]>(await req('GET', '/api/platform/work-items', { sid: userSid, ws: userWs }))).toHaveLength(0);
 
     // Service tokens are one-time plaintext credentials, scoped to both a
