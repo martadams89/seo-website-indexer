@@ -147,13 +147,19 @@ export function recordMetric(input: Omit<MetricObservation, 'id' | 'created_at' 
       provenance: JSON.stringify(input.provenance ?? {}) });
 }
 
-export function listMetrics(workspaceId: string, filters: {
-  source?: string; metric?: string; siteId?: string; from?: string; to?: string; limit?: number;
+export interface MetricSiteScope {
+  siteId?: string;
+  workspaceOnly?: boolean;
+}
+
+export function listMetrics(workspaceId: string, filters: MetricSiteScope & {
+  source?: string; metric?: string; from?: string; to?: string; limit?: number;
 } = {}): MetricObservation[] {
   const clauses = ['workspace_id = ?']; const params: unknown[] = [workspaceId];
   if (filters.source) { clauses.push('source = ?'); params.push(filters.source); }
   if (filters.metric) { clauses.push('metric = ?'); params.push(filters.metric); }
-  if (filters.siteId) { clauses.push('site_id = ?'); params.push(filters.siteId); }
+  if (filters.workspaceOnly) clauses.push('site_id IS NULL');
+  else if (filters.siteId) { clauses.push('site_id = ?'); params.push(filters.siteId); }
   if (filters.from) { clauses.push('observed_at >= ?'); params.push(filters.from); }
   if (filters.to) { clauses.push('observed_at <= ?'); params.push(filters.to); }
   params.push(Math.min(Math.max(filters.limit ?? 500, 1), 5000));
@@ -170,15 +176,18 @@ export interface MetricForecast {
 /** Transparent baseline forecast: ordinary least squares over daily totals,
  * with a 90% residual band. It is intentionally explainable and is hidden
  * until at least seven observations exist. */
-export function forecastMetrics(workspaceId: string, horizonDays = 30): MetricForecast[] {
+export function forecastMetrics(workspaceId: string, horizonDays = 30, scope: MetricSiteScope = {}): MetricForecast[] {
   const horizon = Math.min(Math.max(Math.round(horizonDays), 7), 90);
   // Only additive operational totals are meaningful when dimensions are
   // summed. Scores, positions, rates and latency snapshots must never be
   // projected as if adding mobile + desktop or page-level readings made a KPI.
+  const siteClause = scope.workspaceOnly ? 'AND site_id IS NULL' : scope.siteId ? 'AND site_id=?' : '';
+  const params: unknown[] = [workspaceId];
+  if (scope.siteId && !scope.workspaceOnly) params.push(scope.siteId);
   const rows = getDb().prepare(`SELECT source,metric,unit,substr(observed_at,1,10) day,SUM(value) value
-    FROM metric_observations WHERE workspace_id=? AND observed_at>=datetime('now','-120 days')
+    FROM metric_observations WHERE workspace_id=? ${siteClause} AND observed_at>=datetime('now','-120 days')
     AND metric IN ('sessions','conversions','revenue','visits','pageviews','edge_requests','edge_bytes','edge_visits','requests','bytes')
-    GROUP BY source,metric,unit,substr(observed_at,1,10) ORDER BY source,metric,unit,day`).all(workspaceId) as Array<{ source: string; metric: string; unit: string | null; day: string; value: number }>;
+    GROUP BY source,metric,unit,substr(observed_at,1,10) ORDER BY source,metric,unit,day`).all(...params) as Array<{ source: string; metric: string; unit: string | null; day: string; value: number }>;
   const groups = new Map<string, typeof rows>();
   for (const row of rows) { const key = `${row.source}\n${row.metric}\n${row.unit ?? ''}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
   const forecasts: MetricForecast[] = [];
@@ -540,14 +549,17 @@ export function updateContentAction(workspaceId: string, id: string, changes: { 
   return getContentAction(workspaceId, id);
 }
 
-export function platformOverview(workspaceId: string): Record<string, unknown> {
+export function platformOverview(workspaceId: string, scope: MetricSiteScope = {}): Record<string, unknown> {
   const db = getDb();
+  const siteClause = scope.workspaceOnly ? 'AND site_id IS NULL' : scope.siteId ? 'AND site_id=?' : '';
+  const scopedParams = () => scope.siteId && !scope.workspaceOnly ? [workspaceId, scope.siteId] : [workspaceId];
   const integrationRows = db.prepare(`SELECT provider,status,COUNT(*) count,MAX(last_sync_at) last_sync_at FROM integrations
-    WHERE workspace_id=? GROUP BY provider,status ORDER BY provider`).all(workspaceId);
-  const work = db.prepare(`SELECT status,severity,COUNT(*) count FROM work_items WHERE workspace_id=? GROUP BY status,severity`).all(workspaceId);
+    WHERE workspace_id=? ${siteClause} GROUP BY provider,status ORDER BY provider`).all(...scopedParams());
+  const work = db.prepare(`SELECT status,severity,COUNT(*) count FROM work_items WHERE workspace_id=? ${siteClause} GROUP BY status,severity`).all(...scopedParams());
   const freshness = db.prepare(`SELECT source,MAX(observed_at) observed_at,COUNT(*) observations FROM metric_observations
-    WHERE workspace_id=? GROUP BY source ORDER BY source`).all(workspaceId);
-  const actions = db.prepare(`SELECT status,COUNT(*) count FROM content_actions WHERE workspace_id=? GROUP BY status`).all(workspaceId);
+    WHERE workspace_id=? ${siteClause} GROUP BY source ORDER BY source`).all(...scopedParams());
+  const actions = db.prepare(`SELECT status,COUNT(*) count FROM content_actions WHERE workspace_id=? ${siteClause} GROUP BY status`).all(...scopedParams());
   return { generated_at: new Date().toISOString(), integrations: integrationRows, work_items: work, freshness, content_actions: actions,
-    budgets: budgetStatus(workspaceId), usage: usageSummary(workspaceId), forecasts: forecastMetrics(workspaceId) };
+    budgets: budgetStatus(workspaceId), usage: usageSummary(workspaceId), forecasts: forecastMetrics(workspaceId, 30, scope),
+    scope: { mode: scope.workspaceOnly ? 'workspace' : scope.siteId ? 'site' : 'all', site_id: scope.siteId ?? null } };
 }

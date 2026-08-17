@@ -52,5 +52,7 @@ jobs:
         run: npm run test:ui
       - name: Integration guide contract
         run: npm run test:integrations
+      - name: Unified Intelligence scope contract
+        run: npm run test:intelligence
       - name: Typecheck & build
         run: npm run build

@@ -64,6 +64,39 @@ describe('organic operations platform', () => {
     expect(reopened.id).not.toBe(first.id);
   });
 
+  it('keeps intelligence readings, freshness, and forecasts isolated by website scope', () => {
+    const { workspace } = tenant('site-intelligence');
+    const firstSite = `site-${randomUUID()}`; const secondSite = `site-${randomUUID()}`;
+    database.upsertSite({ id: firstSite, name: 'Alpha', domain: `${firstSite}.example.com`, sitemap_url: `https://${firstSite}.example.com/sitemap.xml`, gsc_url: `sc-domain:${firstSite}.example.com`, enabled: 1, workspace_id: workspace.id });
+    database.upsertSite({ id: secondSite, name: 'Beta', domain: `${secondSite}.example.com`, sitemap_url: `https://${secondSite}.example.com/sitemap.xml`, gsc_url: `sc-domain:${secondSite}.example.com`, enabled: 1, workspace_id: workspace.id });
+    for (let index = 0; index < 10; index++) {
+      const observed = new Date(Date.now() - (9 - index) * 86_400_000).toISOString();
+      store.recordMetric({ workspace_id: workspace.id, site_id: firstSite, source: 'ga4', metric: 'sessions', dimension: '', value: 10 + index, unit: 'count', observed_at: observed, provenance: {} });
+      store.recordMetric({ workspace_id: workspace.id, site_id: secondSite, source: 'ga4', metric: 'sessions', dimension: '', value: 100 + index, unit: 'count', observed_at: observed, provenance: {} });
+      store.recordMetric({ workspace_id: workspace.id, site_id: null, source: 'ga4', metric: 'sessions', dimension: '', value: 1000 + index, unit: 'count', observed_at: observed, provenance: {} });
+    }
+
+    expect(store.listMetrics(workspace.id, { siteId: firstSite })).toHaveLength(10);
+    expect(store.listMetrics(workspace.id, { workspaceOnly: true })).toHaveLength(10);
+    expect(store.listMetrics(workspace.id)).toHaveLength(30);
+    const firstForecast = store.forecastMetrics(workspace.id, 30, { siteId: firstSite }).find(row => row.metric === 'sessions');
+    const secondForecast = store.forecastMetrics(workspace.id, 30, { siteId: secondSite }).find(row => row.metric === 'sessions');
+    const workspaceForecast = store.forecastMetrics(workspace.id, 30, { workspaceOnly: true }).find(row => row.metric === 'sessions');
+    const portfolioForecast = store.forecastMetrics(workspace.id).find(row => row.metric === 'sessions');
+    expect(firstForecast?.current).toBe(19);
+    expect(secondForecast?.current).toBe(109);
+    expect(workspaceForecast?.current).toBe(1009);
+    expect(portfolioForecast?.current).toBe(1137);
+
+    const siteOverview = store.platformOverview(workspace.id, { siteId: firstSite }) as { scope: { mode: string; site_id: string }; freshness: Array<{ source: string; observations: number }>; forecasts: Array<{ current: number }> };
+    const workspaceOverview = store.platformOverview(workspace.id, { workspaceOnly: true }) as { scope: { mode: string; site_id: null }; freshness: Array<{ source: string; observations: number }> };
+    expect(siteOverview.scope).toEqual({ mode: 'site', site_id: firstSite });
+    expect(siteOverview.freshness).toEqual([{ source: 'ga4', observed_at: expect.any(String), observations: 10 }]);
+    expect(siteOverview.forecasts[0].current).toBe(19);
+    expect(workspaceOverview.scope).toEqual({ mode: 'workspace', site_id: null });
+    expect(workspaceOverview.freshness[0].observations).toBe(10);
+  });
+
   it('keeps usage append-only while allowing user anonymization and workspace deletion', () => {
     const { user, workspace } = tenant('ledger');
     const id = store.recordUsage({ workspace_id: workspace.id, user_id: user.id, provider: 'openai', operation: 'check', quantity: 2, unit: 'request', estimated_cost: 0.04 });
