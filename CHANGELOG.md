@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/martadams89/seo-website-indexer/compare/v1.33.3...v1.34.0) (2026-08-17)
+
+
+### ✨ Features
+
+* make Action Centre page-level and verifiable ([#277](https://github.com/martadams89/seo-website-indexer/issues/277)) ([653fc6b](https://github.com/martadams89/seo-website-indexer/commit/653fc6b7db206181db8f31c529fcecc1a9ae3038))
+
 ## [1.33.3](https://github.com/martadams89/seo-website-indexer/compare/v1.33.2...v1.33.3) (2026-08-17)
 
 
