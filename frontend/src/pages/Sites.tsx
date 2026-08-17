@@ -275,9 +275,9 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
                         <span className={`badge ${u.gsc_indexing_state.toLowerCase().includes('indexed') && !u.gsc_indexing_state.includes('NOT') ? 'badge-ok' : 'badge-warn'}`}>
                           {u.gsc_indexing_state}
                         </span>
-                      ) : <span className="text-dim" style={{ fontSize: 11 }}>Pending</span>}
+                      ) : <span className="text-dim" style={{ fontSize: 12 }}>Pending</span>}
                       {u.gsc_last_inspected && (
-                        <div className="text-dim" style={{ fontSize: 9, marginTop: 2 }}>
+                        <div className="text-dim" style={{ fontSize: 12, marginTop: 2 }}>
                           {new Date(u.gsc_last_inspected).toLocaleDateString()}
                         </div>
                       )}
@@ -289,7 +289,7 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
                             <span key={st} className="badge">{st.trim()}</span>
                           ))}
                         </div>
-                      ) : <span className="text-dim" style={{ fontSize: 11 }}>—</span>}
+                      ) : <span className="text-dim" style={{ fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <span className={`badge ${u.google_submitted ? 'badge-ok' : ''}`}>G</span>{' '}
@@ -451,7 +451,7 @@ location ~ ^/[a-f0-9]{32}\\.txt$ {
             <li>Expression: <code>(http.request.uri.path eq "/{site.indexNowKey}.txt")</code></li>
             <li>Static redirect → <code>https://YOUR_INDEXER_PUBLIC_URL/{site.indexNowKey}.txt</code> (302)</li>
           </ol>
-          <p className="text-dim" style={{ fontSize: 11 }}>Search engines follow redirects when fetching key files.</p>
+          <p className="text-dim" style={{ fontSize: 12 }}>Search engines follow redirects when fetching key files.</p>
         </div>
       </details>
     </div>
@@ -603,7 +603,7 @@ function AiLlmsSection({ site, onSaved }: { site: Site; onSaved: () => void }) {
           </button>
         )}
       </div>
-      {meta && <div className="text-dim" style={{ fontSize: 11, marginBottom: 6 }}>{meta}</div>}
+      {meta && <div className="text-dim" style={{ fontSize: 12, marginBottom: 6 }}>{meta}</div>}
       <textarea
         className="input"
         style={{ minHeight: 240, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }}
@@ -686,7 +686,7 @@ function DeliveryTab({ site, onSaved }: { site: Site; onSaved: () => void }) {
 
       <h4 className="panel-title" style={{ marginTop: 16 }}>
         <UploadCloud size={13} /> Delivery method
-        <span className="text-dim" style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}>
+        <span className="text-dim" style={{ fontWeight: 400, fontSize: 12, marginLeft: 6 }}>
           used for IndexNow key files{geoManage ? ' and GEO file deploys' : ''}
         </span>
       </h4>
@@ -859,7 +859,7 @@ export default function SitesPage() {
                   >
                     <td>
                       <div style={{ fontWeight: 700 }}>{site.name}</div>
-                      <div className="text-dim" style={{ fontSize: 11 }}>{site.domain}</div>
+                      <div className="text-dim" style={{ fontSize: 12 }}>{site.domain}</div>
                     </td>
                     <td style={{ fontSize: 12 }}>
                       {site.google_account_id
@@ -877,7 +877,7 @@ export default function SitesPage() {
                     <td>
                       {site.robots_txt_status
                         ? <span className={`badge ${site.robots_txt_status === 'ALLOWED' ? 'badge-ok' : 'badge-warn'}`}>robots {site.robots_txt_status.toLowerCase()}</span>
-                        : <span className="text-dim" style={{ fontSize: 11 }}>—</span>}
+                        : <span className="text-dim" style={{ fontSize: 12 }}>—</span>}
                       {' '}
                       {site.llms_txt_status
                         ? <span className={`badge ${site.llms_txt_status === 'OK' ? 'badge-ok' : 'badge-warn'}`}>llms {site.llms_txt_status.toLowerCase()}</span>

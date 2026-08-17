@@ -151,7 +151,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
           {/* Breakdowns */}
           <div className="flex items-center gap-2" style={{ margin: '16px 0 8px', flexWrap: 'wrap' }}>
             <div className="seg">{BREAKDOWNS.map(b => <button key={b.id} className={`seg-btn${breakdown === b.id ? ' active' : ''}`} onClick={() => setBreakdown(b.id)}>{b.label}</button>)}</div>
-            {(breakdown === 'country' || breakdown === 'device' || breakdown === 'searchAppearance') && <span className="text-dim" style={{ fontSize: 11 }}>Google only — Bing exposes no comparable {breakdown === 'searchAppearance' ? 'search appearance' : `traffic-by-${breakdown}`} API.</span>}
+            {(breakdown === 'country' || breakdown === 'device' || breakdown === 'searchAppearance') && <span className="text-dim" style={{ fontSize: 12 }}>Google only — Bing exposes no comparable {breakdown === 'searchAppearance' ? 'search appearance' : `traffic-by-${breakdown}`} API.</span>}
           </div>
 
           {(breakdown === 'query' || breakdown === 'page') ? (
@@ -215,18 +215,18 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
                 {tracked.map(t => (
                   <span key={t.id} className="tracked-chip">
                     <button className="tracked-chip-name" onClick={() => openTrend(t.query)}>{t.query}</button>
-                    {t.last_position != null && <span className="text-dim" style={{ fontSize: 10 }}>#{t.last_position.toFixed(1)}</span>}
+                    {t.last_position != null && <span className="text-dim" style={{ fontSize: 12 }}>#{t.last_position.toFixed(1)}</span>}
                     <button className="tracked-chip-x" onClick={() => toggleTrack(t.query)} title="Untrack"><X size={10} /></button>
                   </span>
                 ))}
               </div>
-              <p className="text-dim" style={{ fontSize: 11, marginTop: 6 }}>Tracked queries raise an alert if their Google position drops ≥3 places (checked after each run).</p>
+              <p className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>Tracked queries raise an alert if their Google position drops ≥3 places (checked after each run).</p>
             </div>
           )}
         </>
       )}
 
-      <p className="text-dim" style={{ fontSize: 11, marginTop: 10 }}>
+      <p className="text-dim" style={{ fontSize: 12, marginTop: 10 }}>
         Live from the Search Console &amp; Bing Webmaster APIs. Google lags ~2 days (~16 months history); Bing is shorter.
         Week-over-week deltas and query trends come from cached rollups, so they fill in over the first few days.
       </p>
@@ -238,7 +238,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
               : trend.length < 2 ? <div className="empty-note" style={{ marginTop: 12 }}>Not enough history yet — trends build over the days after this query first shows.</div>
               : (
               <div style={{ marginTop: 12 }}>
-                <div className="text-dim" style={{ fontSize: 11, marginBottom: 4 }}>Average Google position (lower is better)</div>
+                <div className="text-dim" style={{ fontSize: 12, marginBottom: 4 }}>Average Google position (lower is better)</div>
                 <MetricChart points={trend.map(p => ({ date: p.day, value: p.position }))} format={fmtPos} color="var(--warn)" height={160} />
                 <div className="flex gap-2" style={{ marginTop: 10 }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => toggleTrack(trendQuery)}>

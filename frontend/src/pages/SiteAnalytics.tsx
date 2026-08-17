@@ -257,7 +257,7 @@ export default function SiteAnalyticsPage() {
               </tbody>
             </table>
           </div>
-          <div className="text-dim" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>
             These are IndexNow or Bing submission failures for URLs in the current sitemap. JSON-LD detection is reported separately and is not schema validation.
           </div>
         </div>
@@ -336,7 +336,7 @@ export default function SiteAnalyticsPage() {
                 {agent.history.length > 1 && (
                   <div style={{ marginTop: 8 }}>
                     <Sparkline points={agent.history.map(h => h.score)} width={280} height={40} stroke={scoreColor(cur.score)} />
-                    <span className="text-dim" style={{ fontSize: 11 }}> score over {agent.history.length} snapshots</span>
+                    <span className="text-dim" style={{ fontSize: 12 }}> score over {agent.history.length} snapshots</span>
                   </div>
                 )}
               </div>
@@ -424,7 +424,7 @@ export default function SiteAnalyticsPage() {
               llmsTab === 'generated' ? llms.generated :
               (llms.robotsLive.text || '(not served)')
             }</pre>
-            <div className="text-dim" style={{ fontSize: 11, marginTop: 6 }}>
+            <div className="text-dim" style={{ fontSize: 12, marginTop: 6 }}>
               {llms.lint.stats.bytes.toLocaleString()} bytes · {llms.lint.stats.links} links · {llms.lint.stats.sections} sections
             </div>
           </div>
@@ -455,7 +455,7 @@ export default function SiteAnalyticsPage() {
                     <tr key={n}>
                       <td className="cell-url">{i.url.replace(/^https?:\/\/[^/]+/, '')}</td>
                       <td><span className={`badge ${i.kind === 'broken' ? 'badge-error' : 'badge-warn'}`}>{i.kind}</span></td>
-                      <td style={{ fontSize: 11 }}>{i.detail}</td>
+                      <td style={{ fontSize: 12 }}>{i.detail}</td>
                     </tr>
                   ))}
                 </tbody>

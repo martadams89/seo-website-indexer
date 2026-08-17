@@ -95,11 +95,11 @@ export function MetricChart({ points, color = 'var(--accent, #7c6cf5)', format =
         {ticks.map((t, i) => (
           <g key={i}>
             <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} />
-            <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={9} fill="var(--text-dim)">{format(t)}</text>
+            <text x={padL - 6} y={y(t) + 3} textAnchor="end" fontSize={12} fill="var(--text-dim)">{format(t)}</text>
           </g>
         ))}
         {points.map((p, i) => i % everyN === 0 && (
-          <text key={i} x={x(i)} y={height - 8} textAnchor="middle" fontSize={9} fill="var(--text-dim)">{p.date.slice(5)}</text>
+          <text key={i} x={x(i)} y={height - 8} textAnchor="middle" fontSize={12} fill="var(--text-dim)">{p.date.slice(5)}</text>
         ))}
         <path d={area} fill={color} opacity={0.12} />
         <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />

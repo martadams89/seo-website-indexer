@@ -38,7 +38,7 @@ export function ModelPicker() {
     <div className="card mt-4">
       <div className="card-title">
         <Bot size={13} /> AI models
-        {loading && <span className="text-dim" style={{ fontSize: 11, fontWeight: 400 }}> · probing providers…</span>}
+        {loading && <span className="text-dim" style={{ fontSize: 12, fontWeight: 400 }}> · probing providers…</span>}
       </div>
       <p className="text-dim" style={{ fontSize: 12, margin: '0 0 10px' }}>
         Which model each provider uses (for AI citation checks and llms.txt generation). Probed live and defaulted to the

@@ -93,7 +93,7 @@ export function QuotaWidget({ siteNames }: Props) {
             const b = bar(p.count, quota.gsc_inspection.perPropertyLimit);
             return (
               <div key={i} style={{ marginTop: 4 }}>
-                <div className="flex items-center justify-between" style={{ fontSize: 11 }}>
+                <div className="flex items-center justify-between" style={{ fontSize: 12 }}>
                   <span className="truncate text-dim" style={{ maxWidth: 240 }}>{label(p.bucket, 'gsc_inspection')}</span>
                   <span className="text-dim">{p.count} / {quota.gsc_inspection.perPropertyLimit}</span>
                 </div>
@@ -121,7 +121,7 @@ export function QuotaWidget({ siteNames }: Props) {
             const b = bar(p.count, quota.indexnow.perSiteLimit);
             return (
               <div key={i} style={{ marginTop: 4 }}>
-                <div className="flex items-center justify-between" style={{ fontSize: 11 }}>
+                <div className="flex items-center justify-between" style={{ fontSize: 12 }}>
                   <span className="truncate text-dim" style={{ maxWidth: 240 }}>{label(p.bucket, 'indexnow')}</span>
                   <span className="text-dim">{p.count.toLocaleString()} / {quota.indexnow.perSiteLimit.toLocaleString()}</span>
                 </div>
