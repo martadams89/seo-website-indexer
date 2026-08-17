@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/martadams89/seo-website-indexer/compare/v1.29.0...v1.30.0) (2026-08-17)
+
+
+### ✨ Features
+
+* **ui:** overhaul shared dialog system ([#263](https://github.com/martadams89/seo-website-indexer/issues/263)) ([118b6cc](https://github.com/martadams89/seo-website-indexer/commit/118b6ccbf4bd729dda042e5304b69e9d63bce48f))
+
 ## [1.29.0](https://github.com/martadams89/seo-website-indexer/compare/v1.28.0...v1.29.0) (2026-08-17)
 
 
