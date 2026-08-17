@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, Bot, CalendarClock, CheckCircle2, CircleHelp,
-  ExternalLink, Globe2, KeyRound, Library, Loader2, MessageSquare, Pencil, Play, Plus,
-  Save, Search, Send, Settings2, Sparkles, Target, Trash2, TrendingUp, Trophy, XCircle,
+  ExternalLink, Globe2, History, KeyRound, Library, Loader2, MessageSquare, Pencil, Play, Plus,
+  Save, Search, Send, Settings2, Sparkles, Target, Trash2, TrendingUp, Trophy, WandSparkles, XCircle,
 } from 'lucide-react';
-import { api, type AiInsights, type AiPrompt, type AiPromptCategory, type AiResult } from '../api';
+import { api, type AiInsights, type AiMigrationPlan, type AiMigrationPolicy, type AiPrompt, type AiPromptCategory, type AiResult } from '../api';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { useApp } from '../AppContext';
@@ -33,6 +33,10 @@ interface PromptDraft {
 const blankPrompt = (): PromptDraft => ({
   prompt: '', siteId: '', category: 'discovery', group: 'Core buyer journey', locale: 'en-GB',
   device: 'desktop', persona: '', cadence: 'weekly', enabled: true,
+});
+
+const blankUpgrade = (): AiMigrationPolicy => ({
+  group_name: 'Imported citation prompts', locale: 'en-GB', device: 'desktop', cadence: 'manual', categories: {},
 });
 
 function editPromptDraft(prompt: AiPrompt): PromptDraft {
@@ -102,6 +106,7 @@ export default function CitationsPage() {
   const { toast, sites } = useApp();
   const [providers, setProviders] = useState<{ all: string[]; configured: string[] }>({ all: [], configured: [] });
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
+  const [migration, setMigration] = useState<AiMigrationPlan>({ prompts: [], prompt_count: 0, result_count: 0 });
   const [results, setResults] = useState<AiResult[]>([]);
   const [insights, setInsights] = useState<AiInsights>(EMPTY_INSIGHTS);
   const [competitorDomains, setCompetitorDomains] = useState('');
@@ -113,6 +118,9 @@ export default function CitationsPage() {
   const [draft, setDraft] = useState<PromptDraft>(() => blankPrompt());
   const [savingPrompt, setSavingPrompt] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeDraft, setUpgradeDraft] = useState<AiMigrationPolicy>(() => blankUpgrade());
+  const [upgrading, setUpgrading] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AiPrompt | null>(null);
   const [query, setQuery] = useState('');
@@ -120,14 +128,14 @@ export default function CitationsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [providerRows, promptRows, resultRows, nextInsights, config] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults(), api.getAiInsights(), api.getAiConfig()]);
-      setProviders(providerRows); setPrompts(promptRows); setResults(resultRows); setInsights(nextInsights); setCompetitorDomains(config.competitorDomains);
+      const [providerRows, promptRows, resultRows, nextInsights, config, migrationPlan] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults(), api.getAiInsights(), api.getAiConfig(), api.getAiMigration()]);
+      setProviders(providerRows); setPrompts(promptRows); setResults(resultRows); setInsights(nextInsights); setCompetitorDomains(config.competitorDomains); setMigration(migrationPlan);
       setActiveProvider(previous => previous || providerRows.configured[0] || providerRows.all[0] || '');
     } catch (error) { toast('error', error instanceof Error ? error.message : 'Failed to load'); }
   }, [toast]);
   useEffect(() => { load(); }, [load]);
 
-  const anyModalOpen = !!editorPrompt || guideOpen || watchlistOpen || !!deleteTarget || expanded != null;
+  const anyModalOpen = !!editorPrompt || guideOpen || upgradeOpen || watchlistOpen || !!deleteTarget || expanded != null;
   useEffect(() => {
     if (!anyModalOpen) return;
     const previousOverflow = document.body.style.overflow;
@@ -135,7 +143,7 @@ export default function CitationsPage() {
     const close = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (guideOpen && editorPrompt) { setGuideOpen(false); return; }
-      setEditorPrompt(null); setGuideOpen(false); setWatchlistOpen(false); setDeleteTarget(null); setExpanded(null);
+      setEditorPrompt(null); setGuideOpen(false); setUpgradeOpen(false); setWatchlistOpen(false); setDeleteTarget(null); setExpanded(null);
     };
     window.addEventListener('keydown', close);
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', close); };
@@ -159,6 +167,10 @@ export default function CitationsPage() {
   }
   function openEdit(prompt: AiPrompt) { setDraft(editPromptDraft(prompt)); setExpanded(null); setEditorPrompt(prompt); }
   function openResults(id: number) { setActiveProvider(providers.configured[0] || providers.all[0] || ''); setExpanded(id); }
+  function openUpgrade() {
+    setUpgradeDraft({ ...blankUpgrade(), categories: Object.fromEntries(migration.prompts.map(prompt => [String(prompt.id), prompt.suggested_category])) });
+    setUpgradeOpen(true);
+  }
 
   async function savePrompt() {
     if (!draft.prompt.trim() || savingPrompt) return;
@@ -167,7 +179,10 @@ export default function CitationsPage() {
       const schedule = { group_name: draft.group, locale: draft.locale, device: draft.device, persona: draft.persona || null, cadence: draft.cadence };
       if (editorPrompt === 'new') await api.addAiPrompt(draft.prompt.trim(), draft.siteId || null, draft.category, schedule);
       else if (editorPrompt) await api.updateAiPrompt(editorPrompt.id, { prompt: draft.prompt.trim(), site_id: draft.siteId || null, category: draft.category, ...schedule, enabled: draft.enabled ? 1 : 0 });
-      const wasNew = editorPrompt === 'new'; setEditorPrompt(null); await load(); toast('success', wasNew ? 'Prompt added to the library.' : 'Prompt settings updated.');
+      const wasNew = editorPrompt === 'new';
+      const wasLegacy = editorPrompt !== 'new' && !!editorPrompt && editorPrompt.schema_version < 2;
+      setEditorPrompt(null); await load();
+      toast('success', wasNew ? 'Prompt added to the library.' : wasLegacy ? 'Prompt upgraded and settings saved. Historical answers were preserved.' : 'Prompt settings updated.');
     } catch (error) { toast('error', error instanceof Error ? error.message : 'Could not save prompt'); }
     setSavingPrompt(false);
   }
@@ -189,6 +204,16 @@ export default function CitationsPage() {
     catch (error) { toast('error', error instanceof Error ? error.message : 'Could not save competitors'); }
     setSavingConfig(false);
   }
+  async function upgradePrompts() {
+    if (upgrading) return;
+    setUpgrading(true);
+    try {
+      const result = await api.upgradeAiPrompts(upgradeDraft);
+      setUpgradeOpen(false); await load();
+      toast('success', `${result.prompts_upgraded} legacy prompt${result.prompts_upgraded === 1 ? '' : 's'} upgraded; ${result.results_preserved} historical answer${result.results_preserved === 1 ? '' : 's'} preserved.`);
+    } catch (error) { toast('error', error instanceof Error ? error.message : 'Could not upgrade prompts'); }
+    setUpgrading(false);
+  }
 
   return <div className="ops-page citations-page">
     <header className="ops-page-header citations-header">
@@ -197,6 +222,8 @@ export default function CitationsPage() {
     </header>
 
     {running !== null && <div className="alert alert-info" role="status"><div className="alert-content citations-run-status"><Loader2 size={14} className="spin"/><span>Querying {running === 'all' ? 'the prompt library across every configured provider' : 'this prompt across configured providers'}… live searches can take about a minute per provider.</span></div></div>}
+
+    {!!migration.prompt_count && <section className="citation-upgrade-banner" aria-label="Legacy citation upgrade available"><div className="citation-upgrade-icon"><WandSparkles/></div><div><span className="eyebrow">Safe in-place upgrade</span><h2>{migration.prompt_count} legacy citation prompt{migration.prompt_count === 1 ? '' : 's'} can use the new tracking format</h2><p>Add intent, locale, audience, device and cadence without replacing prompt IDs or losing {migration.result_count} stored answer{migration.result_count === 1 ? '' : 's'}.</p></div><button className="btn btn-primary" onClick={openUpgrade}><WandSparkles size={14}/> Review upgrade</button></section>}
 
     <div className="citation-provider-strip"><div><strong>Answer engines</strong><span>{providers.configured.length} of {providers.all.length} ready</span></div>{providers.all.map(provider => <span key={provider} className={providers.configured.includes(provider) ? 'ready' : ''}><i/><Bot size={12}/>{PROVIDER_LABEL[provider] ?? provider}<small>{providers.configured.includes(provider) ? 'Ready' : 'Needs key'}</small></span>)}{noKeys && <button className="btn btn-ghost btn-sm" onClick={() => window.location.assign('/settings')}><KeyRound size={12}/> Configure API keys</button>}</div>
 
@@ -209,7 +236,7 @@ export default function CitationsPage() {
           const checked = providers.all.filter(provider => latest.has(`${prompt.id}:${provider}`)).length;
           const cited = providers.all.filter(provider => latest.get(`${prompt.id}:${provider}`)?.cited).length;
           const site = sites.find(row => row.id === prompt.site_id);
-          return <article key={prompt.id} className={!prompt.enabled ? 'disabled' : ''}><button className="prompt-library-copy" onClick={() => openResults(prompt.id)}><span><span className={`category-chip category-${prompt.category}`}>{CATEGORY_LABEL[prompt.category]}</span>{!prompt.enabled && <span className="prompt-paused">Paused</span>}</span><h3>{prompt.prompt}</h3><small><CalendarClock size={11}/>{prompt.group_name || 'Ungrouped'} · {site?.name || 'Whole workspace'} · {prompt.locale} · {prompt.device} · {prompt.cadence}</small></button><button className="prompt-result-summary" onClick={() => openResults(prompt.id)}><span><strong>{cited}</strong><small>citing</small></span><span><strong>{checked}</strong><small>checked</small></span><div>{providers.all.map(provider => { const result = latest.get(`${prompt.id}:${provider}`); return <i key={provider} className={!result ? '' : result.error ? 'error' : result.cited ? 'cited' : 'checked'} title={`${PROVIDER_LABEL[provider] ?? provider}: ${!result ? 'not run' : result.error ? 'error' : result.cited ? 'cited' : 'not cited'}`}/>})}</div></button><div className="prompt-row-actions"><button className="btn-icon btn-icon-ghost" aria-label={`Run ${prompt.prompt}`} title="Run this prompt" disabled={running !== null || noKeys || !prompt.enabled} onClick={() => run(prompt.id)}>{running === prompt.id ? <Loader2 size={13} className="spin"/> : <Play size={13}/>}</button><button className="btn-icon btn-icon-ghost" aria-label={`Edit ${prompt.prompt}`} title="Edit prompt" onClick={() => openEdit(prompt)}><Pencil size={13}/></button><button className="btn-icon btn-icon-ghost" aria-label={`Delete ${prompt.prompt}`} title="Delete prompt" onClick={() => setDeleteTarget(prompt)}><Trash2 size={13}/></button></div></article>;
+          return <article key={prompt.id} className={!prompt.enabled ? 'disabled' : ''}><button className="prompt-library-copy" onClick={() => openResults(prompt.id)}><span><span className={`category-chip category-${prompt.category}`}>{CATEGORY_LABEL[prompt.category]}</span>{prompt.schema_version < 2 && <span className="prompt-legacy">Legacy</span>}{!prompt.enabled && <span className="prompt-paused">Paused</span>}</span><h3>{prompt.prompt}</h3><small><CalendarClock size={11}/>{prompt.group_name || 'Ungrouped'} · {site?.name || 'Whole workspace'} · {prompt.locale} · {prompt.device} · {prompt.cadence}</small></button><button className="prompt-result-summary" onClick={() => openResults(prompt.id)}><span><strong>{cited}</strong><small>citing</small></span><span><strong>{checked}</strong><small>checked</small></span><div>{providers.all.map(provider => { const result = latest.get(`${prompt.id}:${provider}`); return <i key={provider} className={!result ? '' : result.error ? 'error' : result.cited ? 'cited' : 'checked'} title={`${PROVIDER_LABEL[provider] ?? provider}: ${!result ? 'not run' : result.error ? 'error' : result.cited ? 'cited' : 'not cited'}`}/>})}</div></button><div className="prompt-row-actions"><button className="btn-icon btn-icon-ghost" aria-label={`Run ${prompt.prompt}`} title="Run this prompt" disabled={running !== null || noKeys || !prompt.enabled} onClick={() => run(prompt.id)}>{running === prompt.id ? <Loader2 size={13} className="spin"/> : <Play size={13}/>}</button><button className="btn btn-secondary btn-sm prompt-edit-action" aria-label={`Edit ${prompt.prompt}`} onClick={() => openEdit(prompt)}><Pencil size={12}/> Edit</button><button className="btn-icon btn-icon-ghost" aria-label={`Delete ${prompt.prompt}`} title="Delete prompt" onClick={() => setDeleteTarget(prompt)}><Trash2 size={13}/></button></div></article>;
         })}</div>}
     </section>
 
@@ -222,6 +249,8 @@ export default function CitationsPage() {
     {!!insights.movements.length && <section className="command-panel answer-diff-panel"><div className="command-panel-head"><div><span className="eyebrow">Answer and source diffs</span><h2>What changed since the previous check</h2></div><span className="signal-count">{insights.movements.length} changes</span></div><div className="answer-diff-list">{insights.movements.slice(0, 10).map(item => <button key={`${item.promptId}:${item.provider}`} onClick={() => openResults(item.promptId)}><span className={`movement-dot ${item.cited !== item.previousCited ? item.cited ? 'gained' : 'lost' : 'changed'}`}/><span><strong>{item.prompt}</strong><small>{PROVIDER_LABEL[item.provider] ?? item.provider}{item.cited !== item.previousCited ? ` · citation ${item.cited ? 'gained' : 'lost'}` : item.answerChanged ? ' · answer changed' : ''}</small></span><span>{!!item.addedSources.length && <em>+{item.addedSources.join(', ')}</em>}{!!item.removedSources.length && <em className="removed">−{item.removedSources.join(', ')}</em>}</span></button>)}</div></section>}
 
     {editorPrompt && !guideOpen && <Modal onClose={() => setEditorPrompt(null)} size="xl" className="prompt-editor-modal" eyebrow={editorPrompt === 'new' ? 'Add to the tracking library' : 'Update tracking policy'} title={editorPrompt === 'new' ? 'New buyer question' : 'Edit prompt'} description="Write one natural question, then define where and how it should be tracked." icon={<MessageSquare/>} footer={<><button className="btn btn-ghost" onClick={() => setEditorPrompt(null)}>Cancel</button><button className="btn btn-primary" disabled={!draft.prompt.trim() || savingPrompt} onClick={savePrompt}>{savingPrompt ? <Loader2 size={13} className="spin"/> : <Save size={13}/>} {savingPrompt ? 'Saving…' : editorPrompt === 'new' ? 'Add to library' : 'Save changes'}</button></>}><div className="prompt-editor-layout"><div className="prompt-editor-main"><section><header><span>1</span><div><h3>Buyer question</h3><p>Use the language a real person would type or say.</p></div></header><label>Question<textarea data-autofocus rows={4} value={draft.prompt} onChange={event => setDraft({ ...draft, prompt: event.target.value })} placeholder="What would your buyer ask an AI assistant?"/><small>{draft.prompt.trim().length} characters · one intent per prompt</small></label></section><section><header><span>2</span><div><h3>Intent</h3><p>Categories keep the library balanced across the buyer journey.</p></div></header><div className="prompt-category-picker">{Object.entries(CATEGORY_GUIDE).map(([value, guide]) => <button key={value} className={draft.category === value ? 'active' : ''} onClick={() => setDraft({ ...draft, category: value as AiPromptCategory })}><strong>{guide.label}</strong><span>{guide.purpose}</span></button>)}</div></section><section><header><span>3</span><div><h3>Tracking context</h3><p>Scope the question so repeated checks remain comparable.</p></div></header><div className="form-grid"><label>Website<select value={draft.siteId} onChange={event => setDraft({ ...draft, siteId: event.target.value })}><option value="">Whole workspace</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}</select><small>Use workspace-wide for category or brand-level questions.</small></label><label>Prompt group<input value={draft.group} onChange={event => setDraft({ ...draft, group: event.target.value })} placeholder="Core buyer journey"/></label><label>Locale<input value={draft.locale} onChange={event => setDraft({ ...draft, locale: event.target.value })} placeholder="en-GB"/></label><label>Device<select value={draft.device} onChange={event => setDraft({ ...draft, device: event.target.value })}><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label><label>Persona<input value={draft.persona} onChange={event => setDraft({ ...draft, persona: event.target.value })} placeholder="Optional, e.g. small agency owner"/></label><label>Cadence<select value={draft.cadence} onChange={event => setDraft({ ...draft, cadence: event.target.value as AiPrompt['cadence'] })}><option value="manual">Manual only</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>{editorPrompt !== 'new' && <label className="checkbox-label full"><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })}/> Tracking enabled</label>}</div></section></div><aside className="prompt-editor-guide"><span className={`category-chip category-${draft.category}`}>{CATEGORY_LABEL[draft.category]}</span><h3>Does this question work?</h3><p>{CATEGORY_GUIDE[draft.category].tip}</p><div><strong>Example</strong><button onClick={() => setDraft({ ...draft, prompt: CATEGORY_GUIDE[draft.category].example })}>{CATEGORY_GUIDE[draft.category].example}<span>Use this example</span></button></div><ul><li><CheckCircle2/> Sounds like a real buyer</li><li><CheckCircle2/> Has one clear intent</li><li><CheckCircle2/> Includes useful context</li><li><XCircle/> Does not force your brand into every question</li></ul><button className="btn btn-ghost btn-sm" onClick={() => setGuideOpen(true)}><CircleHelp size={12}/> Open the full guide</button></aside></div></Modal>}
+
+    {upgradeOpen && <Modal onClose={() => setUpgradeOpen(false)} size="xl" className="prompt-upgrade-modal" eyebrow="Legacy citation uplift" title={`Upgrade ${migration.prompt_count} prompt${migration.prompt_count === 1 ? '' : 's'} safely`} description={`The same prompt and result IDs stay in place. ${migration.result_count} historical answer${migration.result_count === 1 ? '' : 's'} will be attached to ${migration.result_count === 1 ? 'its' : 'their'} original question before metadata changes.`} icon={<WandSparkles/>} footer={<><span className="upgrade-preservation"><History size={13}/> No citation history will be deleted</span><button className="btn btn-ghost" onClick={() => setUpgradeOpen(false)}>Cancel</button><button className="btn btn-primary" disabled={upgrading} onClick={upgradePrompts}>{upgrading ? <Loader2 size={13} className="spin"/> : <WandSparkles size={13}/>} {upgrading ? 'Upgrading…' : 'Upgrade prompts'}</button></>}><div className="prompt-upgrade-layout"><section><header><span>1</span><div><h3>Shared tracking context</h3><p>These defaults make old checks comparable. You can edit each prompt again later.</p></div></header><div className="form-grid"><label>Website<select value={upgradeDraft.site_id ?? ''} onChange={event => setUpgradeDraft({ ...upgradeDraft, site_id: event.target.value || null })}><option value="">Keep current / whole workspace</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label><label>Prompt group<input value={upgradeDraft.group_name} onChange={event => setUpgradeDraft({ ...upgradeDraft, group_name: event.target.value })}/></label><label>Locale<input value={upgradeDraft.locale} onChange={event => setUpgradeDraft({ ...upgradeDraft, locale: event.target.value })} placeholder="en-GB"/></label><label>Device<select value={upgradeDraft.device} onChange={event => setUpgradeDraft({ ...upgradeDraft, device: event.target.value })}><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label><label>Persona<input value={upgradeDraft.persona ?? ''} onChange={event => setUpgradeDraft({ ...upgradeDraft, persona: event.target.value || null })} placeholder="Optional audience context"/></label><label>Cadence<select value={upgradeDraft.cadence} onChange={event => setUpgradeDraft({ ...upgradeDraft, cadence: event.target.value as AiPrompt['cadence'] })}><option value="manual">Manual only</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div></section><section><header><span>2</span><div><h3>Review suggested intent</h3><p>Suggestions use wording only. Change anything that does not match the buyer journey.</p></div></header><div className="upgrade-prompt-list">{migration.prompts.map(prompt => <article key={prompt.id}><div><strong>{prompt.prompt}</strong><small><History size={11}/>{prompt.result_count} stored answer{prompt.result_count === 1 ? '' : 's'} preserved</small></div><label>Intent<select aria-label={`Intent for ${prompt.prompt}`} value={upgradeDraft.categories[String(prompt.id)] ?? prompt.suggested_category} onChange={event => setUpgradeDraft({ ...upgradeDraft, categories: { ...upgradeDraft.categories, [String(prompt.id)]: event.target.value as AiPromptCategory } })}>{Object.entries(CATEGORY_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></article>)}</div></section></div></Modal>}
 
     {guideOpen && <Modal onClose={() => setGuideOpen(false)} size="xl" className="prompt-guide-modal" eyebrow="Practical prompt design" title="Build a useful buyer-question set" description="Track questions that represent distinct moments in discovery, evaluation, purchase and support." icon={<Library/>} footer={<><span className="app-modal-footer-note">A strong starter library usually contains 8–15 questions across at least three intents.</span><button className="btn btn-primary" onClick={() => openCreate()}><Plus size={13}/> Create a prompt</button></>}><div className="prompt-guide-principles"><div><span>01</span><strong>Ask naturally</strong><p>Use the words a buyer would use, not an SEO keyword string.</p></div><div><span>02</span><strong>Change one variable</strong><p>Keep intent, market and persona stable so movement is meaningful.</p></div><div><span>03</span><strong>Balance the journey</strong><p>Combine unbranded discovery with comparison, commercial, brand and support checks.</p></div></div><div className="prompt-template-grid">{Object.entries(CATEGORY_GUIDE).map(([value, guide]) => <article key={value}><span className={`category-chip category-${value}`}>{guide.label}</span><h3>{guide.purpose}</h3><blockquote>{guide.example}</blockquote><p>{guide.tip}</p><button className="btn btn-secondary btn-sm" onClick={() => openCreate({ category: value as AiPromptCategory, prompt: guide.example })}><Plus size={12}/> Use template</button></article>)}</div></Modal>}
 
