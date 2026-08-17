@@ -22,7 +22,11 @@ const IDENTIFIER_TYPES = [
   ['facebook', 'Facebook'], ['x', 'X / Twitter'], ['google_business_profile', 'Google Business Profile'],
 ] as const;
 const KNOWN_IDENTIFIER_KEYS = new Set<string>(IDENTIFIER_TYPES.map(([key]) => key));
-const LISTING_PROVIDERS = ['Google Business Profile', 'Bing Places', 'Apple Business Connect', 'Yelp', 'Tripadvisor', 'Facebook', 'Other'];
+const LISTING_PROVIDERS = [
+  'Google Business Profile', 'Google Play', 'Apple App Store', 'Apple Business Connect', 'Bing Places',
+  'G2', 'Capterra', 'GetApp', 'Software Advice', 'TrustRadius', 'Trustpilot', 'Product Hunt', 'SourceForge',
+  'Chrome Web Store', 'Microsoft Store', 'Yelp', 'Tripadvisor', 'Facebook', 'Other',
+];
 const LOCALES = ['en-GB', 'en-US', 'en-CA', 'en-AU', 'de-DE', 'fr-FR', 'es-ES', 'it-IT', 'nl-NL', 'pt-BR', 'ja-JP'];
 
 const rowId = () => crypto.randomUUID();

@@ -185,6 +185,8 @@ function initSchema(db: Database.Database): void {
       model      TEXT,
       cited      INTEGER NOT NULL DEFAULT 0,
       domains    TEXT,               -- JSON array of our domains found
+      attributions TEXT,              -- JSON evidence: owned site, profile, marketplace or brand mention
+      attribution_version INTEGER NOT NULL DEFAULT 0,
       excerpt    TEXT,
       error      TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -898,6 +900,12 @@ function initSchema(db: Database.Database): void {
     }
     if (!aiCols.some(c => c.name === 'user_prompt')) {
       db.exec("ALTER TABLE ai_results ADD COLUMN user_prompt TEXT;");
+    }
+    if (!aiCols.some(c => c.name === 'attributions')) {
+      db.exec("ALTER TABLE ai_results ADD COLUMN attributions TEXT;");
+    }
+    if (!aiCols.some(c => c.name === 'attribution_version')) {
+      db.exec("ALTER TABLE ai_results ADD COLUMN attribution_version INTEGER NOT NULL DEFAULT 0;");
     }
   }
 

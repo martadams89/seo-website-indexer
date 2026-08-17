@@ -226,20 +226,22 @@ describe('workspace tenant isolation', () => {
     const ownerB = users.createUser({ email: `ai-b-${randomUUID()}@x.com`, password: 'password123' });
     const workspaceA = ws.bootstrapUserWorkspace(ownerA, false);
     const workspaceB = ws.bootstrapUserWorkspace(ownerB, false);
-    const prompt = citations.addPrompt('private buyer question', null, workspaceA.id, 'commercial');
+    const siteId = `ai-site-${randomUUID().slice(0, 8)}`; makeSite(siteId, workspaceA.id);
+    const trackedDomain = `${siteId}.com`;
+    const prompt = citations.addPrompt('private buyer question', siteId, workspaceA.id, 'commercial');
     db.getDb().prepare(`
       INSERT INTO ai_results(prompt_id, provider, model, cited, domains, excerpt, citations)
-      VALUES(?, 'openai', 'test', 1, '["example.com"]', 'private answer', '["https://example.com/source"]')
-    `).run(prompt.id);
+      VALUES(?, 'openai', 'test', 1, ?, 'private answer', ?)
+    `).run(prompt.id, JSON.stringify([trackedDomain]), JSON.stringify([`https://${trackedDomain}/source`]));
 
     expect(citations.getThread(prompt.id, 'openai', workspaceA.id)).toHaveLength(1);
     expect(citations.getThread(prompt.id, 'openai', workspaceB.id)).toHaveLength(0);
     expect(citations.getResults(20, workspaceB.id).some(row => row.prompt_id === prompt.id)).toBe(false);
     db.setWorkspaceSetting(workspaceA.id, 'openai_api_key', 'test-key');
-    db.setWorkspaceSetting(workspaceA.id, 'ai_competitor_domains', 'example.com');
+    db.setWorkspaceSetting(workspaceA.id, 'ai_competitor_domains', trackedDomain);
     const insights = citations.getAiInsights(workspaceA.id);
     expect(insights.overview.visibility).toBe(100);
-    expect(insights.sources.find(row => row.domain === 'example.com')?.competitor).toBe(true);
+    expect(insights.sources.find(row => row.domain === trackedDomain)?.competitor).toBe(true);
     expect(citations.getAiInsights(workspaceB.id).overview.checks).toBe(0);
     await expect(citations.runPrompt(prompt.id, workspaceB.id)).rejects.toThrow('Prompt not found');
     await expect(citations.replyInThread(prompt.id, 'openai', 'tell me more', workspaceB.id)).rejects.toThrow('Prompt not found');

@@ -11,7 +11,7 @@ import { resolveModel, type ModelProvider } from './models.js';
 import { logSystem } from '../utils/logger.js';
 import { recordAlert } from '../analytics/stats.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
-import { assertWithinBudget, recordUsage } from '../platform/store.js';
+import { assertWithinBudget, listLocalEntities, recordUsage, type LocalEntity } from '../platform/store.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
 export type Provider = typeof PROVIDERS[number];
@@ -204,15 +204,208 @@ const ASK: Record<Provider, (turns: ChatTurn[], key: string, modelId?: string) =
   brave: askBrave,
 };
 
-/** Domains we count as "ours" for citation detection. */
-function trackedDomains(workspaceId: string | null = null): string[] {
-  const sites = workspaceId ? getSitesForWorkspace(workspaceId) : getAllSites();
-  return sites.map(s => s.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, ''));
+export type CitationAttributionKind = 'owned_site' | 'third_party_profile' | 'marketplace' | 'brand_mention';
+
+export interface CitationAttribution {
+  kind: CitationAttributionKind;
+  entity: string;
+  matched: string;
+  source: string;
+  url?: string;
+  domain?: string;
 }
 
-function findDomains(answer: ProviderAnswer, domains: string[]): string[] {
-  const hay = (answer.text + ' ' + answer.citations.join(' ')).toLowerCase();
-  return domains.filter(d => hay.includes(d.toLowerCase()));
+interface IdentityAlias { value: string; entity: string; explicit: boolean }
+interface IdentityProfile { entity: string; provider: string; url: string; domain: string }
+interface CitationIdentity {
+  domains: Array<{ domain: string; entity: string }>;
+  aliases: IdentityAlias[];
+  profiles: IdentityProfile[];
+}
+
+const MARKETPLACE_SOURCES: Record<string, string> = {
+  'play.google.com': 'Google Play',
+  'apps.apple.com': 'Apple App Store',
+  'g2.com': 'G2',
+  'softwareadvice.com': 'Software Advice',
+  'capterra.com': 'Capterra',
+  'getapp.com': 'GetApp',
+  'trustradius.com': 'TrustRadius',
+  'sourceforge.net': 'SourceForge',
+  'producthunt.com': 'Product Hunt',
+  'trustpilot.com': 'Trustpilot',
+  'chromewebstore.google.com': 'Chrome Web Store',
+  'microsoft.com': 'Microsoft Store',
+};
+
+const GENERIC_INFERRED_NAMES = new Set(['app', 'brand', 'company', 'default', 'home', 'platform', 'product', 'site', 'software', 'website']);
+
+function cleanDomain(value: string): string {
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return url.hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return value.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  }
+}
+
+function normalizeWords(value: string): string {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function usableAlias(value: string, explicit: boolean): boolean {
+  const normalized = normalizeWords(value);
+  if (!normalized || normalized.length < 3) return false;
+  if (explicit) return true;
+  return !GENERIC_INFERRED_NAMES.has(normalized) && (normalized.includes(' ') || normalized.length >= 4);
+}
+
+function parseAliasSetting(value: string | null | undefined): string[] {
+  return (value ?? '').split(/[\n,]+/).map(item => item.trim()).filter(Boolean).slice(0, 100);
+}
+
+function marketplaceSource(domain: string): string | null {
+  const match = Object.entries(MARKETPLACE_SOURCES).find(([candidate]) => domain === candidate || domain.endsWith(`.${candidate}`));
+  return match?.[1] ?? null;
+}
+
+function urlValue(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())) return null;
+  try { return new URL(value.trim()).toString(); } catch { return null; }
+}
+
+function entityAliases(entity: LocalEntity): string[] {
+  const legalName = typeof entity.knowledge.legal_name === 'string' ? entity.knowledge.legal_name : '';
+  return [entity.name, legalName].filter(Boolean);
+}
+
+function citationIdentity(workspaceId: string | null, siteId: string | null = null): CitationIdentity {
+  const sites = workspaceId ? getSitesForWorkspace(workspaceId) : getAllSites();
+  const scopedSites = siteId ? sites.filter(site => site.id === siteId) : sites;
+  const entities = workspaceId ? listLocalEntities(workspaceId)
+    .filter(entity => !siteId || entity.site_id === siteId || entity.site_id === null) : [];
+  const domains = scopedSites.map(site => ({ domain: cleanDomain(site.domain), entity: site.name }));
+  const aliases: IdentityAlias[] = [];
+  const profiles: IdentityProfile[] = [];
+  const addAlias = (value: string, entity: string, explicit: boolean) => {
+    if (usableAlias(value, explicit)) aliases.push({ value: value.trim(), entity: entity.trim() || value.trim(), explicit });
+  };
+  for (const site of scopedSites) addAlias(site.name, site.name, false);
+  for (const entity of entities) {
+    for (const alias of entityAliases(entity)) addAlias(alias, entity.name, false);
+    const primaryUrl = urlValue(entity.primary_url);
+    if (primaryUrl) {
+      const primaryDomain = cleanDomain(primaryUrl);
+      if (!marketplaceSource(primaryDomain)) domains.push({ domain: primaryDomain, entity: entity.name });
+    }
+    const values: Array<{ provider: string; value: unknown }> = [
+      ...entity.listings.map(item => ({ provider: item.provider || 'Third-party profile', value: item.url })),
+      ...Object.entries(entity.identifiers).map(([provider, value]) => ({ provider, value })),
+    ];
+    for (const item of values) {
+      const url = urlValue(item.value); if (!url) continue;
+      const domain = cleanDomain(url);
+      profiles.push({ entity: entity.name, provider: marketplaceSource(domain) ?? item.provider.replace(/_/g, ' '), url, domain });
+    }
+  }
+  if (workspaceId) {
+    const brandName = getWorkspaceSetting(workspaceId, 'brand_name');
+    if (brandName) addAlias(brandName, brandName, true);
+    for (const alias of parseAliasSetting(getWorkspaceSetting(workspaceId, 'ai_brand_aliases'))) addAlias(alias, alias, true);
+  }
+  const uniqueAliases = [...new Map(aliases.sort((a, b) => b.value.length - a.value.length)
+    .map(alias => [normalizeWords(alias.value), alias])).values()];
+  const uniqueProfiles = [...new Map(profiles.map(profile => [profile.url.toLowerCase(), profile])).values()];
+  return { domains: [...new Map(domains.map(item => [item.domain, item])).values()], aliases: uniqueAliases, profiles: uniqueProfiles };
+}
+
+function domainMatches(domain: string, candidate: string): boolean {
+  return domain === candidate || domain.endsWith(`.${candidate}`);
+}
+
+function urlMatchesProfile(value: string, profile: IdentityProfile): boolean {
+  try {
+    const candidate = new URL(value); const expected = new URL(profile.url);
+    if (!domainMatches(cleanDomain(candidate.hostname), cleanDomain(expected.hostname))) return false;
+    const candidatePath = candidate.pathname.replace(/\/$/, '').toLowerCase();
+    const expectedPath = expected.pathname.replace(/\/$/, '').toLowerCase();
+    if (expectedPath && expectedPath !== '/' && candidatePath !== expectedPath && !candidatePath.startsWith(`${expectedPath}/`)) return false;
+    for (const [key, expectedValue] of expected.searchParams) if (candidate.searchParams.get(key) !== expectedValue) return false;
+    return expectedPath !== '/' || [...expected.searchParams].length > 0;
+  } catch { return false; }
+}
+
+function aliasInMarketplaceUrl(value: string, alias: IdentityAlias): boolean {
+  try {
+    const url = new URL(value); if (!marketplaceSource(cleanDomain(url.hostname))) return false;
+    const aliasKey = normalizeWords(alias.value).replace(/\s+/g, '');
+    const urlKey = normalizeWords(decodeURIComponent(`${url.pathname} ${url.search}`)).replace(/\s+/g, '');
+    return aliasKey.length >= 4 && urlKey.includes(aliasKey);
+  } catch { return false; }
+}
+
+function dedupeAttributions(items: CitationAttribution[]): CitationAttribution[] {
+  return [...new Map(items.map(item => [`${item.kind}:${item.entity.toLowerCase()}:${item.url ?? item.matched.toLowerCase()}`, item])).values()];
+}
+
+/** Classify visibility independently from where the evidence lives. A brand can
+ * be cited through its own domain, a marketplace/profile, or as a named entity. */
+export function classifyCitation(answer: ProviderAnswer, identity: CitationIdentity): { cited: boolean; domains: string[]; attributions: CitationAttribution[] } {
+  const attributions: CitationAttribution[] = [];
+  const answerWords = ` ${normalizeWords(answer.text)} `;
+  const directDomains = new Set<string>();
+
+  for (const item of identity.domains) {
+    const textHasDomain = answer.text.toLowerCase().includes(item.domain.toLowerCase());
+    const citedUrl = answer.citations.find(value => {
+      try { return domainMatches(cleanDomain(value), item.domain); } catch { return false; }
+    });
+    if (!textHasDomain && !citedUrl) continue;
+    directDomains.add(item.domain);
+    attributions.push({ kind: 'owned_site', entity: item.entity, matched: item.domain, source: 'Owned website',
+      ...(citedUrl ? { url: citedUrl, domain: cleanDomain(citedUrl) } : { domain: item.domain }) });
+  }
+
+  for (const citation of answer.citations) {
+    const domain = cleanDomain(citation);
+    const profile = identity.profiles.find(item => urlMatchesProfile(citation, item));
+    if (profile) {
+      attributions.push({ kind: 'third_party_profile', entity: profile.entity, matched: profile.url,
+        source: profile.provider, url: citation, domain });
+      continue;
+    }
+    const alias = identity.aliases.find(item => aliasInMarketplaceUrl(citation, item));
+    const source = marketplaceSource(domain);
+    if (alias && source) attributions.push({ kind: 'marketplace', entity: alias.entity, matched: alias.value, source, url: citation, domain });
+  }
+
+  for (const alias of identity.aliases) {
+    const normalized = normalizeWords(alias.value);
+    if (normalized && answerWords.includes(` ${normalized} `)) {
+      attributions.push({ kind: 'brand_mention', entity: alias.entity, matched: alias.value, source: 'Answer text' });
+    }
+  }
+
+  const unique = dedupeAttributions(attributions);
+  return { cited: unique.length > 0, domains: [...directDomains], attributions: unique };
+}
+
+export function getCitationIdentitySummary(workspaceId: string): {
+  aliases: string[]; ownedDomains: string[]; profiles: Array<{ entity: string; provider: string; domain: string; url: string }>;
+} {
+  const identity = citationIdentity(workspaceId);
+  return { aliases: identity.aliases.map(item => item.value), ownedDomains: identity.domains.map(item => item.domain), profiles: identity.profiles };
+}
+
+function attributionSummary(attributions: CitationAttribution[]): string {
+  const direct = attributions.filter(item => item.kind === 'owned_site');
+  const thirdParty = attributions.filter(item => item.kind === 'third_party_profile' || item.kind === 'marketplace');
+  const mentions = attributions.filter(item => item.kind === 'brand_mention');
+  if (direct.length) return `Direct website citation: ${[...new Set(direct.map(item => item.matched))].join(', ')}`;
+  if (thirdParty.length) return `Third-party citation via ${[...new Set(thirdParty.map(item => item.source))].join(', ')}`;
+  if (mentions.length) return `Brand/entity mentioned: ${[...new Set(mentions.map(item => item.entity))].join(', ')}`;
+  return 'No tracked brand, entity, profile or owned website was found.';
 }
 
 export const PROMPT_CATEGORIES = ['discovery', 'comparison', 'commercial', 'brand', 'support'] as const;
@@ -368,18 +561,20 @@ export function deletePrompt(id: number, workspaceId: string | null = null): voi
 /** Citation results, scoped to one workspace's prompts. */
 export function getResults(limit = 200, workspaceId: string | null = null): Array<Record<string, unknown>> {
   if (workspaceId) {
-    return getDb().prepare(`
+    const rows = getDb().prepare(`
       SELECT r.*, p.prompt, p.site_id FROM ai_results r
       JOIN ai_prompts p ON p.id = r.prompt_id
       WHERE p.workspace_id = ?
       ORDER BY r.created_at DESC LIMIT ?
     `).all(workspaceId, limit) as Array<Record<string, unknown>>;
+    return rows.map(row => decorateStoredResult(row, citationIdentity(workspaceId, String(row.site_id ?? '') || null)));
   }
-  return getDb().prepare(`
+  const rows = getDb().prepare(`
     SELECT r.*, p.prompt, p.site_id FROM ai_results r
     JOIN ai_prompts p ON p.id = r.prompt_id
     ORDER BY r.created_at DESC LIMIT ?
   `).all(limit) as Array<Record<string, unknown>>;
+  return rows.map(row => decorateStoredResult(row, citationIdentity(null, String(row.site_id ?? '') || null)));
 }
 
 /** Run one prompt against every configured provider; persist + return results. */
@@ -387,13 +582,13 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
   const db = getDb();
   const row = getPrompt(promptId, workspaceId);
   if (!row) throw new Error('Prompt not found');
-  const domains = trackedDomains(workspaceId);
+  const identity = citationIdentity(workspaceId, row.site_id);
   const providers = configuredProviders(workspaceId);
   if (providers.length === 0) throw new Error('No AI provider API keys configured (Settings)');
 
   const insert = db.prepare(`
-    INSERT INTO ai_results(prompt_id, provider, model, cited, domains, excerpt, error, parent_id, citations, user_prompt)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO ai_results(prompt_id, provider, model, cited, domains, attributions, attribution_version, excerpt, error, parent_id, citations, user_prompt)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const movements: Array<{ provider: Provider; cited: boolean; sourceChanged?: boolean }> = [];
@@ -401,32 +596,33 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
     if (workspaceId) assertWithinBudget({ workspaceId, provider, quantity: 1 });
     const key = effectiveSetting(workspaceId, KEY_SETTING[provider])!;
     const previous = db.prepare(`
-      SELECT cited,citations FROM ai_results
+      SELECT cited,citations,excerpt FROM ai_results
       WHERE prompt_id = ? AND provider = ? AND parent_id IS NULL
       ORDER BY created_at DESC, id DESC LIMIT 1
-    `).get(promptId, provider) as { cited: number; citations: string | null } | undefined;
+    `).get(promptId, provider) as { cited: number; citations: string | null; excerpt: string | null } | undefined;
     try {
       const modelId = provider === 'brave' ? undefined : resolveModel(workspaceId, provider as ModelProvider);
       const context = [row.locale ? `Locale: ${row.locale}.` : '', row.device ? `Device context: ${row.device}.` : '', row.persona ? `Audience persona: ${row.persona}.` : ''].filter(Boolean).join(' ');
       const answer = await ASK[provider]([{ role: 'user', content: context ? `${row.prompt}\n\n${context}` : row.prompt }], key, modelId);
-      const found = findDomains(answer, domains);
+      const attribution = classifyCitation(answer, identity);
+      const previousAttribution = previous ? classifyCitation({ text: previous.excerpt ?? '', model: '', citations: safeArray(previous.citations) }, identity) : null;
       const currentSources = [...new Set(answer.citations.map(sourceDomain).filter((value): value is string => !!value))];
       const previousSources = [...new Set(safeArray(previous?.citations).map(sourceDomain).filter((value): value is string => !!value))];
       const addedSources = currentSources.filter(source => !previousSources.includes(source));
       const removedSources = previousSources.filter(source => !currentSources.includes(source));
       // Full response (bounded) — the dashboard renders it as a scrollable chat bubble.
       const text = answer.text.trim().slice(0, 12_000);
-      insert.run(promptId, provider, answer.model, found.length ? 1 : 0, JSON.stringify(found), text, null,
+      insert.run(promptId, provider, answer.model, attribution.cited ? 1 : 0, JSON.stringify(attribution.domains), JSON.stringify(attribution.attributions), 1, text, null,
         null, JSON.stringify(answer.citations.slice(0, 40)), row.prompt);
-      if (previous && Boolean(previous.cited) !== Boolean(found.length)) {
-        const gained = found.length > 0;
+      if (previousAttribution && previousAttribution.cited !== attribution.cited) {
+        const gained = attribution.cited;
         const label = PROVIDER_LABELS[provider] ?? provider;
         recordAlert(
           row.site_id,
           'citation',
           `${gained ? 'Citation gained' : 'Citation lost'} on ${label}: “${row.prompt.slice(0, 90)}”`,
           gained ? 'info' : 'warn',
-          gained ? `Now cites ${found.join(', ')}` : 'The latest answer no longer cites a tracked domain.',
+          gained ? attributionSummary(attribution.attributions) : 'The latest answer no longer cites a tracked brand, entity, profile or owned website.',
           workspaceId,
         );
         movements.push({ provider, cited: gained });
@@ -434,16 +630,16 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
         const label = PROVIDER_LABELS[provider] ?? provider;
         recordAlert(row.site_id, 'citation', `Answer sources changed on ${label}: “${row.prompt.slice(0, 90)}”`, 'info',
           `${addedSources.length ? `Added ${addedSources.join(', ')}. ` : ''}${removedSources.length ? `Removed ${removedSources.join(', ')}.` : ''}`.trim(), workspaceId);
-        movements.push({ provider, cited: Boolean(found.length), sourceChanged: true });
+        movements.push({ provider, cited: attribution.cited, sourceChanged: true });
       }
-      logSystem(found.length ? 'ok' : 'info',
-        `AI citation [${provider}] ${found.length ? `cited: ${found.join(', ')}` : 'not cited'} — "${row.prompt.slice(0, 60)}"`);
+      logSystem(attribution.cited ? 'ok' : 'info',
+        `AI citation [${provider}] ${attribution.cited ? attributionSummary(attribution.attributions) : 'not cited'} — "${row.prompt.slice(0, 60)}"`);
       if (workspaceId) recordUsage({ workspace_id: workspaceId, user_id: null, provider, operation: 'ai.visibility_check', quantity: 1, unit: 'check', estimated_cost: 0,
-        metadata: { prompt_id: promptId, model: answer.model, cited: found.length > 0, group: row.group_name, locale: row.locale, device: row.device } });
-      return { provider, model: answer.model, cited: found.length > 0, domains: found, excerpt: text };
+        metadata: { prompt_id: promptId, model: answer.model, cited: attribution.cited, attribution_kinds: [...new Set(attribution.attributions.map(item => item.kind))], group: row.group_name, locale: row.locale, device: row.device } });
+      return { provider, model: answer.model, cited: attribution.cited, domains: attribution.domains, attributions: attribution.attributions, excerpt: text };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      insert.run(promptId, provider, null, 0, '[]', null, msg.slice(0, 300), null, '[]', row.prompt);
+      insert.run(promptId, provider, null, 0, '[]', '[]', 1, null, msg.slice(0, 300), null, '[]', row.prompt);
       logSystem('warn', `AI citation [${provider}] failed: ${msg.slice(0, 120)}`);
       return { provider, model: null, cited: false, domains: [], error: msg };
     }
@@ -480,22 +676,25 @@ export async function runAllPrompts(workspaceId: string | null = null): Promise<
 export interface AiResultRow {
   id: number; prompt_id: number; provider: Provider; model: string | null;
   cited: number; domains: string; excerpt: string | null; error: string | null;
-  parent_id: number | null; citations: string | null; user_prompt: string | null;
+  attributions: string | null; attribution_version: number;
+  parent_id: number | null; citations: string | null; user_prompt: string | null; site_id?: string | null;
   created_at: string;
 }
 
 /** Root result + follow-ups for one workspace-scoped prompt × provider. */
 export function getThread(promptId: number, provider: string, workspaceId: string | null = null): AiResultRow[] {
   if (workspaceId) {
-    return getDb().prepare(`
-      SELECT r.* FROM ai_results r
+    const rows = getDb().prepare(`
+      SELECT r.*,p.site_id FROM ai_results r
       JOIN ai_prompts p ON p.id = r.prompt_id
       WHERE r.prompt_id = ? AND r.provider = ? AND p.workspace_id = ?
       ORDER BY r.id ASC
     `).all(promptId, provider, workspaceId) as AiResultRow[];
+    return rows.map(row => decorateStoredResult(row, citationIdentity(workspaceId, row.site_id ?? null)) as unknown as AiResultRow);
   }
-  return getDb().prepare('SELECT * FROM ai_results WHERE prompt_id = ? AND provider = ? ORDER BY id ASC')
-    .all(promptId, provider) as AiResultRow[];
+  const rows = getDb().prepare(`SELECT r.*,p.site_id FROM ai_results r JOIN ai_prompts p ON p.id=r.prompt_id
+    WHERE r.prompt_id=? AND r.provider=? ORDER BY r.id ASC`).all(promptId, provider) as AiResultRow[];
+  return rows.map(row => decorateStoredResult(row, citationIdentity(null, row.site_id ?? null)) as unknown as AiResultRow);
 }
 
 /**
@@ -519,18 +718,18 @@ export async function replyInThread(promptId: number, provider: Provider, follow
   if (turns.length === 0) turns.push({ role: 'user', content: promptRow.prompt });
   turns.push({ role: 'user', content: followUp });
 
-  const domains = trackedDomains(workspaceId);
+  const identity = citationIdentity(workspaceId, promptRow.site_id);
   const parent = getThread(promptId, provider, workspaceId).at(-1);
   const modelId = resolveModel(workspaceId, provider as ModelProvider);
   const answer = await ASK[provider](turns, key, modelId);
-  const found = findDomains(answer, domains);
+  const attribution = classifyCitation(answer, identity);
   const text = answer.text.trim().slice(0, 12_000);
   const res = db.prepare(`
-    INSERT INTO ai_results(prompt_id, provider, model, cited, domains, excerpt, error, parent_id, citations, user_prompt)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
-  `).run(promptId, provider, answer.model, found.length ? 1 : 0, JSON.stringify(found), text, null,
+    INSERT INTO ai_results(prompt_id, provider, model, cited, domains, attributions, attribution_version, excerpt, error, parent_id, citations, user_prompt)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(promptId, provider, answer.model, attribution.cited ? 1 : 0, JSON.stringify(attribution.domains), JSON.stringify(attribution.attributions), 1, text, null,
     parent?.id ?? null, JSON.stringify(answer.citations.slice(0, 40)), followUp);
-  logSystem(found.length ? 'ok' : 'info', `AI follow-up [${provider}] ${found.length ? `cited: ${found.join(', ')}` : 'not cited'}`);
+  logSystem(attribution.cited ? 'ok' : 'info', `AI follow-up [${provider}] ${attribution.cited ? attributionSummary(attribution.attributions) : 'not cited'}`);
   return db.prepare('SELECT * FROM ai_results WHERE id = ?').get(res.lastInsertRowid) as AiResultRow;
 }
 
@@ -550,10 +749,14 @@ export interface AiInsights {
     previousVisibility: number | null;
     change: number | null;
     sourceDomains: number;
+    directCitations: number;
+    thirdPartyCitations: number;
+    mentionOnlyCitations: number;
   };
   providers: Array<{ provider: Provider; checks: number; cited: number; visibility: number }>;
   trend: Array<{ day: string; checks: number; cited: number; visibility: number }>;
-  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; providers: Provider[] }>;
+  sources: Array<{ domain: string; citations: number; owned: boolean; competitor: boolean; attributed: boolean;
+    attributionKinds: CitationAttributionKind[]; entities: string[]; providers: Provider[] }>;
   opportunities: Array<{
     promptId: number; prompt: string; category: PromptCategory; siteId: string | null;
     citedProviders: Provider[]; missingProviders: Provider[];
@@ -578,22 +781,50 @@ function sourceDomain(value: string): string | null {
   } catch { return null; }
 }
 
+function safeAttributions(value: unknown): CitationAttribution[] {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(item => item && typeof item === 'object' && typeof item.kind === 'string' && typeof item.entity === 'string') as CitationAttribution[];
+  } catch { return []; }
+}
+
+function decorateStoredResult<T extends object>(row: T, identity: CitationIdentity): T {
+  const value = row as Record<string, unknown>;
+  if (value.error) return { ...row, cited: 0, domains: '[]', attributions: '[]', attribution_version: 1 } as T;
+  const classification = classifyCitation({
+    text: typeof value.excerpt === 'string' ? value.excerpt : '',
+    model: typeof value.model === 'string' ? value.model : '',
+    citations: safeArray(typeof value.citations === 'string' ? value.citations : null),
+  }, identity);
+  return { ...row, cited: classification.cited ? 1 : 0, domains: JSON.stringify(classification.domains),
+    attributions: JSON.stringify(classification.attributions), attribution_version: 1 } as T;
+}
+
 /** Portfolio-level GEO intelligence derived from root runs only. */
 export function getAiInsights(workspaceId: string | null): AiInsights {
   const empty: AiInsights = {
-    overview: { prompts: 0, configuredProviders: 0, checks: 0, cited: 0, visibility: 0, previousVisibility: null, change: null, sourceDomains: 0 },
+    overview: { prompts: 0, configuredProviders: 0, checks: 0, cited: 0, visibility: 0, previousVisibility: null, change: null, sourceDomains: 0,
+      directCitations: 0, thirdPartyCitations: 0, mentionOnlyCitations: 0 },
     providers: [], trend: [], sources: [], opportunities: [], movements: [],
   };
   if (!workspaceId) return empty;
 
   const prompts = listPrompts(workspaceId);
   const configured = configuredProviders(workspaceId);
-  const rows = getDb().prepare(`
+  const rawRows = getDb().prepare(`
     SELECT r.*, p.prompt, p.category, p.site_id
     FROM ai_results r JOIN ai_prompts p ON p.id = r.prompt_id
     WHERE p.workspace_id = ? AND r.parent_id IS NULL
     ORDER BY r.created_at DESC, r.id DESC
   `).all(workspaceId) as InsightResult[];
+  const identityCache = new Map<string, CitationIdentity>();
+  const identityFor = (siteId: string | null) => {
+    const key = siteId ?? '*';
+    if (!identityCache.has(key)) identityCache.set(key, citationIdentity(workspaceId, siteId));
+    return identityCache.get(key)!;
+  };
+  const rows = rawRows.map(row => decorateStoredResult(row as unknown as Record<string, unknown>, identityFor(row.site_id)) as unknown as InsightResult);
 
   const latest = new Map<string, InsightResult>();
   const previous = new Map<string, InsightResult>();
@@ -604,6 +835,11 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
   }
   const current = [...latest.values()].filter(row => configured.includes(row.provider));
   const cited = current.filter(r => r.cited && !r.error).length;
+  const currentAttributions = current.map(row => ({ row, items: safeAttributions(row.attributions) }));
+  const directCitations = currentAttributions.filter(({ items }) => items.some(item => item.kind === 'owned_site')).length;
+  const thirdPartyCitations = currentAttributions.filter(({ items }) => items.some(item => item.kind === 'third_party_profile' || item.kind === 'marketplace')).length;
+  const mentionOnlyCitations = currentAttributions.filter(({ items }) => items.some(item => item.kind === 'brand_mention')
+    && !items.some(item => item.kind === 'owned_site' || item.kind === 'third_party_profile' || item.kind === 'marketplace')).length;
   const checks = current.filter(r => !r.error).length;
   const prior = [...previous.values()].filter(r => configured.includes(r.provider) && !r.error);
   const previousVisibility = prior.length ? Math.round((prior.filter(r => r.cited).length / prior.length) * 100) : null;
@@ -628,17 +864,21 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
     day, ...item, visibility: item.checks ? Math.round(item.cited / item.checks * 100) : 0,
   }));
 
-  const owned = trackedDomains(workspaceId);
+  const owned = citationIdentity(workspaceId).domains.map(item => item.domain);
   const competitors = (getWorkspaceSetting(workspaceId, 'ai_competitor_domains') ?? '')
     .split(/[\s,]+/).map(d => d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
-  const domainMap = new Map<string, { citations: number; providers: Set<Provider> }>();
+  const domainMap = new Map<string, { citations: number; providers: Set<Provider>; attributionKinds: Set<CitationAttributionKind>; entities: Set<string> }>();
   for (const row of current) {
+    const attributions = safeAttributions(row.attributions);
     for (const raw of safeArray(row.citations)) {
       const domain = sourceDomain(raw);
       if (!domain) continue;
-      const entry = domainMap.get(domain) ?? { citations: 0, providers: new Set<Provider>() };
+      const entry = domainMap.get(domain) ?? { citations: 0, providers: new Set<Provider>(), attributionKinds: new Set<CitationAttributionKind>(), entities: new Set<string>() };
       entry.citations += 1;
       entry.providers.add(row.provider);
+      for (const item of attributions.filter(attribution => attribution.domain && domainMatches(domain, attribution.domain))) {
+        entry.attributionKinds.add(item.kind); entry.entities.add(item.entity);
+      }
       domainMap.set(domain, entry);
     }
   }
@@ -648,6 +888,9 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
     citations: item.citations,
     owned: matches(domain, owned),
     competitor: matches(domain, competitors),
+    attributed: item.attributionKinds.size > 0,
+    attributionKinds: [...item.attributionKinds],
+    entities: [...item.entities],
     providers: [...item.providers],
   })).sort((a, b) => b.citations - a.citations || a.domain.localeCompare(b.domain)).slice(0, 50);
 
@@ -684,6 +927,7 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
       previousVisibility,
       change: previousVisibility === null ? null : visibility - previousVisibility,
       sourceDomains: domainMap.size,
+      directCitations, thirdPartyCitations, mentionOnlyCitations,
     },
     providers: providerInsights, trend, sources, opportunities, movements,
   };

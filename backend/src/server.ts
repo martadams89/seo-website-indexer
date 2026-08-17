@@ -111,7 +111,7 @@ import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexe
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
-import { listPrompts, addPrompt, updatePrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, getLegacyPromptPlan, upgradeLegacyPrompts, type Provider, type PromptCategory, type PromptRow, type LegacyPromptUpgrade } from './ai/citations.js';
+import { listPrompts, addPrompt, updatePrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getCitationIdentitySummary, getThread, replyInThread, getLegacyPromptPlan, upgradeLegacyPrompts, type Provider, type PromptCategory, type PromptRow, type LegacyPromptUpgrade } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
@@ -2424,13 +2424,21 @@ app.get('/api/ai/results', async (req) => getResults(200, currentWorkspace(req))
 app.get('/api/ai/insights', async (req) => getAiInsights(currentWorkspace(req)));
 app.get('/api/ai/config', async (req) => {
   const wsId = currentWorkspace(req);
-  return { competitorDomains: wsId ? (getWorkspaceSettings(wsId).ai_competitor_domains ?? '') : '' };
+  const settings = wsId ? getWorkspaceSettings(wsId) : {};
+  return { competitorDomains: settings.ai_competitor_domains ?? '', brandAliases: settings.ai_brand_aliases ?? '',
+    identity: wsId ? getCitationIdentitySummary(wsId) : { aliases: [], ownedDomains: [], profiles: [] } };
 });
 app.put('/api/ai/config', async (req) => {
   const wsId = requireWorkspace(req);
-  const { competitorDomains = '' } = (req.body ?? {}) as { competitorDomains?: string };
-  const clean = String(competitorDomains).split(/[\s,]+/).map(domain => domain.trim()).filter(Boolean).slice(0, 100).join(', ');
-  setWorkspaceSetting(wsId, 'ai_competitor_domains', clean);
+  const body = (req.body ?? {}) as { competitorDomains?: string; brandAliases?: string };
+  if (body.competitorDomains !== undefined) {
+    const clean = String(body.competitorDomains).split(/[\s,]+/).map(domain => domain.trim()).filter(Boolean).slice(0, 100).join(', ');
+    setWorkspaceSetting(wsId, 'ai_competitor_domains', clean);
+  }
+  if (body.brandAliases !== undefined) {
+    const cleanAliases = String(body.brandAliases).split(/[\n,]+/).map(alias => alias.trim()).filter(Boolean).slice(0, 100).join('\n');
+    setWorkspaceSetting(wsId, 'ai_brand_aliases', cleanAliases);
+  }
   return { ok: true };
 });
 app.post('/api/ai/run/:promptId', async (req, reply) => {

@@ -35,7 +35,7 @@ export interface EntityDiscoveryResult {
 
 type JsonLdNode = Record<string, unknown>;
 
-const RELEVANT_TYPES = new Set(['organization', 'localbusiness', 'person', 'product', 'corporation', 'professionalservice']);
+const RELEVANT_TYPES = new Set(['organization', 'localbusiness', 'person', 'product', 'softwareapplication', 'mobileapplication', 'webapplication', 'corporation', 'professionalservice']);
 
 function decodeHtml(value: string): string {
   return value
@@ -136,6 +136,18 @@ function identifierKey(url: string): string {
 
 function listingProvider(url: string): string | null {
   const lower = url.toLowerCase();
+  if (lower.includes('play.google.com/store/apps')) return 'Google Play';
+  if (lower.includes('apps.apple.com/')) return 'Apple App Store';
+  if (lower.includes('g2.com/products/')) return 'G2';
+  if (lower.includes('capterra.com/')) return 'Capterra';
+  if (lower.includes('getapp.com/')) return 'GetApp';
+  if (lower.includes('softwareadvice.com/')) return 'Software Advice';
+  if (lower.includes('trustradius.com/products/')) return 'TrustRadius';
+  if (lower.includes('trustpilot.com/review/')) return 'Trustpilot';
+  if (lower.includes('producthunt.com/products/')) return 'Product Hunt';
+  if (lower.includes('sourceforge.net/software/product/')) return 'SourceForge';
+  if (lower.includes('chromewebstore.google.com/')) return 'Chrome Web Store';
+  if (lower.includes('apps.microsoft.com/') || lower.includes('microsoft.com/store/apps/')) return 'Microsoft Store';
   if (lower.includes('google.') && (lower.includes('/maps') || lower.includes('maps.app.goo.gl'))) return 'Google Business Profile';
   if (lower.includes('bing.com/maps')) return 'Bing Places';
   if (lower.includes('yelp.')) return 'Yelp';
@@ -147,7 +159,7 @@ function listingProvider(url: string): string | null {
 function schemaType(types: string[], hasAddress: boolean): string {
   const lower = types.map(type => type.toLowerCase());
   if (lower.includes('person')) return 'person';
-  if (lower.includes('product')) return 'product';
+  if (lower.some(type => ['product', 'softwareapplication', 'mobileapplication', 'webapplication'].includes(type))) return 'product';
   if (lower.some(type => type === 'localbusiness' || type === 'professionalservice') || hasAddress) return 'location';
   return 'brand';
 }
