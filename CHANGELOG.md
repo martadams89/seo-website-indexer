@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/martadams89/seo-website-indexer/compare/v1.30.0...v1.31.0) (2026-08-17)
+
+
+### ✨ Features
+
+* **integrations:** add permission setup guides ([#265](https://github.com/martadams89/seo-website-indexer/issues/265)) ([e8215be](https://github.com/martadams89/seo-website-indexer/commit/e8215beb8207a5bc3e6e0c46dac53949e943a7ba))
+
 ## [1.30.0](https://github.com/martadams89/seo-website-indexer/compare/v1.29.0...v1.30.0) (2026-08-17)
 
 
