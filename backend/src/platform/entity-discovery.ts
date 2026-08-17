@@ -30,12 +30,25 @@ export interface EntityDiscoveryResult {
   sources: string[];
   found_fields: string[];
   warnings: string[];
+  selection: {
+    selected_name: string;
+    selected_type: string;
+    reason: string;
+    candidates: Array<{
+      name: string;
+      type: string;
+      url: string;
+      selected: boolean;
+      relationship?: string;
+    }>;
+  };
   data: EntityDiscoveryData;
 }
 
 type JsonLdNode = Record<string, unknown>;
 
 const RELEVANT_TYPES = new Set(['organization', 'localbusiness', 'person', 'product', 'softwareapplication', 'mobileapplication', 'webapplication', 'corporation', 'professionalservice']);
+const IDENTITY_TYPES = new Set([...RELEVANT_TYPES, 'brand', 'website']);
 
 function decodeHtml(value: string): string {
   return value
@@ -76,6 +89,37 @@ function extractJsonLd(html: string): JsonLdNode[] {
     catch { /* Broken JSON-LD is reported as unavailable instead of breaking discovery. */ }
   }
   return nodes;
+}
+
+function mergeValues(current: unknown, next: unknown): unknown {
+  if (current == null) return next;
+  if (next == null) return current;
+  if (Array.isArray(current) || Array.isArray(next)) {
+    const values = [...arrayValue(current), ...arrayValue(next)];
+    return values.filter((value, index) => values.findIndex(item => JSON.stringify(item) === JSON.stringify(value)) === index);
+  }
+  if (typeof current === 'object' && typeof next === 'object') {
+    const merged = { ...(current as JsonLdNode) };
+    for (const [key, value] of Object.entries(next as JsonLdNode)) merged[key] = mergeValues(merged[key], value);
+    return merged;
+  }
+  return current === next ? current : next;
+}
+
+function mergeJsonLdNodes(nodes: JsonLdNode[]): JsonLdNode[] {
+  const merged: JsonLdNode[] = [];
+  const byId = new Map<string, number>();
+  for (const node of nodes) {
+    const id = textValue(node['@id']);
+    if (!id || !byId.has(id)) {
+      if (id) byId.set(id, merged.length);
+      merged.push(node);
+      continue;
+    }
+    const index = byId.get(id)!;
+    merged[index] = mergeValues(merged[index], node) as JsonLdNode;
+  }
+  return merged;
 }
 
 function attr(html: string, patterns: RegExp[]): string {
@@ -164,11 +208,81 @@ function schemaType(types: string[], hasAddress: boolean): string {
   return 'brand';
 }
 
-function candidateScore(node: JsonLdNode): number {
+function hostname(value: string): string {
+  if (!value) return '';
+  try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); }
+  catch { return ''; }
+}
+
+function identityText(value: string): string {
+  return value.normalize('NFKD').toLowerCase().replace(/[™®©]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function namesMatch(candidateName: string, signals: string[]): 'exact' | 'partial' | '' {
+  const candidate = identityText(candidateName);
+  if (!candidate) return '';
+  for (const signal of signals.map(identityText).filter(Boolean)) {
+    if (candidate === signal) return 'exact';
+    if (candidate.length >= 4 && (signal.includes(candidate) || candidate.includes(signal))) return 'partial';
+  }
+  return '';
+}
+
+interface RankedCandidate {
+  node: JsonLdNode;
+  score: number;
+  name: string;
+  type: string;
+  url: string;
+  signals: string[];
+}
+
+function candidateScore(node: JsonLdNode, context?: { siteHost: string; nameSignals: string[] }): RankedCandidate {
   const types = nodeTypes(node).map(type => type.toLowerCase());
   let score = types.some(type => RELEVANT_TYPES.has(type)) ? 20 : 0;
   for (const key of ['name', 'url', 'address', 'telephone', 'sameAs', 'aggregateRating']) if (node[key]) score += 5;
-  return score;
+  if (types.some(type => ['product', 'softwareapplication', 'mobileapplication', 'webapplication'].includes(type))) score += 20;
+  if (types.some(type => ['localbusiness', 'professionalservice'].includes(type))) score += 15;
+  if (types.some(type => ['organization', 'corporation'].includes(type))) score += 10;
+
+  const name = textValue(node.name ?? node.legalName);
+  const url = textValue(node.url) || textValue(node['@id']);
+  const signals: string[] = [];
+  if (context) {
+    const urlHost = hostname(textValue(node.url));
+    const idHost = hostname(textValue(node['@id']));
+    if (urlHost && urlHost === context.siteHost) {
+      score += 80;
+      signals.push('site URL');
+    } else if (urlHost && context.siteHost) {
+      score -= 35;
+    }
+    if (idHost && idHost === context.siteHost) {
+      score += 40;
+      signals.push('schema ID');
+    }
+    const nameMatch = namesMatch(name, context.nameSignals);
+    if (nameMatch === 'exact') {
+      score += 60;
+      signals.push('site name');
+    } else if (nameMatch === 'partial') {
+      score += 35;
+      signals.push('page title');
+    }
+  }
+  return { node, score, name, type: nodeTypes(node).join(' / ') || 'Entity', url, signals };
+}
+
+function relationIds(node: JsonLdNode): Map<string, string> {
+  const relationships = new Map<string, string>();
+  for (const [property, label] of [['publisher', 'Publisher'], ['parentOrganization', 'Parent organisation'], ['brand', 'Brand'], ['provider', 'Provider']] as const) {
+    for (const value of arrayValue(node[property])) {
+      if (!value || typeof value !== 'object') continue;
+      const id = textValue((value as JsonLdNode)['@id']);
+      if (id) relationships.set(id, label);
+    }
+  }
+  return relationships;
 }
 
 function numeric(value: unknown): number | null {
@@ -179,9 +293,18 @@ function numeric(value: unknown): number | null {
 }
 
 export function parseEntityDiscovery(html: string, input: { siteName: string; siteUrl: string }): EntityDiscoveryResult {
-  const nodes = extractJsonLd(html);
-  const schemaTypes = [...new Set(nodes.flatMap(nodeTypes))];
-  const candidate = [...nodes].sort((a, b) => candidateScore(b) - candidateScore(a))[0];
+  const extractedNodes = extractJsonLd(html);
+  const nodes = mergeJsonLdNodes(extractedNodes);
+  const schemaTypes = [...new Set(extractedNodes.flatMap(nodeTypes))];
+  const pageTitle = attr(html, [/<title[^>]*>([\s\S]*?)<\/title>/i]);
+  const canonicalUrl = canonical(html);
+  const siteHost = hostname(canonicalUrl) || hostname(input.siteUrl);
+  const nameSignals = [meta(html, 'og:site_name'), pageTitle, input.siteName];
+  const ranked = nodes
+    .filter(node => nodeTypes(node).some(type => IDENTITY_TYPES.has(type.toLowerCase())))
+    .map(node => candidateScore(node, { siteHost, nameSignals }))
+    .sort((a, b) => b.score - a.score);
+  const candidate = ranked[0]?.node;
   const types = candidate ? nodeTypes(candidate) : [];
   const address = addressParts(candidate?.address);
   const sameAs = arrayValue(candidate?.sameAs).map(textValue).filter(Boolean);
@@ -206,9 +329,9 @@ export function parseEntityDiscovery(html: string, input: { siteName: string; si
 
   const rating = candidate?.aggregateRating && typeof candidate.aggregateRating === 'object'
     ? candidate.aggregateRating as Record<string, unknown> : {};
-  const primaryUrl = textValue(candidate?.url) || canonical(html) || input.siteUrl;
+  const primaryUrl = textValue(candidate?.url) || canonicalUrl || input.siteUrl;
   const name = textValue(candidate?.name ?? candidate?.legalName) || meta(html, 'og:site_name')
-    || attr(html, [/<title[^>]*>([\s\S]*?)<\/title>/i]) || input.siteName;
+    || pageTitle || input.siteName;
   const locale = textValue(candidate?.inLanguage).replace('_', '-') || localeFromHtml(html) || 'en';
   const market = address.market || textValue(candidate?.areaServed);
   const knowledge: Record<string, unknown> = {};
@@ -238,10 +361,47 @@ export function parseEntityDiscovery(html: string, input: { siteName: string; si
     .map(([field]) => field);
   const sources = candidate ? [`${types.join(' / ') || 'Entity'} JSON-LD`, 'Page metadata'] : ['Page metadata'];
   const warnings: string[] = [];
-  if (!nodes.length) warnings.push('No valid JSON-LD was found. Basic page metadata was used instead.');
-  else if (candidate && !candidateScore(candidate)) warnings.push('Structured data was found, but it did not contain a clear organization, location, person or product record.');
+  if (!extractedNodes.length) warnings.push('No valid JSON-LD was found. Basic page metadata was used instead.');
+  else if (!candidate) warnings.push('Structured data was found, but it did not contain a clear organization, location, person or product record.');
   if (!address.formatted) warnings.push('No public address was discovered. Add it only if this entity has a customer-facing location.');
   if (!sameAs.length) warnings.push('No sameAs profiles or public listing links were discovered.');
+
+  const related = candidate ? relationIds(candidate) : new Map<string, string>();
+  const candidates: EntityDiscoveryResult['selection']['candidates'] = [];
+  const seenIdentities = new Set<string>();
+  for (const row of ranked) {
+    const candidateName = row.name || row.type;
+    const identityKey = `${identityText(candidateName)}|${hostname(row.url) || row.url}`;
+    if (seenIdentities.has(identityKey)) continue;
+    seenIdentities.add(identityKey);
+    candidates.push({
+      name: candidateName,
+      type: row.type,
+      url: row.url,
+      selected: row.node === candidate,
+      ...(related.get(textValue(row.node['@id'])) ? { relationship: related.get(textValue(row.node['@id'])) } : {}),
+    });
+    if (candidates.length === 8) break;
+  }
+  const selected = ranked[0];
+  const matchedBy = selected?.signals.includes('site URL') && selected.signals.some(signal => signal === 'site name' || signal === 'page title')
+    ? `its URL and name match ${siteHost}`
+    : selected?.signals.includes('site URL') || selected?.signals.includes('schema ID')
+      ? `its structured-data URL matches ${siteHost}`
+      : selected?.signals.includes('site name') || selected?.signals.includes('page title')
+        ? 'its name matches the selected site'
+        : 'it is the clearest identity record in the page structured data';
+  const selection = candidate ? {
+    selected_name: name,
+    selected_type: types.join(' / ') || 'Entity',
+    reason: `Selected ${name} because ${matchedBy}.`,
+    candidates,
+  } : {
+    selected_name: name,
+    selected_type: 'Page metadata',
+    reason: 'No suitable JSON-LD identity was found, so page metadata was used.',
+    candidates,
+  };
 
   return {
     source_url: input.siteUrl,
@@ -250,6 +410,7 @@ export function parseEntityDiscovery(html: string, input: { siteName: string; si
     sources,
     found_fields: foundFields,
     warnings,
+    selection,
     data,
   };
 }

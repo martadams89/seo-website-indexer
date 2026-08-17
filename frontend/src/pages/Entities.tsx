@@ -154,7 +154,12 @@ export default function EntitiesPage() {
       for (const [key, value] of [['description', draft.description], ['legal_name', draft.legalName], ['logo_url', draft.logoUrl]]) {
         if (value.trim()) knowledge[key] = value.trim(); else delete knowledge[key];
       }
-      if (discovery) knowledge.discovery = { source_url: discovery.source_url, discovered_at: discovery.discovered_at, schema_types: discovery.schema_types };
+      if (discovery) knowledge.discovery = {
+        source_url: discovery.source_url,
+        discovered_at: discovery.discovered_at,
+        schema_types: discovery.schema_types,
+        selection: discovery.selection,
+      };
       const listings = draft.listings.filter(row => row.provider.trim()).map(row => ({
         provider: row.provider.trim(), url: row.url.trim() || undefined, status: row.status,
         rating: row.rating ? Number(row.rating) : undefined, review_count: row.reviewCount ? Number(row.reviewCount) : undefined,
@@ -202,7 +207,12 @@ export default function EntitiesPage() {
             <button className="btn btn-primary" disabled={!draft.siteId || discovering} onClick={discover}>{discovering ? <RefreshCw className="spin" size={14}/> : <Sparkles size={14}/>} {discovering ? 'Scanning website…' : discovery ? 'Scan again' : 'Discover public facts'}</button>
             <small>{selectedSite ? `Reads ${selectedSite.domain}. ` : ''}Public HTML only; your website is never changed.</small>
           </> : <div className="entity-no-site"><p>Add a website first so we have a trusted source to inspect.</p><Link className="btn btn-secondary btn-sm" to="/sites">Go to websites</Link></div>}
-          {discovery && <div className="entity-discovery-result"><div><BadgeCheck/><strong>{discovery.found_fields.length} facts discovered</strong></div><span>{discovery.sources.join(' + ')}</span>{discovery.schema_types.length > 0 && <span>Schema: {discovery.schema_types.join(', ')}</span>}{discovery.warnings.map(warning => <p key={warning}>{warning}</p>)}</div>}
+          {discovery && <div className="entity-discovery-result">
+            <div><BadgeCheck/><strong>{discovery.found_fields.length} facts discovered</strong></div>
+            <section className="entity-selected-identity"><span>Selected identity</span><strong>{discovery.selection.selected_name}</strong><small>{discovery.selection.selected_type}</small><p>{discovery.selection.reason}</p></section>
+            {discovery.selection.candidates.length > 1 && <details><summary>Other identities found ({discovery.selection.candidates.length - 1})</summary><ul>{discovery.selection.candidates.filter(candidate => !candidate.selected).map(candidate => <li key={`${candidate.type}-${candidate.name}-${candidate.url}`}><span><strong>{candidate.name}</strong><small>{candidate.type}{candidate.relationship ? ` · ${candidate.relationship}` : ''}</small></span>{candidate.url && <a href={candidate.url} target="_blank" rel="noreferrer" aria-label={`Open ${candidate.name}`}><ExternalLink/></a>}</li>)}</ul></details>}
+            <span>{discovery.sources.join(' + ')}</span>{discovery.schema_types.length > 0 && <span>Schema found: {discovery.schema_types.join(', ')}</span>}{discovery.warnings.map(warning => <p key={warning}>{warning}</p>)}
+          </div>}
         </div>
 
         <div className="entity-howto">
