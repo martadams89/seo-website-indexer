@@ -100,6 +100,8 @@ Connections are configured in the dashboard and scoped to the active workspace u
 
 Workspace-specific API keys override any platform default set by a super-admin. This allows one installation to use shared keys, client-owned keys or a mixture of both.
 
+See the [integration permission and setup guide](docs/INTEGRATIONS.md) for the exact OAuth scopes, provider roles, token permissions, callback URLs, value locations and troubleshooting steps for every service in this table. The same minimum-access guide is available from each connection modal in the dashboard.
+
 ## How indexing works
 
 Each scheduled run reads a site's configured sitemap and any additional `Sitemap:` entries in `robots.txt`. It compares the current URLs and `lastmod` values with the previous run, then submits only new or changed content where the receiving service supports it.
@@ -194,7 +196,7 @@ Before opening a pull request:
 
 ```bash
 cd backend && npm test && npm run build
-cd frontend && npm run lint && npm run build
+cd frontend && npm run test:theme && npm run test:ui && npm run test:integrations && npm run lint && npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
@@ -203,6 +205,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 
 - [Deployment, authentication and recovery](docs/DEPLOYMENT.md)
 - [Users, roles and workspaces](docs/USERS_AND_WORKSPACES.md)
+- [Integration permissions and setup](docs/INTEGRATIONS.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)
 - [Automation API and signed webhooks](docs/AUTOMATION_API.md)

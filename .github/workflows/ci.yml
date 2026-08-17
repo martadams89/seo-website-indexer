@@ -50,5 +50,7 @@ jobs:
         run: npm run test:theme
       - name: Dialog contract
         run: npm run test:ui
+      - name: Integration guide contract
+        run: npm run test:integrations
       - name: Typecheck & build
         run: npm run build

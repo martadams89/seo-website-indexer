@@ -36,6 +36,8 @@ Connecting Google for Search Console is separate from signing in to the dashboar
 
 The connection uses the OAuth 2.0 web application flow and requests offline access. Access tokens are refreshed automatically while the Google grant remains valid. The standard connection requests Search Console, read-only Google Analytics and email scopes. The broader `cloud-platform` scope is requested only when the optional Google API auto-configuration flow is selected.
 
+For the exact scope strings, GA4 role, API-enable checklist and permission matrix for every other provider, see [integration permissions and setup](INTEGRATIONS.md).
+
 ### Use a Google OAuth client configured by the operator
 
 If the deployment already has Google OAuth credentials in its environment, select **Settings → Google Accounts → Connect Google** and complete the consent window.
