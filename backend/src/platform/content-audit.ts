@@ -1,25 +1,50 @@
-import { getDb, getSitesForWorkspace, getUrlsBySite, type Site } from '../db/database.js';
+import { getDb, getSitesForWorkspace, getUrlsBySite } from '../db/database.js';
 import { createWorkItem, recordMetric, recordUsage } from './store.js';
 
-interface PageAudit {
+export interface PageAudit {
   url: string; status: number; title: string; description: string; canonical: string;
   words: number; internalLinks: number; externalLinks: number; schemas: number;
 }
 
 const textContent = (html: string) => html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
   .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-const attr = (html: string, re: RegExp) => (re.exec(html)?.[1] ?? '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
 
-async function inspectPage(url: string, site: Site): Promise<PageAudit> {
+const namedEntities: Record<string, string> = {
+  amp: '&', apos: "'", copy: '©', gt: '>', hellip: '…', lt: '<', mdash: '—', nbsp: ' ', ndash: '–', quot: '"', reg: '®', trade: '™',
+};
+
+export function decodeHtmlEntities(value: string): string {
+  return value.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (entity, code: string) => {
+    if (code[0] !== '#') return namedEntities[code.toLowerCase()] ?? entity;
+    const numeric = code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number.parseInt(code.slice(1), 10);
+    try { return Number.isFinite(numeric) ? String.fromCodePoint(numeric) : entity; } catch { return entity; }
+  });
+}
+
+function tagAttribute(tag: string, name: string): string {
+  const match = new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i').exec(tag);
+  return decodeHtmlEntities(match?.[2] ?? '').trim();
+}
+
+function tagWithAttribute(html: string, tagName: string, attribute: string, value: string): string {
+  for (const match of html.matchAll(new RegExp(`<${tagName}\\b[^>]*>`, 'gi'))) {
+    if (tagAttribute(match[0], attribute).toLowerCase() === value) return match[0];
+  }
+  return '';
+}
+
+export async function inspectPage(url: string): Promise<PageAudit> {
   const res = await fetch(url, { headers: { 'User-Agent': 'OrganicCommandAudit/1.0' }, redirect: 'follow', signal: AbortSignal.timeout(20_000) });
   const html = (await res.text()).slice(0, 2_000_000);
-  const title = attr(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
-  const description = attr(html, /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i) || attr(html, /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i);
-  const canonical = attr(html, /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']*)/i) || attr(html, /<link[^>]+href=["']([^"']*)["'][^>]+rel=["']canonical["']/i);
-  const origin = new URL(site.domain.startsWith('http') ? site.domain : `https://${site.domain}`).hostname.replace(/^www\./, '');
-  const links = [...html.matchAll(/<a\b[^>]+href=["']([^"'#]+)["']/gi)].map(match => match[1]);
+  const title = decodeHtmlEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? '').trim();
+  const description = tagAttribute(tagWithAttribute(html, 'meta', 'name', 'description'), 'content');
+  const canonicalTag = [...html.matchAll(/<link\b[^>]*>/gi)].find(match => tagAttribute(match[0], 'rel').toLowerCase().split(/\s+/).includes('canonical'))?.[0] ?? '';
+  const canonical = tagAttribute(canonicalTag, 'href');
+  const resolvedUrl = res.url || url;
+  const origin = new URL(resolvedUrl).hostname.replace(/^www\./, '');
+  const links = [...html.matchAll(/<a\b[^>]*>/gi)].map(match => tagAttribute(match[0], 'href')).filter(href => href && !href.startsWith('#'));
   let internalLinks = 0; let externalLinks = 0;
-  for (const href of links) { try { const host = new URL(href, url).hostname.replace(/^www\./, ''); if (host === origin) internalLinks++; else externalLinks++; } catch { /* malformed href */ } }
+  for (const href of links) { try { const host = new URL(href, resolvedUrl).hostname.replace(/^www\./, ''); if (host === origin) internalLinks++; else externalLinks++; } catch { /* malformed href */ } }
   const words = textContent(html).split(/\s+/).filter(Boolean).length;
   return { url, status: res.status, title, description, canonical, words, internalLinks, externalLinks,
     schemas: (html.match(/<script[^>]+type=["']application\/ld\+json["']/gi) ?? []).length };
@@ -36,7 +61,7 @@ export async function auditContentInventory(workspaceId: string, siteId?: string
     if (!urls.length) urls.push(site.domain.startsWith('http') ? site.domain : `https://${site.domain}`);
     const results: PageAudit[] = [];
     for (let index = 0; index < urls.length; index += 5) {
-      const batch = await Promise.allSettled(urls.slice(index, index + 5).map(url => inspectPage(url, site)));
+      const batch = await Promise.allSettled(urls.slice(index, index + 5).map(url => inspectPage(url)));
       for (const result of batch) if (result.status === 'fulfilled') results.push(result.value);
     }
     const observedAt = new Date().toISOString(); const titleMap = new Map<string, string[]>();
