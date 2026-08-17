@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:integrations": "node scripts/check-integration-guides.mjs",
     "test:ui": "node scripts/check-modal-contract.mjs",
     "test:theme": "node scripts/check-theme-contrast.mjs",
     "preview": "vite preview"

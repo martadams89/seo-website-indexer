@@ -1,4 +1,4 @@
-import { effectiveSetting, getSiteById, type Site } from '../db/database.js';
+import { getSiteById, type Site } from '../db/database.js';
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 import { logSystem } from '../utils/logger.js';
 import {
@@ -82,7 +82,10 @@ async function syncGa4(integration: Integration): Promise<SyncResult> {
 
 async function syncPageSpeed(integration: Integration): Promise<SyncResult> {
   const site = siteFor(integration); if (!site) throw new Error('PageSpeed requires a site.');
-  const key = asString(integration.config.api_key) || effectiveSetting(integration.workspace_id, 'crux_api_key') || '';
+  // PageSpeed Insights and Chrome UX Report are separate Google APIs. Reusing
+  // a CrUX-restricted key here makes a correctly locked-down CrUX key fail with
+  // API_KEY_SERVICE_BLOCKED, so PageSpeed uses only its own optional key.
+  const key = asString(integration.config.api_key);
   const target = asString(integration.config.url) || (site.domain.startsWith('http') ? site.domain : `https://${site.domain}`);
   let observations = 0;
   const regressions: string[] = [];
