@@ -49,9 +49,9 @@ describe('v1.26 platform upgrade', () => {
   it('adds scheduled prompt and Bing OAuth columns without losing existing rows', () => {
     const db = database.getDb();
     const promptColumns = (db.prepare('PRAGMA table_info(ai_prompts)').all() as Array<{ name: string }>).map(row => row.name);
-    expect(promptColumns).toEqual(expect.arrayContaining(['group_name', 'locale', 'device', 'persona', 'cadence', 'next_run_at', 'last_run_at']));
-    expect(db.prepare('SELECT prompt,group_name,cadence FROM ai_prompts WHERE id=1').get()).toEqual({
-      prompt: 'Which platform is visible?', group_name: 'Core prompts', cadence: 'manual',
+    expect(promptColumns).toEqual(expect.arrayContaining(['group_name', 'locale', 'device', 'persona', 'cadence', 'next_run_at', 'last_run_at', 'schema_version']));
+    expect(db.prepare('SELECT prompt,group_name,cadence,schema_version FROM ai_prompts WHERE id=1').get()).toEqual({
+      prompt: 'Which platform is visible?', group_name: 'Core prompts', cadence: 'manual', schema_version: 1,
     });
 
     const bingColumns = (db.prepare('PRAGMA table_info(bing_accounts)').all() as Array<{ name: string }>).map(row => row.name);
@@ -64,7 +64,7 @@ describe('v1.26 platform upgrade', () => {
     expect(tables).toEqual(expect.arrayContaining([
       'integrations', 'metric_observations', 'work_items', 'annotations', 'dashboard_views',
       'report_templates', 'report_runs', 'usage_ledger', 'budget_policies', 'outbound_webhooks',
-      'service_tokens', 'content_actions', 'local_entities', 'bing_oauth_states',
+      'service_tokens', 'content_actions', 'local_entities', 'bing_oauth_states', 'ai_prompt_revisions',
     ]));
   });
 });

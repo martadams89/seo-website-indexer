@@ -174,6 +174,7 @@ function initSchema(db: Database.Database): void {
       next_run_at TEXT,
       last_run_at TEXT,
       enabled    INTEGER NOT NULL DEFAULT 1,
+      schema_version INTEGER NOT NULL DEFAULT 2,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -189,6 +190,17 @@ function initSchema(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_ai_results_prompt ON ai_results(prompt_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS ai_prompt_revisions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      prompt_id   INTEGER NOT NULL REFERENCES ai_prompts(id) ON DELETE CASCADE,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+      snapshot    TEXT NOT NULL,
+      reason      TEXT NOT NULL DEFAULT 'edit',
+      changed_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_prompt_revisions_prompt ON ai_prompt_revisions(prompt_id, created_at DESC);
 
     -- ── Core Web Vitals (CrUX) snapshots ─────────────────────────────────
     CREATE TABLE IF NOT EXISTS crux_snapshots (
@@ -821,6 +833,12 @@ function initSchema(db: Database.Database): void {
   }
   if (apCols.length > 0 && !apCols.some(c => c.name === 'last_run_at')) {
     db.exec("ALTER TABLE ai_prompts ADD COLUMN last_run_at TEXT;");
+  }
+  // Rows created before the structured prompt library are deliberately marked
+  // as v1. The dashboard can then offer an explicit, non-destructive upgrade
+  // instead of guessing whether default-looking metadata was chosen by a user.
+  if (apCols.length > 0 && !apCols.some(c => c.name === 'schema_version')) {
+    db.exec("ALTER TABLE ai_prompts ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;");
   }
   if (apCols.length > 0) db.exec("CREATE INDEX IF NOT EXISTS idx_ai_prompts_ws ON ai_prompts(workspace_id);");
 

@@ -11,6 +11,7 @@ const modalSurfaces = [
   'src/pages/Citations.tsx',
   'src/pages/Governance.tsx',
   'src/pages/Integrations.tsx',
+  'src/pages/Intelligence.tsx',
   'src/pages/Publishing.tsx',
   'src/pages/Reports.tsx',
   'src/pages/Sites.tsx',

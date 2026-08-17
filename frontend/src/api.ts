@@ -266,7 +266,7 @@ export interface PlatformOverview {
   freshness: Array<{ source: string; observed_at: string; observations: number }>;
   content_actions: Array<{ status: string; count: number }>;
   budgets: BudgetStatus[]; usage: { total_cost: number; rows: Array<Record<string, unknown>> };
-  forecasts: Array<{ source: string; metric: string; history_days: number; horizon_days: number; current: number; forecast: number; lower: number; upper: number; daily_slope: number; method: string; generated_at: string }>;
+  forecasts: Array<{ source: string; metric: string; unit: string | null; history_days: number; horizon_days: number; current: number; forecast: number; lower: number; upper: number; daily_slope: number; method: string; generated_at: string }>;
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────────
@@ -519,6 +519,8 @@ export const api = {
   // ── AI citations ──
   getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
   getAiPrompts: () => apiFetch<AiPrompt[]>('/api/ai/prompts'),
+  getAiMigration: () => apiFetch<AiMigrationPlan>('/api/ai/migration'),
+  upgradeAiPrompts: (data: AiMigrationPolicy) => apiFetch<{ prompts_upgraded: number; results_preserved: number }>('/api/ai/migration', { method: 'POST', body: JSON.stringify(data) }),
   addAiPrompt: (prompt: string, site_id?: string | null, category: AiPromptCategory = 'discovery', schedule: Partial<Pick<AiPrompt, 'group_name' | 'locale' | 'device' | 'persona' | 'cadence'>> = {}) =>
     apiFetch<AiPrompt>('/api/ai/prompts', { method: 'POST', body: JSON.stringify({ prompt, site_id, category, ...schedule }) }),
   updateAiPrompt: (id: number, data: Partial<AiPrompt>) => apiFetch<AiPrompt>(`/api/ai/prompts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -785,7 +787,18 @@ export interface AiPrompt {
   id: number; site_id: string | null; prompt: string; category: AiPromptCategory;
   group_name: string; locale: string; device: string; persona: string | null;
   cadence: 'manual' | 'daily' | 'weekly' | 'monthly'; next_run_at: string | null; last_run_at: string | null;
-  enabled: number; created_at: string;
+  enabled: number; schema_version: number; created_at: string;
+}
+export interface AiMigrationPlan {
+  prompts: Array<{
+    id: number; prompt: string; result_count: number; suggested_category: AiPromptCategory;
+    category: AiPromptCategory; group_name: string; locale: string; device: string; cadence: AiPrompt['cadence'];
+  }>;
+  prompt_count: number; result_count: number;
+}
+export interface AiMigrationPolicy {
+  group_name: string; locale: string; device: string; persona?: string | null;
+  cadence: AiPrompt['cadence']; site_id?: string | null; categories: Record<string, AiPromptCategory>;
 }
 export interface AiResult {
   id: number; prompt_id: number; prompt?: string; site_id?: string | null;

@@ -111,7 +111,7 @@ import { getBingQuota, submitToBingInBatches, deriveBingSiteUrl } from './indexe
 import { getGooglePerformance, getBingPerformance, getBingCrawlIssues, getGoogleDimension } from './indexer/performance.js';
 import { snapshotSitePerformance, getWowDeltas, getQueryTrend, getTrackableQueries, listTrackedQueries, addTrackedQuery, removeTrackedQuery, getPortfolioMovers } from './analytics/perf-store.js';
 import { checkSiteHygiene } from './indexer/hygiene.js';
-import { listPrompts, addPrompt, updatePrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, type Provider, type PromptCategory, type PromptRow } from './ai/citations.js';
+import { listPrompts, addPrompt, updatePrompt, deletePrompt, getResults, runPrompt, runAllPrompts, configuredProviders, PROVIDERS, PROMPT_CATEGORIES, getAiInsights, getThread, replyInThread, getLegacyPromptPlan, upgradeLegacyPrompts, type Provider, type PromptCategory, type PromptRow, type LegacyPromptUpgrade } from './ai/citations.js';
 import { fetchCrux, cruxConfigured } from './ai/crux.js';
 import { logSystem } from './utils/logger.js';
 import { provisionGeminiKey } from './ai/provision.js';
@@ -390,7 +390,7 @@ app.addHook('preHandler', async (req, reply) => {
   if (role === 'viewer' || role === null) {
     return reply.status(403).send({ error: 'Read-only access — ask a workspace admin for edit permissions.' });
   }
-  const isAiOperation = pathOnly.startsWith('/api/ai/prompts') || pathOnly.startsWith('/api/ai/run') || pathOnly === '/api/ai/config';
+  const isAiOperation = pathOnly.startsWith('/api/ai/prompts') || pathOnly.startsWith('/api/ai/run') || pathOnly === '/api/ai/config' || pathOnly === '/api/ai/migration';
   if (isAiOperation && !canUseAiCitations(ctx.user, ctx.workspaceId)) {
     return reply.status(403).send({ error: 'AI Citations access is disabled for your account in this workspace. Ask a workspace admin.' });
   }
@@ -2389,6 +2389,14 @@ app.get('/api/ai/providers', async (req) => ({
 }));
 
 app.get('/api/ai/prompts', async (req) => listPrompts(currentWorkspace(req)));
+app.get('/api/ai/migration', async (req) => getLegacyPromptPlan(requireWorkspace(req)));
+app.post('/api/ai/migration', async (req, reply) => {
+  const ws = requireWorkspace(req);
+  const body = (req.body ?? {}) as LegacyPromptUpgrade;
+  if (body.site_id && !canAccessSiteInWorkspace(currentUser(req), body.site_id, ws)) return reply.code(404).send({ error: 'Site not found' });
+  if (body.cadence && !['manual','daily','weekly','monthly'].includes(body.cadence)) return reply.code(400).send({ error: 'Invalid cadence' });
+  return upgradeLegacyPrompts(ws, body, currentUser(req).id);
+});
 app.post('/api/ai/prompts', async (req, reply) => {
   const wsId = currentWorkspace(req);
   const { prompt, site_id, category, group_name, locale, device, persona, cadence } = (req.body ?? {}) as {
@@ -2405,7 +2413,7 @@ app.patch('/api/ai/prompts/:id', async (req, reply) => {
   const body = (req.body ?? {}) as Partial<Pick<PromptRow, 'prompt' | 'site_id' | 'category' | 'group_name' | 'locale' | 'device' | 'persona' | 'cadence' | 'enabled'>>;
   if (body.site_id) assertSiteAccess(req, body.site_id);
   if (body.category && !PROMPT_CATEGORIES.includes(body.category)) return reply.code(400).send({ error: 'Invalid prompt category' });
-  return updatePrompt(id, ws, body) ?? reply.code(404).send({ error: 'Prompt not found' });
+  return updatePrompt(id, ws, body, currentUser(req).id) ?? reply.code(404).send({ error: 'Prompt not found' });
 });
 app.delete('/api/ai/prompts/:id', async (req) => {
   deletePrompt(Number((req.params as { id: string }).id), currentWorkspace(req));

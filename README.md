@@ -21,10 +21,10 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
 | Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. |
-| AI visibility | Test a reusable set of questions across supported AI and search providers, record citations, compare competitors and review gains or losses. |
+| AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, record citations, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
-| Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Every observation keeps its source and timestamp. |
+| Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Every signal explains its source, scope, trend and suggested next step. |
 | Work and publishing | Turn findings into assigned actions and use approval-based publishing flows for WordPress, Shopify and Webflow. |
 | Reports | Build scheduled reports, send digests and provide a read-only client portal. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |

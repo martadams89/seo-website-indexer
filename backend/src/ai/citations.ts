@@ -222,7 +222,21 @@ export interface PromptRow {
   id: number; workspace_id: string | null; site_id: string | null; prompt: string;
   category: PromptCategory; group_name: string; locale: string; device: string; persona: string | null;
   cadence: 'manual' | 'daily' | 'weekly' | 'monthly'; next_run_at: string | null; last_run_at: string | null;
-  enabled: number; created_at: string;
+  enabled: number; schema_version: number; created_at: string;
+}
+
+export interface LegacyPromptPlan {
+  prompts: Array<{
+    id: number; prompt: string; result_count: number; suggested_category: PromptCategory;
+    category: PromptCategory; group_name: string; locale: string; device: string; cadence: PromptRow['cadence'];
+  }>;
+  prompt_count: number;
+  result_count: number;
+}
+
+export interface LegacyPromptUpgrade {
+  group_name?: string; locale?: string; device?: string; persona?: string | null;
+  cadence?: PromptRow['cadence']; site_id?: string | null; categories?: Record<string, PromptCategory>;
 }
 
 /** Prompts for one workspace (the tenant boundary). */
@@ -231,6 +245,29 @@ export function listPrompts(workspaceId: string | null = null): PromptRow[] {
     return getDb().prepare('SELECT * FROM ai_prompts WHERE workspace_id = ? ORDER BY created_at DESC').all(workspaceId) as PromptRow[];
   }
   return getDb().prepare('SELECT * FROM ai_prompts ORDER BY created_at DESC').all() as PromptRow[];
+}
+
+function suggestedCategory(prompt: string): PromptCategory {
+  const text = prompt.toLowerCase();
+  if (/\b(vs\.?|versus|compare|comparison|alternative|difference between)\b/.test(text)) return 'comparison';
+  if (/\b(how (?:do|can|should) i|how to|set ?up|configure|fix|troubleshoot|integrat(?:e|ion))\b/.test(text)) return 'support';
+  if (/\b(best|top|recommend|shortlist|buy|pricing|price|cost|provider|agency|service|software|platform|tool)\b/.test(text)) return 'commercial';
+  if (/\b(what is|who is|reviews? of|is .+ (?:good|legit|reliable))\b/.test(text)) return 'brand';
+  return 'discovery';
+}
+
+/** Identify pre-structured prompts without mutating them. */
+export function getLegacyPromptPlan(workspaceId: string): LegacyPromptPlan {
+  const prompts = getDb().prepare(`
+    SELECT p.*, COUNT(r.id) result_count
+    FROM ai_prompts p LEFT JOIN ai_results r ON r.prompt_id=p.id
+    WHERE p.workspace_id=? AND COALESCE(p.schema_version,1)<2
+    GROUP BY p.id ORDER BY p.created_at, p.id
+  `).all(workspaceId) as Array<PromptRow & { result_count: number }>;
+  const rows = prompts.map(row => ({ id: row.id, prompt: row.prompt, result_count: Number(row.result_count),
+    suggested_category: suggestedCategory(row.prompt), category: row.category, group_name: row.group_name,
+    locale: row.locale, device: row.device, cadence: row.cadence }));
+  return { prompts: rows, prompt_count: rows.length, result_count: rows.reduce((sum, row) => sum + row.result_count, 0) };
 }
 
 export function addPrompt(
@@ -259,16 +296,51 @@ function nextPromptRun(cadence: PromptRow['cadence']): string | null {
   return next.toISOString();
 }
 
-export function updatePrompt(id: number, workspaceId: string, changes: Partial<Pick<PromptRow, 'prompt' | 'site_id' | 'category' | 'group_name' | 'locale' | 'device' | 'persona' | 'cadence' | 'enabled'>>): PromptRow | null {
-  const current = getPrompt(id, workspaceId); if (!current) return null;
+type PromptChanges = Partial<Pick<PromptRow, 'prompt' | 'site_id' | 'category' | 'group_name' | 'locale' | 'device' | 'persona' | 'cadence' | 'enabled'>>;
+
+function persistPromptUpdate(current: PromptRow, workspaceId: string, changes: PromptChanges, changedBy: string | null, reason: 'edit' | 'legacy_upgrade'): void {
+  const db = getDb();
   const cadence = changes.cadence && ['manual','daily','weekly','monthly'].includes(changes.cadence) ? changes.cadence : current.cadence;
-  getDb().prepare(`UPDATE ai_prompts SET prompt=?,site_id=?,category=?,group_name=?,locale=?,device=?,persona=?,cadence=?,enabled=?,
+  const category = changes.category && PROMPT_CATEGORIES.includes(changes.category) ? changes.category : current.category;
+  db.prepare(`INSERT INTO ai_prompt_revisions(prompt_id,workspace_id,snapshot,reason,changed_by) VALUES(?,?,?,?,?)`)
+    .run(current.id, workspaceId, JSON.stringify(current), reason, changedBy);
+  // Old root results did not retain the exact question. Snapshot it before an
+  // edit so historic answers continue to display beside what was really asked.
+  db.prepare('UPDATE ai_results SET user_prompt=? WHERE prompt_id=? AND user_prompt IS NULL').run(current.prompt, current.id);
+  db.prepare(`UPDATE ai_prompts SET prompt=?,site_id=?,category=?,group_name=?,locale=?,device=?,persona=?,cadence=?,enabled=?,schema_version=2,
     next_run_at=CASE WHEN ?='manual' THEN NULL WHEN cadence!=? OR next_run_at IS NULL THEN datetime('now') ELSE next_run_at END
     WHERE id=? AND workspace_id=?`).run(changes.prompt?.trim() || current.prompt, changes.site_id === undefined ? current.site_id : changes.site_id,
-      changes.category ?? current.category, changes.group_name?.trim() || current.group_name, changes.locale?.trim() || current.locale,
+      category, changes.group_name?.trim() || current.group_name, changes.locale?.trim() || current.locale,
       changes.device?.trim() || current.device, changes.persona === undefined ? current.persona : (changes.persona?.trim() || null), cadence,
-      changes.enabled === undefined ? current.enabled : changes.enabled, cadence, cadence, id, workspaceId);
+      changes.enabled === undefined ? current.enabled : changes.enabled, cadence, cadence, current.id, workspaceId);
+}
+
+export function updatePrompt(id: number, workspaceId: string, changes: PromptChanges, changedBy: string | null = null): PromptRow | null {
+  const current = getPrompt(id, workspaceId); if (!current) return null;
+  getDb().transaction(() => persistPromptUpdate(current, workspaceId, changes, changedBy, 'edit'))();
   return getPrompt(id, workspaceId) ?? null;
+}
+
+/** Convert v1 prompts to the structured library in place. Prompt/result IDs
+ * stay stable, every previous prompt is revisioned, and all result rows remain. */
+export function upgradeLegacyPrompts(workspaceId: string, input: LegacyPromptUpgrade, changedBy: string | null = null): { prompts_upgraded: number; results_preserved: number } {
+  const plan = getLegacyPromptPlan(workspaceId);
+  if (!plan.prompt_count) return { prompts_upgraded: 0, results_preserved: 0 };
+  const cadence = input.cadence && ['manual','daily','weekly','monthly'].includes(input.cadence) ? input.cadence : 'manual';
+  getDb().transaction(() => {
+    for (const item of plan.prompts) {
+      const current = getPrompt(item.id, workspaceId); if (!current || current.schema_version >= 2) continue;
+      const requested = input.categories?.[String(item.id)];
+      persistPromptUpdate(current, workspaceId, {
+        category: requested && PROMPT_CATEGORIES.includes(requested) ? requested : item.suggested_category,
+        group_name: input.group_name?.trim() || 'Imported citation prompts',
+        locale: input.locale?.trim() || 'en-GB', device: input.device?.trim() || 'desktop',
+        persona: input.persona?.trim() || null, cadence,
+        site_id: input.site_id === undefined ? current.site_id : input.site_id,
+      }, changedBy, 'legacy_upgrade');
+    }
+  })();
+  return { prompts_upgraded: plan.prompt_count, results_preserved: plan.result_count };
 }
 
 export function listDuePrompts(limit = 50): PromptRow[] {
@@ -345,7 +417,7 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
       // Full response (bounded) — the dashboard renders it as a scrollable chat bubble.
       const text = answer.text.trim().slice(0, 12_000);
       insert.run(promptId, provider, answer.model, found.length ? 1 : 0, JSON.stringify(found), text, null,
-        null, JSON.stringify(answer.citations.slice(0, 40)), null);
+        null, JSON.stringify(answer.citations.slice(0, 40)), row.prompt);
       if (previous && Boolean(previous.cited) !== Boolean(found.length)) {
         const gained = found.length > 0;
         const label = PROVIDER_LABELS[provider] ?? provider;
@@ -371,7 +443,7 @@ export async function runPrompt(promptId: number, workspaceId: string | null = n
       return { provider, model: answer.model, cited: found.length > 0, domains: found, excerpt: text };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      insert.run(promptId, provider, null, 0, '[]', null, msg.slice(0, 300), null, '[]', null);
+      insert.run(promptId, provider, null, 0, '[]', null, msg.slice(0, 300), null, '[]', row.prompt);
       logSystem('warn', `AI citation [${provider}] failed: ${msg.slice(0, 120)}`);
       return { provider, model: null, cited: false, domains: [], error: msg };
     }

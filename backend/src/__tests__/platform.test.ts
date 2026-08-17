@@ -46,6 +46,7 @@ describe('organic operations platform', () => {
     for (let index = 0; index < 10; index++) {
       const observed = new Date(Date.now() - (9 - index) * 86_400_000).toISOString();
       store.recordMetric({ workspace_id: workspace.id, site_id: null, source: 'ga4', metric: 'sessions', dimension: '', value: 100 + index * 10, unit: 'count', observed_at: observed, provenance: { property: 'test' } });
+      store.recordMetric({ workspace_id: workspace.id, site_id: null, source: 'pagespeed', metric: 'lcp_ms', dimension: 'mobile', value: 3000 - index * 100, unit: 'ms', observed_at: observed, provenance: { strategy: 'mobile' } });
     }
     expect(store.listMetrics(workspace.id, { source: 'ga4' })).toHaveLength(10);
     const forecast = store.forecastMetrics(workspace.id)[0];
@@ -53,6 +54,7 @@ describe('organic operations platform', () => {
     expect(forecast.forecast).toBeGreaterThan(forecast.current);
     expect(forecast.lower).toBeLessThanOrEqual(forecast.forecast);
     expect(forecast.method).toContain('90%');
+    expect(store.forecastMetrics(workspace.id).some(row => row.metric === 'lcp_ms')).toBe(false);
 
     const first = store.createWorkItem({ workspaceId: workspace.id, source: 'content_audit', sourceRef: 'thin:/one', title: 'Thin page' });
     const second = store.createWorkItem({ workspaceId: workspace.id, source: 'content_audit', sourceRef: 'thin:/one', title: 'Duplicate signal' });

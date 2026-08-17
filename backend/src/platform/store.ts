@@ -162,7 +162,7 @@ export function listMetrics(workspaceId: string, filters: {
 }
 
 export interface MetricForecast {
-  source: string; metric: string; history_days: number; horizon_days: number;
+  source: string; metric: string; unit: string | null; history_days: number; horizon_days: number;
   current: number; forecast: number; lower: number; upper: number; daily_slope: number;
   method: string; generated_at: string;
 }
@@ -172,11 +172,15 @@ export interface MetricForecast {
  * until at least seven observations exist. */
 export function forecastMetrics(workspaceId: string, horizonDays = 30): MetricForecast[] {
   const horizon = Math.min(Math.max(Math.round(horizonDays), 7), 90);
-  const rows = getDb().prepare(`SELECT source,metric,substr(observed_at,1,10) day,SUM(value) value
+  // Only additive operational totals are meaningful when dimensions are
+  // summed. Scores, positions, rates and latency snapshots must never be
+  // projected as if adding mobile + desktop or page-level readings made a KPI.
+  const rows = getDb().prepare(`SELECT source,metric,unit,substr(observed_at,1,10) day,SUM(value) value
     FROM metric_observations WHERE workspace_id=? AND observed_at>=datetime('now','-120 days')
-    GROUP BY source,metric,substr(observed_at,1,10) ORDER BY source,metric,day`).all(workspaceId) as Array<{ source: string; metric: string; day: string; value: number }>;
+    AND metric IN ('sessions','conversions','revenue','visits','pageviews','edge_requests','edge_bytes','edge_visits','requests','bytes')
+    GROUP BY source,metric,unit,substr(observed_at,1,10) ORDER BY source,metric,unit,day`).all(workspaceId) as Array<{ source: string; metric: string; unit: string | null; day: string; value: number }>;
   const groups = new Map<string, typeof rows>();
-  for (const row of rows) { const key = `${row.source}\n${row.metric}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
+  for (const row of rows) { const key = `${row.source}\n${row.metric}\n${row.unit ?? ''}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
   const forecasts: MetricForecast[] = [];
   for (const series of groups.values()) {
     if (series.length < 7) continue;
@@ -187,9 +191,9 @@ export function forecastMetrics(workspaceId: string, horizonDays = 30): MetricFo
     const residuals = series.map((row, index) => Number(row.value) - (intercept + slope * index));
     const sigma = Math.sqrt(residuals.reduce((sum, value) => sum + value ** 2, 0) / Math.max(n - 2, 1));
     const projected = Math.max(0, intercept + slope * (n - 1 + horizon)); const band = 1.645 * sigma * Math.sqrt(1 + horizon / n);
-    forecasts.push({ source: series[0].source, metric: series[0].metric, history_days: n, horizon_days: horizon,
+    forecasts.push({ source: series[0].source, metric: series[0].metric, unit: series[0].unit, history_days: n, horizon_days: horizon,
       current: Number(series[n - 1].value), forecast: projected, lower: Math.max(0, projected - band), upper: projected + band,
-      daily_slope: slope, method: 'Linear trend over daily totals; 90% residual confidence band.', generated_at: new Date().toISOString() });
+      daily_slope: slope, method: 'Linear trend over additive daily totals; 90% residual confidence band.', generated_at: new Date().toISOString() });
   }
   return forecasts.sort((a, b) => Math.abs(b.daily_slope) - Math.abs(a.daily_slope)).slice(0, 12);
 }
