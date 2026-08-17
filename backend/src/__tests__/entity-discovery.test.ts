@@ -66,6 +66,33 @@ describe('entity discovery', () => {
     ]);
   });
 
+  it('selects an app identity instead of its parent company and merges split schema nodes', () => {
+    const result = parseEntityDiscovery(`<!doctype html><html lang="en-GB"><head>
+      <title>DampApp Pro™ - Damp &amp; Timber Survey Software</title>
+      <meta property="og:site_name" content="DampApp Pro" />
+      <link rel="canonical" href="https://dampapp.pro/" />
+      <script type="application/ld+json">{
+        "@context":"https://schema.org","@graph":[
+          {"@type":"Organization","@id":"https://prosurvey.app/#organization","name":"ProSurvey Apps Limited","legalName":"ProSurvey Apps Limited","url":"https://prosurvey.app/","address":{"addressCountry":"GB"},"sameAs":["https://www.linkedin.com/company/prosurvey-apps"]},
+          {"@type":"WebSite","@id":"https://dampapp.pro/#website","url":"https://dampapp.pro/","name":"DampApp Pro","publisher":{"@id":"https://prosurvey.app/#organization"}},
+          {"@type":"SoftwareApplication","@id":"https://dampapp.pro/#product","name":"DampApp Pro","url":"https://dampapp.pro/","description":"Damp and timber survey software.","publisher":{"@id":"https://prosurvey.app/#organization"},"sameAs":["https://play.google.com/store/apps/details?id=pro.dampapp","https://apps.apple.com/gb/app/dampapp-pro/id123"]},
+          {"@type":"SoftwareApplication","@id":"https://dampapp.pro/#product","aggregateRating":{"ratingValue":"4.9","ratingCount":"42"}}
+        ]
+      }</script></head></html>`, { siteName: 'DampApp.pro', siteUrl: 'https://dampapp.pro/' });
+
+    expect(result.data).toMatchObject({
+      name: 'DampApp Pro', entity_type: 'product', primary_url: 'https://dampapp.pro/', review_rating: 4.9, review_count: 42,
+    });
+    expect(result.data.knowledge).not.toHaveProperty('legal_name', 'ProSurvey Apps Limited');
+    expect(result.data.listings.map(item => item.provider)).toEqual(['Google Play', 'Apple App Store']);
+    expect(result.selection).toMatchObject({ selected_name: 'DampApp Pro', selected_type: 'SoftwareApplication' });
+    expect(result.selection.reason).toContain('URL and name match dampapp.pro');
+    expect(result.selection.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'DampApp Pro', type: 'SoftwareApplication', selected: true }),
+      expect.objectContaining({ name: 'ProSurvey Apps Limited', type: 'Organization', selected: false, relationship: 'Publisher' }),
+    ]));
+  });
+
   it('normalizes configured domains into scannable homepages', () => {
     expect(siteHomepage({ domain: 'sc-domain:example.com' } as never)).toBe('https://example.com/');
     expect(siteHomepage({ domain: 'https://example.com/store' } as never)).toBe('https://example.com/store');

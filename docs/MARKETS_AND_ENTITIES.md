@@ -14,6 +14,8 @@ It does not publish changes to your website or directory accounts. Saving a reco
 
 Discovery makes a read-only request to the selected site's public homepage. It looks for Organization, LocalBusiness, Person, Product and related JSON-LD, plus the canonical URL, language, description, Open Graph site name and image. It can also recognise common public profile and listing URLs from `sameAs`, including Google Business Profile, Google Play, the Apple App Store, G2, Capterra, GetApp, Software Advice, TrustRadius, Trustpilot, Product Hunt, SourceForge, the Chrome Web Store, Microsoft Store, Bing Places, Yelp, Tripadvisor and Apple Business Connect.
 
+When a page describes more than one identity, discovery prefers the record whose URL and name match the website being scanned. This is particularly important for product and app sites: a `SoftwareApplication` on the selected domain is used instead of its parent `Organization` on a different domain. The discovery panel shows the selected identity, why it was selected and any publisher, parent or alternative identities found on the page. Split JSON-LD records that share an `@id` are combined before their fields are imported.
+
 Discovery never changes the website. If the site blocks automated requests or does not publish structured data, use the ordinary fields instead. No JSON writing is required.
 
 ## What to record
