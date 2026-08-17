@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.3](https://github.com/martadams89/seo-website-indexer/compare/v1.33.2...v1.33.3) (2026-08-17)
+
+
+### 🐛 Bug Fixes
+
+* prefer site identity during entity discovery ([#275](https://github.com/martadams89/seo-website-indexer/issues/275)) ([9e488ee](https://github.com/martadams89/seo-website-indexer/commit/9e488eed110d30c0408b32e540c6bc5e27a517b0))
+
 ## [1.33.2](https://github.com/martadams89/seo-website-indexer/compare/v1.33.1...v1.33.2) (2026-08-17)
 
 
