@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.0](https://github.com/martadams89/seo-website-indexer/compare/v1.32.0...v1.33.0) (2026-08-17)
+
+
+### ✨ Features
+
+* scope unified intelligence by site ([#269](https://github.com/martadams89/seo-website-indexer/issues/269)) ([8331945](https://github.com/martadams89/seo-website-indexer/commit/83319453649719fc98b3b75f51ce9d13596377b6))
+
 ## [1.32.0](https://github.com/martadams89/seo-website-indexer/compare/v1.31.0...v1.32.0) (2026-08-17)
 
 
