@@ -456,9 +456,11 @@ function entityFromRow(row: Record<string, unknown>): LocalEntity {
   const listings = parseJson<LocalEntity['listings']>(String(row.listings ?? ''), []);
   const knowledge = parseJson<Record<string, unknown>>(String(row.knowledge ?? ''), {});
   const core = [row.name, row.market, row.primary_url, row.address, row.phone].filter(Boolean).length / 5 * 50;
-  const listing = listings.length ? listings.filter(item => item.status !== 'inconsistent').length / listings.length * 30 : 0;
-  const knowledgeScore = Math.min((Object.keys(identifiers).length + Object.keys(knowledge).length) * 5, 20);
-  return { ...row, identifiers, listings, knowledge, consistency_score: Math.round(core + listing + knowledgeScore) } as unknown as LocalEntity;
+  const verifiedListings = listings.filter(item => item.status === 'consistent' || item.status === 'verified').length;
+  const listing = listings.length ? verifiedListings / listings.length * 25 : 0;
+  const knowledgeScore = Math.min((Object.keys(identifiers).length + Object.keys(knowledge).length) * 5, 15);
+  const reviewScore = (row.review_rating != null ? 5 : 0) + (row.review_count != null ? 5 : 0);
+  return { ...row, identifiers, listings, knowledge, consistency_score: Math.round(core + listing + knowledgeScore + reviewScore) } as unknown as LocalEntity;
 }
 
 export function listLocalEntities(workspaceId: string): LocalEntity[] {

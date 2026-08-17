@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { getSitesForWorkspace, getWorkspaceSettings, setWorkspaceSetting } from '../db/database.js';
+import { getSiteById, getSitesForWorkspace, getWorkspaceSettings, setWorkspaceSetting } from '../db/database.js';
 import { canAccessSiteInWorkspace, listWorkspaceMembers } from '../auth/workspaces.js';
 import { recordAuditEvent, type User } from '../auth/users.js';
 import {
@@ -14,6 +14,7 @@ import {
 import { publishContentAction, rollbackContentAction, stageContentAction, syncIntegrationById, verifyContentAction } from './connectors.js';
 import { auditContentInventory } from './content-audit.js';
 import { runPlatformAutomation } from './automation.js';
+import { discoverEntityFromSite } from './entity-discovery.js';
 import {
   createReportTemplate, defaultReportRecipients, deleteReportTemplate, generateReport, getReportRun,
   listReportRuns, listReportTemplates, sendWorkspaceDigest, updateReportTemplate,
@@ -127,6 +128,20 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
   app.delete('/api/platform/views/:id', async (req, reply) => deleteDashboardView(workspace(req), user(req).id, (req.params as { id: string }).id) ? { ok: true } : reply.code(404).send({ error: 'Saved view not found' }));
 
   app.get('/api/platform/entities', async req => listLocalEntities(workspace(req)));
+  app.post('/api/platform/entities/discover', async (req, reply) => {
+    const body = (req.body ?? {}) as { site_id?: string };
+    if (!body.site_id) return reply.code(400).send({ error: 'Choose a website to scan.' });
+    assertSite(req, body.site_id);
+    const site = getSiteById(body.site_id);
+    if (!site) return reply.code(404).send({ error: 'Site not found.' });
+    try {
+      const result = await discoverEntityFromSite(site);
+      recordUsage({ workspace_id: workspace(req), user_id: user(req).id, provider: 'internal', operation: 'entity.discover', quantity: 1, unit: 'page', estimated_cost: 0, metadata: { site_id: site.id, source_url: result.source_url } });
+      return result;
+    } catch (error) {
+      return reply.code(422).send({ error: error instanceof Error ? error.message : 'Website discovery failed.' });
+    }
+  });
   app.post('/api/platform/entities', async (req, reply) => {
     const ws = workspace(req); const body = (req.body ?? {}) as { id?: string; site_id?: string | null; name?: string; market?: string; locale?: string; entity_type?: string; primary_url?: string | null; address?: string | null; phone?: string | null; identifiers?: Record<string,string>; listings?: Array<{provider:string;url?:string;status?:string;rating?:number;review_count?:number}>; knowledge?: Record<string,unknown>; review_rating?: number | null; review_count?: number | null };
     if (!body.name?.trim() || !body.market?.trim()) return reply.code(400).send({ error: 'Entity name and market are required.' });
