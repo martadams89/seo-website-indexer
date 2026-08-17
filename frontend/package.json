@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:theme": "node scripts/check-theme-contrast.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
