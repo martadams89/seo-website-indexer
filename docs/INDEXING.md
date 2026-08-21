@@ -4,7 +4,7 @@ This guide explains how a site moves from a sitemap to monitored search-engine s
 
 ## Add a site
 
-Open **Sites & Submissions → Add Site** and enter:
+Open **Sites → Add Site** and enter:
 
 - a name and domain;
 - the main sitemap URL;
@@ -95,7 +95,7 @@ IndexNow verifies site control by requesting a text file from the site:
 GET https://example.com/YOUR_KEY.txt
 ```
 
-The response body must be the key as plain text. Find the per-site key under **Sites & Submissions → site → IndexNow**.
+The response body must be the key as plain text. Find the per-site key under **Sites → site → IndexNow**.
 
 Choose one of these methods.
 

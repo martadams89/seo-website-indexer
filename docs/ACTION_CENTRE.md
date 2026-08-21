@@ -28,7 +28,7 @@ Google's separate Indexing API is not used for ordinary pages because it only su
 
 ## Google access required
 
-The website must have a Google account selected under **Sites & Submissions**. The OAuth grant needs the Search Console `webmasters` scope, and that Google identity must have access to the configured URL-prefix or domain property.
+The website must have a Google account selected under **Sites**. The OAuth grant needs the Search Console `webmasters` scope, and that Google identity must have access to the configured URL-prefix or domain property.
 
 The connected account can belong to the current user or be shared with the workspace. Workspace members can run the check without seeing its OAuth tokens. Their workspace role must include **Manage content and actions**.
 
@@ -51,4 +51,3 @@ Use normal prose in the title and description. Structured evidence from automate
 | Sitemap not accepted | Confirm the configured sitemap URL is public and the connected Google identity can manage the Search Console property. The URL Inspection result is still retained if it succeeds. |
 | Inspection needs attention | Read coverage, fetch, robots and canonical fields in the Google evidence card; copy the updated repair brief if another code or content change is required. |
 | Daily limit reached | Wait for the next quota day or review `GSC_INSPECTION_DAILY_LIMIT`; do not raise it beyond the allowance available to the Google property. |
-

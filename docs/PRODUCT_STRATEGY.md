@@ -17,9 +17,9 @@ governance without withholding the useful open-source core.
 
 The v1.27 platform completes the first broad implementation of this model. The
 command centre now sits on a normalized evidence layer and links directly to an
-assignable action inbox, scheduled AI visibility, governed CMS publishing,
-branded reporting, local-entity intelligence, usage controls and a client
-portal. Each headline signal links back to the operating surface that can
+assignable work centre, scheduled AI visibility, governed CMS publishing,
+branded reporting, local-entity intelligence, usage controls and an authenticated
+executive view. Each headline signal links back to the operating surface that can
 resolve it.
 
 ## v1.27 delivery snapshot
@@ -38,8 +38,8 @@ they are safe and useful in a single-container architecture:
 - WordPress, Shopify and Webflow adapter contracts with a mandatory propose →
   approve → stage → publish → verify workflow and captured rollback state.
 - Content inventory auditing, local-market entities/listings/reviews, scheduled
-  branded reports, severity-routed digests and a white-labelled read-only
-  client portal.
+  branded reports, severity-routed digests and a branded authenticated
+  executive view.
 - Encrypted connectors, Bing OAuth plus API-key fallback, signed webhooks,
   hashed scoped service tokens and stable metric/event/log ingestion APIs.
 - Workspace MFA and retention policies, an append-only usage ledger,
@@ -131,7 +131,7 @@ worth adding when it contributes a unique signal or supports a safe action.
 - Governed AI actions: propose schema, metadata, internal links and `llms.txt`
   changes, show diffs/evidence, require approval, publish through an adapter,
   verify the live result and support rollback.
-- Client portals, white labeling, approval queues, SCIM, enforced MFA,
+- Public guest portals, approval queues, SCIM, enforced MFA,
   retention/export controls, PostgreSQL/job-queue scale and high availability.
 
 ## Integration priority score
