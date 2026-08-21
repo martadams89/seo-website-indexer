@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.35.0](https://github.com/martadams89/seo-website-indexer/compare/v1.34.4...v1.35.0) (2026-08-21)
+
+
+### ✨ Features
+
+* streamline the platform and simplify the UI ([#287](https://github.com/martadams89/seo-website-indexer/issues/287)) ([84a07aa](https://github.com/martadams89/seo-website-indexer/commit/84a07aa0b69869b2a80a6a33403a0b48e17ec92b))
+
 ## [1.34.4](https://github.com/martadams89/seo-website-indexer/compare/v1.34.3...v1.34.4) (2026-08-21)
 
 
