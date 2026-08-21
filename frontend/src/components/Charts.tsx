@@ -60,11 +60,12 @@ export function StatCard({ label, value, sub, tone }: { label: string; value: st
 
 // ── Metric line chart: single series, date x-axis, hover tooltip ─────────────
 
-export function MetricChart({ points, color = 'var(--accent, #7c6cf5)', format = (n: number) => String(Math.round(n)), height = 200 }: {
+export function MetricChart({ points, color = 'var(--accent, #7c6cf5)', format = (n: number) => String(Math.round(n)), height = 200, label = 'Metric trend' }: {
   points: Array<{ date: string; value: number }>;
   color?: string;
   format?: (n: number) => string;
   height?: number;
+  label?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 640, padL = 44, padR = 12, padT = 12, padB = 26;
@@ -84,7 +85,7 @@ export function MetricChart({ points, color = 'var(--accent, #7c6cf5)', format =
 
   return (
     <div className="metric-chart-wrap" style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${W} ${height}`} width="100%" height={height} preserveAspectRatio="none"
+      <svg role="img" aria-label={`${label}. ${points.length} points from ${points[0].date} at ${format(points[0].value)} to ${points.at(-1)!.date} at ${format(points.at(-1)!.value)}.`} viewBox={`0 0 ${W} ${height}`} width="100%" height={height} preserveAspectRatio="none"
         onMouseLeave={() => setHover(null)}
         onMouseMove={e => {
           const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();

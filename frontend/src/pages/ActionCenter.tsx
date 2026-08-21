@@ -4,6 +4,7 @@ import {
   FileText, Filter, Globe2, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
 import { api, type Site, type WorkItem, type WorkspaceMember } from '../api';
 import { Modal } from '../components/Modal';
 import { useWorkspace } from '../workspace/WorkspaceContext';
@@ -56,10 +57,11 @@ function issueBrief(item: WorkItem, pageUrl = item.page_url || ''): string {
 
 export default function ActionCenterPage() {
   const { active } = useWorkspace(); const toast = useToast();
+  const [searchParams] = useSearchParams();
   const canManage = !!active?.permissions?.manage_content;
   const [items, setItems] = useState<WorkItem[]>([]); const [members, setMembers] = useState<WorkspaceMember[]>([]); const [sites, setSites] = useState<Site[]>([]);
   const [timeline, setTimeline] = useState<Array<{ id: string; kind: string; title: string; note: string | null; event_at: string }>>([]);
-  const [status, setStatus] = useState('active'); const [siteFilter, setSiteFilter] = useState('all'); const [query, setQuery] = useState(''); const [selected, setSelected] = useState<string[]>([]);
+  const [status, setStatus] = useState('active'); const [siteFilter, setSiteFilter] = useState(() => searchParams.get('site') || 'all'); const [query, setQuery] = useState(''); const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null); const [composer, setComposer] = useState(false); const [detail, setDetail] = useState<WorkItem | null>(null);
   const [pageTarget, setPageTarget] = useState(''); const [remediationNote, setRemediationNote] = useState('');
   const [draft, setDraft] = useState({ title: '', description: '', severity: 'medium', assignee_user_id: '', due_at: '', site_id: '', page_url: '' });
@@ -73,6 +75,10 @@ export default function ActionCenterPage() {
     setDetail(current => current ? work.find(item => item.id === current.id) || null : null);
   }, [active, status]);
   useEffect(() => { load().catch(() => null); }, [load]);
+  useEffect(() => {
+    const requestedSite = searchParams.get('site');
+    if (requestedSite) setSiteFilter(requestedSite);
+  }, [searchParams]);
 
   const visible = useMemo(() => items.filter(item => {
     if (status === 'active' && ['done', 'dismissed'].includes(item.status)) return false;
@@ -142,7 +148,7 @@ export default function ActionCenterPage() {
     <div className="ops-split action-split">
       <section className="ops-card action-board">
         <div className="ops-toolbar action-toolbar"><div className="ops-search"><Search size={15}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search issue, website, page or evidence…"/></div><select className="action-site-filter" aria-label="Filter by website" value={siteFilter} onChange={e => setSiteFilter(e.target.value)}><option value="all">All websites</option><option value="workspace">Workspace-wide</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}</select><div className="ops-segment"><Filter size={13}/>{['active', 'open', 'in_progress', 'done', 'all'].map(value => <button key={value} className={status === value ? 'active' : ''} onClick={() => setStatus(value)}>{value === 'in_progress' ? 'fixing' : value}</button>)}</div></div>
-        {selected.length > 0 && <div className="bulk-bar"><strong>{selected.length} selected</strong><button className="btn btn-secondary btn-sm" disabled={!canManage || busy === 'bulk'} onClick={bulkDone}><CheckCircle2 size={13}/> Mark resolved</button><button className="btn-icon btn-icon-ghost" onClick={() => setSelected([])}><X size={14}/></button></div>}
+        {selected.length > 0 && <div className="bulk-bar"><strong>{selected.length} selected</strong><button className="btn btn-secondary btn-sm" disabled={!canManage || busy === 'bulk'} onClick={bulkDone}><CheckCircle2 size={13}/> Mark resolved</button><button className="btn-icon btn-icon-ghost" aria-label="Clear selection" onClick={() => setSelected([])}><X size={14}/></button></div>}
         <div className="work-list">
           {visible.map(item => <article className={`work-item severity-${item.severity}`} key={item.id}>
             <input type="checkbox" aria-label={`Select ${item.title}`} checked={selected.includes(item.id)} onChange={e => setSelected(current => e.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>

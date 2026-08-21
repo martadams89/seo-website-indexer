@@ -33,7 +33,7 @@ for (const section of ['Google Analytics 4: the short answer', 'Analytics and pe
 }
 
 assert.match(page, /INTEGRATION_SETUP_GUIDES/, 'The integration page must use the structured guide catalog');
-assert.match(page, /> Setup guide<\//, 'Every connection modal must expose its setup guide');
+assert.match(page, /Setup guide\s*<\//, 'Every connection modal must expose its setup guide');
 assert.match(page, /Permission reference/, 'The integration page must link the complete reference');
 assert.match(page, /integration-guide-modal/, 'Setup guidance must use the shared accessible modal');
 

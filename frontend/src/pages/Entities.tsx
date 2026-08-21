@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { api, type EntityDiscovery, type LocalEntity, type Site } from '../api';
 import { useToast } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
+import { useInsights } from '../insights/InsightsContext';
 
 interface IdentifierRow { id: string; kind: string; customKind: string; value: string }
 interface ListingRow { id: string; provider: string; url: string; status: string; rating: string; reviewCount: string }
@@ -81,6 +82,7 @@ function mergeListings(current: ListingRow[], discovered: LocalEntity['listings'
 
 export default function EntitiesPage() {
   const { active } = useWorkspace();
+  const { siteScope } = useInsights();
   const toast = useToast();
   const canManage = !!active?.permissions?.manage_content;
   const [entities, setEntities] = useState<LocalEntity[]>([]);
@@ -99,10 +101,12 @@ export default function EntitiesPage() {
   useEffect(() => { load().catch(() => null); }, [load, active?.id]);
 
   const selectedSite = useMemo(() => sites.find(site => site.id === draft.siteId), [sites, draft.siteId]);
+  const visibleEntities = useMemo(() => entities.filter(entity => siteScope === 'all' ? true : siteScope === 'workspace' ? entity.site_id == null : entity.site_id === siteScope), [entities, siteScope]);
 
   function open(row?: LocalEntity) {
     setEditing(row || null); setDiscovery(null);
-    setDraft(row ? editDraft(row) : newDraft(sites.length === 1 ? sites[0] : undefined));
+    const scopedSite = siteScope === 'all' || siteScope === 'workspace' ? undefined : sites.find(site => site.id === siteScope);
+    setDraft(row ? editDraft(row) : newDraft(scopedSite ?? (sites.length === 1 ? sites[0] : undefined)));
     setComposer(true);
   }
 
@@ -285,10 +289,10 @@ export default function EntitiesPage() {
 
     <section className="entity-purpose"><div><span className="entity-guide-icon"><CircleHelp/></span><div><span className="eyebrow">What this is for</span><h2>Make your public identity consistent and measurable</h2><p>Connect an entity to a website, discover the facts already published in structured data, then review its canonical URL, contact details, profiles, listings and reviews. The score highlights missing or unverified evidence; nothing is published automatically.</p></div></div><ol><li><b>1</b><span>Scan a website</span></li><li><b>2</b><span>Review normal fields</span></li><li><b>3</b><span>Track consistency</span></li></ol></section>
 
-    <section className="entity-summary"><div><Globe2/><strong>{new Set(entities.map(row => row.market)).size}</strong><span>markets</span></div><div><Building2/><strong>{entities.length}</strong><span>entities</span></div><div><Star/><strong>{entities.length ? Math.round(entities.reduce((sum, row) => sum + row.consistency_score, 0) / entities.length) : 0}%</strong><span>evidence completeness</span></div><p>Each record is tenant-scoped and can be linked to one website or kept workspace-wide. Re-scan whenever public schema changes, then verify listings before they contribute to the score.</p></section>
+    <section className="entity-summary"><div><Globe2/><strong>{new Set(visibleEntities.map(row => row.market)).size}</strong><span>markets</span></div><div><Building2/><strong>{visibleEntities.length}</strong><span>entities</span></div><div><Star/><strong>{visibleEntities.length ? Math.round(visibleEntities.reduce((sum, row) => sum + row.consistency_score, 0) / visibleEntities.length) : 0}%</strong><span>evidence completeness</span></div><p>Each record is tenant-scoped and can be linked to one website or kept workspace-wide. Re-scan whenever public schema changes, then verify listings before they contribute to the score.</p></section>
 
-    <div className="entity-grid">{entities.map(row => <article key={row.id}><header><span className="site-monogram">{row.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">{row.entity_type} · {row.locale}</span><h2>{row.name}</h2><p><MapPin size={10}/>{row.market}</p></div><button className="btn-icon btn-icon-ghost" aria-label={`Delete ${row.name}`} disabled={!canManage} onClick={() => remove(row)}><Trash2 size={13}/></button></header><div className="entity-score"><div style={{ '--entity-score': `${row.consistency_score}%` } as React.CSSProperties}/><strong>{row.consistency_score}%</strong><span>evidence completeness</span></div><dl><div><dt>Canonical identity</dt><dd>{row.primary_url ? <a href={row.primary_url} target="_blank" rel="noreferrer">Open <ExternalLink/></a> : 'Add primary URL'}</dd></div><div><dt>Contact facts</dt><dd>{row.address && row.phone ? 'Complete' : 'Needs detail'}</dd></div><div><dt>Profiles</dt><dd>{Object.keys(row.identifiers).length}</dd></div><div><dt>Verified listings</dt><dd>{row.listings.filter(item => item.status === 'consistent' || item.status === 'verified').length} / {row.listings.length}</dd></div><div><dt>Reviews</dt><dd>{row.review_rating ? `${row.review_rating.toFixed(1)} · ${row.review_count || 0}` : 'Not connected'}</dd></div></dl><footer><span>Updated {new Date(row.updated_at).toLocaleDateString()}</span><button className="btn btn-secondary btn-sm" disabled={!canManage} onClick={() => open(row)}>Review facts</button></footer></article>)}
-      {!entities.length && <div className="ops-empty entity-empty"><Sparkles/><h3>Discover your first entity from a website</h3><p>We can read public Organization or LocalBusiness schema and page metadata, pre-fill normal form fields, and show exactly what still needs review.</p>{sites.length ? <button className="btn btn-primary" disabled={!canManage} onClick={() => open()}><Search size={13}/> Start website discovery</button> : <Link className="btn btn-secondary" to="/sites">Add a website first</Link>}<button className="btn btn-ghost btn-sm" disabled={!canManage} onClick={() => open()}><Plus size={12}/> Or enter facts manually</button></div>}
+    <div className="entity-grid">{visibleEntities.map(row => <article key={row.id}><header><span className="site-monogram">{row.name.slice(0, 1).toUpperCase()}</span><div><span className="eyebrow">{row.entity_type} · {row.locale}</span><h2>{row.name}</h2><p><MapPin size={10}/>{row.market}</p></div><button className="btn-icon btn-icon-ghost" aria-label={`Delete ${row.name}`} disabled={!canManage} onClick={() => remove(row)}><Trash2 size={13}/></button></header><div className="entity-score"><div style={{ '--entity-score': `${row.consistency_score}%` } as React.CSSProperties}/><strong>{row.consistency_score}%</strong><span>evidence completeness</span></div><dl><div><dt>Canonical identity</dt><dd>{row.primary_url ? <a href={row.primary_url} target="_blank" rel="noreferrer">Open <ExternalLink/></a> : 'Add primary URL'}</dd></div><div><dt>Contact facts</dt><dd>{row.address && row.phone ? 'Complete' : 'Needs detail'}</dd></div><div><dt>Profiles</dt><dd>{Object.keys(row.identifiers).length}</dd></div><div><dt>Verified listings</dt><dd>{row.listings.filter(item => item.status === 'consistent' || item.status === 'verified').length} / {row.listings.length}</dd></div><div><dt>Reviews</dt><dd>{row.review_rating ? `${row.review_rating.toFixed(1)} · ${row.review_count || 0}` : 'Not connected'}</dd></div></dl><footer><span>Updated {new Date(row.updated_at).toLocaleDateString()}</span><button className="btn btn-secondary btn-sm" disabled={!canManage} onClick={() => open(row)}>Review facts</button></footer></article>)}
+      {!visibleEntities.length && <div className="ops-empty entity-empty"><Sparkles/><h3>{entities.length ? 'No entities match this website scope' : 'Discover your first entity from a website'}</h3><p>We can read public Organization or LocalBusiness schema and page metadata, pre-fill normal form fields, and show exactly what still needs review.</p>{sites.length ? <button className="btn btn-primary" disabled={!canManage} onClick={() => open()}><Search size={13}/> Start website discovery</button> : <Link className="btn btn-secondary" to="/sites">Add a website first</Link>}<button className="btn btn-ghost btn-sm" disabled={!canManage} onClick={() => open()}><Plus size={12}/> Or enter facts manually</button></div>}
     </div>
   </div>;
 }

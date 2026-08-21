@@ -8,6 +8,8 @@ import { api, type AiCitationConfig, type AiInsights, type AiMigrationPlan, type
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { useApp } from '../AppContext';
+import { useInsights } from '../insights/InsightsContext';
+import { Link } from 'react-router-dom';
 
 const PROVIDER_LABEL: Record<string, string> = {
   openai: 'ChatGPT', anthropic: 'Claude', gemini: 'Gemini', perplexity: 'Perplexity', xai: 'Grok', brave: 'Brave Search',
@@ -126,6 +128,7 @@ function Thread({ promptId, promptText, provider, configured, onCitedChange }: {
 
 export default function CitationsPage() {
   const { toast, sites } = useApp();
+  const { siteScope, range } = useInsights();
   const [providers, setProviders] = useState<{ all: string[]; configured: string[] }>({ all: [], configured: [] });
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
   const [migration, setMigration] = useState<AiMigrationPlan>({ prompts: [], prompt_count: 0, result_count: 0 });
@@ -152,41 +155,31 @@ export default function CitationsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [providerRows, promptRows, resultRows, nextInsights, config, migrationPlan] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults(), api.getAiInsights(), api.getAiConfig(), api.getAiMigration()]);
+      const [providerRows, promptRows, resultRows, nextInsights, config, migrationPlan] = await Promise.all([api.getAiProviders(), api.getAiPrompts(), api.getAiResults(), api.getAiInsights({ siteId: siteScope === 'all' ? undefined : siteScope === 'workspace' ? null : siteScope, scoped: siteScope !== 'all', days: range }), api.getAiConfig(), api.getAiMigration()]);
       setProviders(providerRows); setPrompts(promptRows); setResults(resultRows); setInsights(nextInsights); setCompetitorDomains(config.competitorDomains); setBrandAliases(config.brandAliases); setIdentity(config.identity); setMigration(migrationPlan);
       setActiveProvider(previous => previous || providerRows.configured[0] || providerRows.all[0] || '');
     } catch (error) { toast('error', error instanceof Error ? error.message : 'Failed to load'); }
-  }, [toast]);
+  }, [toast, siteScope, range]);
   useEffect(() => { load(); }, [load]);
-
-  const anyModalOpen = !!editorPrompt || guideOpen || upgradeOpen || watchlistOpen || !!deleteTarget || expanded != null;
-  useEffect(() => {
-    if (!anyModalOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const close = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (guideOpen && editorPrompt) { setGuideOpen(false); return; }
-      setEditorPrompt(null); setGuideOpen(false); setUpgradeOpen(false); setWatchlistOpen(false); setDeleteTarget(null); setExpanded(null);
-    };
-    window.addEventListener('keydown', close);
-    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', close); };
-  }, [anyModalOpen, guideOpen, editorPrompt]);
 
   const latest = useMemo(() => {
     const rows = new Map<string, AiResult>();
     for (const result of results.filter(row => row.parent_id == null)) { const key = `${result.prompt_id}:${result.provider}`; if (!rows.has(key)) rows.set(key, result); }
     return rows;
   }, [results]);
-  const visiblePrompts = useMemo(() => prompts.filter(prompt => {
+  const scopedPrompts = useMemo(() => prompts.filter(prompt => (
+    siteScope === 'all' ? true : siteScope === 'workspace' ? prompt.site_id == null : prompt.site_id === siteScope
+  )), [prompts, siteScope]);
+  const visiblePrompts = useMemo(() => scopedPrompts.filter(prompt => {
     const text = `${prompt.prompt} ${prompt.group_name} ${prompt.persona || ''}`.toLowerCase();
     return (categoryFilter === 'all' || prompt.category === categoryFilter) && text.includes(query.trim().toLowerCase());
-  }), [prompts, query, categoryFilter]);
+  }), [scopedPrompts, query, categoryFilter]);
   const expandedPrompt = prompts.find(prompt => prompt.id === expanded);
   const noKeys = !providers.configured.length;
 
   function openCreate(seed?: { category: AiPromptCategory; prompt: string }) {
-    setDraft({ ...blankPrompt(), ...(seed ? { category: seed.category, prompt: seed.prompt } : {}) });
+    const scopedSite = siteScope === 'all' || siteScope === 'workspace' ? '' : siteScope;
+    setDraft({ ...blankPrompt(), siteId: scopedSite, ...(seed ? { category: seed.category, prompt: seed.prompt } : {}) });
     setGuideOpen(false); setEditorPrompt('new');
   }
   function openEdit(prompt: AiPrompt) { setDraft(editPromptDraft(prompt)); setExpanded(null); setEditorPrompt(prompt); }
@@ -212,7 +205,7 @@ export default function CitationsPage() {
   }
   async function run(id: number | 'all') {
     setRunning(id);
-    try { if (id === 'all') await api.runAllAiPrompts(); else await api.runAiPrompt(id); toast('success', 'Citation check complete'); await load(); }
+    try { if (id === 'all') await api.runAllAiPrompts({ siteId: siteScope === 'all' ? undefined : siteScope === 'workspace' ? null : siteScope, scoped: siteScope !== 'all' }); else await api.runAiPrompt(id); toast('success', 'Citation check complete'); await load(); }
     catch (error) { toast('error', error instanceof Error ? error.message : 'Run failed'); }
     setRunning(null);
   }
@@ -242,14 +235,14 @@ export default function CitationsPage() {
   return <div className="ops-page citations-page">
     <header className="ops-page-header citations-header">
       <div><span className="eyebrow"><Sparkles size={13}/> Generative engine intelligence</span><h1>AI visibility</h1><p>Track the real questions buyers ask, compare how answer engines respond, and identify the sources and content gaps that shape visibility.</p></div>
-      <div className="header-actions"><button className="btn btn-secondary" onClick={() => setGuideOpen(true)}><CircleHelp size={14}/> Prompt guide</button><button className="btn btn-secondary" onClick={() => openCreate()}><Plus size={14}/> New prompt</button><button className="btn btn-primary" disabled={running !== null || noKeys || !prompts.length} onClick={() => run('all')}>{running === 'all' ? <><Loader2 size={13} className="spin"/> Running…</> : <><Play size={13}/> Run all prompts</>}</button></div>
+      <div className="header-actions"><button className="btn btn-secondary" onClick={() => setGuideOpen(true)}><CircleHelp size={14}/> Prompt guide</button><button className="btn btn-secondary" onClick={() => openCreate()}><Plus size={14}/> New prompt</button><button className="btn btn-primary" title="Runs every prompt in the selected website scope; library search and category filters only change this list" disabled={running !== null || noKeys || !scopedPrompts.length} onClick={() => run('all')}>{running === 'all' ? <><Loader2 size={13} className="spin"/> Running…</> : <><Play size={13}/> Run selected scope ({scopedPrompts.length})</>}</button></div>
     </header>
 
     {running !== null && <div className="alert alert-info" role="status"><div className="alert-content citations-run-status"><Loader2 size={14} className="spin"/><span>Querying {running === 'all' ? 'the prompt library across every configured provider' : 'this prompt across configured providers'}… live searches can take about a minute per provider.</span></div></div>}
 
     {!!migration.prompt_count && <section className="citation-upgrade-banner" aria-label="Legacy citation upgrade available"><div className="citation-upgrade-icon"><WandSparkles/></div><div><span className="eyebrow">Safe in-place upgrade</span><h2>{migration.prompt_count} legacy citation prompt{migration.prompt_count === 1 ? '' : 's'} can use the new tracking format</h2><p>Add intent, locale, audience, device and cadence without replacing prompt IDs or losing {migration.result_count} stored answer{migration.result_count === 1 ? '' : 's'}.</p></div><button className="btn btn-primary" onClick={openUpgrade}><WandSparkles size={14}/> Review upgrade</button></section>}
 
-    <div className="citation-provider-strip"><div><strong>Answer engines</strong><span>{providers.configured.length} of {providers.all.length} ready</span></div>{providers.all.map(provider => <span key={provider} className={providers.configured.includes(provider) ? 'ready' : ''}><i/><Bot size={12}/>{PROVIDER_LABEL[provider] ?? provider}<small>{providers.configured.includes(provider) ? 'Ready' : 'Needs key'}</small></span>)}{noKeys && <button className="btn btn-ghost btn-sm" onClick={() => window.location.assign('/settings')}><KeyRound size={12}/> Configure API keys</button>}</div>
+    <div className="citation-provider-strip"><div><strong>Answer engines</strong><span>{providers.configured.length} of {providers.all.length} ready</span></div>{providers.all.map(provider => <span key={provider} className={providers.configured.includes(provider) ? 'ready' : ''}><i/><Bot size={12}/>{PROVIDER_LABEL[provider] ?? provider}<small>{providers.configured.includes(provider) ? 'Ready' : 'Needs key'}</small></span>)}{noKeys && <Link className="btn btn-ghost btn-sm" to="/settings?tab=keys"><KeyRound size={12}/> Configure API keys</Link>}</div>
 
     <section className="ops-card prompt-library">
       <header className="ops-card-head prompt-library-head"><div><span className="eyebrow"><Library size={12}/> Tracking workspace</span><h2>Prompt library</h2><p>One row per buyer question. Open a row to inspect answers; edit it to change scope, audience or schedule.</p></div><button className="btn btn-primary btn-sm" onClick={() => openCreate()}><Plus size={13}/> Add buyer question</button></header>
@@ -280,7 +273,7 @@ export default function CitationsPage() {
 
     {expandedPrompt && <Modal onClose={() => setExpanded(null)} size="xl" className="prompt-results-modal" eyebrow={<span className={`category-chip category-${expandedPrompt.category}`}>{CATEGORY_LABEL[expandedPrompt.category]}</span>} title={expandedPrompt.prompt} description={`${expandedPrompt.group_name || 'Ungrouped'} · ${sites.find(site => site.id === expandedPrompt.site_id)?.name || 'Whole workspace'} · ${expandedPrompt.locale} · ${expandedPrompt.device} · ${expandedPrompt.cadence}`} icon={<Bot/>} headerActions={<><button className="btn btn-secondary btn-sm" onClick={() => openEdit(expandedPrompt)}><Pencil size={12}/> Edit</button><button className="btn btn-primary btn-sm" disabled={running !== null || noKeys || !expandedPrompt.enabled} onClick={() => run(expandedPrompt.id)}>{running === expandedPrompt.id ? <Loader2 size={12} className="spin"/> : <Play size={12}/>} Run</button></>}><div className="prompt-provider-tabs">{providers.all.map(provider => { const result = latest.get(`${expandedPrompt.id}:${provider}`); const status = result ? citationLabel(result) : null; return <button key={provider} className={activeProvider === provider ? 'active' : ''} onClick={() => setActiveProvider(provider)}><Bot size={13}/><span><strong>{PROVIDER_LABEL[provider] ?? provider}</strong><small>{!providers.configured.includes(provider) ? 'Needs API key' : !result ? 'Not run yet' : result.error ? 'Run failed' : status?.label}</small></span>{result && !result.error && (result.cited ? <CheckCircle2 className="ok"/> : <XCircle/>)}</button>; })}</div>{activeProvider ? <Thread key={`${expandedPrompt.id}:${activeProvider}`} promptId={expandedPrompt.id} promptText={expandedPrompt.prompt} provider={activeProvider} configured={providers.configured.includes(activeProvider)} onCitedChange={load}/> : <div className="ops-empty"><Bot/><strong>No provider selected</strong><span>Configure an answer engine to start tracking this question.</span></div>}</Modal>}
 
-    {watchlistOpen && <Modal onClose={() => setWatchlistOpen(false)} size="md" className="prompt-watchlist-modal attribution-config-modal" eyebrow="Entity-aware measurement" title="Citation identity & competitors" description="Define how the system recognises you. Existing stored answers are reclassified immediately; nothing is sent to an AI provider." icon={<Target/>} footer={<><button className="btn btn-ghost" onClick={() => setWatchlistOpen(false)}>Cancel</button><button className="btn btn-primary" disabled={savingConfig} onClick={saveAttributionConfig}>{savingConfig ? <Loader2 size={13} className="spin"/> : <Save size={13}/>} Save attribution</button></>}><div className="attribution-config-layout"><section><h3>Automatically recognised</h3><p>Website names and domains come from Sites. Profile URLs and legal names come from Markets & Entities.</p><div className="identity-token-groups"><div><strong>Owned domains</strong><span>{identity.ownedDomains.length ? identity.ownedDomains.join(' · ') : 'Add a website first'}</span></div><div><strong>Entity profiles</strong><span>{identity.profiles.length ? identity.profiles.map(profile => `${profile.provider} (${profile.domain})`).join(' · ') : 'Add app-store, marketplace or profile URLs in Markets & Entities'}</span></div></div><a className="btn btn-secondary btn-sm" href="/entities"><Globe2 size={12}/> Review entity profiles</a></section><label>Other brand or product names<textarea data-autofocus rows={5} value={brandAliases} onChange={event => setBrandAliases(event.target.value)} placeholder={'Trading name\nProduct name\nPrevious brand name'}/><small>One name per line. Use distinctive names; these are matched in answer text and recognised marketplace URLs.</small></label><label>Competitor domains<textarea rows={5} value={competitorDomains} onChange={event => setCompetitorDomains(event.target.value)} placeholder={'competitor.com\nanother-rival.co.uk'}/><small>These do not count as you. They are labelled separately in the source graph.</small></label></div></Modal>}
+    {watchlistOpen && <Modal onClose={() => setWatchlistOpen(false)} size="md" className="prompt-watchlist-modal attribution-config-modal" eyebrow="Entity-aware measurement" title="Citation identity & competitors" description="Define how the system recognises you. Existing stored answers are reclassified immediately; nothing is sent to an AI provider." icon={<Target/>} footer={<><button className="btn btn-ghost" onClick={() => setWatchlistOpen(false)}>Cancel</button><button className="btn btn-primary" disabled={savingConfig} onClick={saveAttributionConfig}>{savingConfig ? <Loader2 size={13} className="spin"/> : <Save size={13}/>} Save attribution</button></>}><div className="attribution-config-layout"><section><h3>Automatically recognised</h3><p>Website names and domains come from Sites. Profile URLs and legal names come from Markets & Entities.</p><div className="identity-token-groups"><div><strong>Owned domains</strong><span>{identity.ownedDomains.length ? identity.ownedDomains.join(' · ') : 'Add a website first'}</span></div><div><strong>Entity profiles</strong><span>{identity.profiles.length ? identity.profiles.map(profile => `${profile.provider} (${profile.domain})`).join(' · ') : 'Add app-store, marketplace or profile URLs in Markets & Entities'}</span></div></div><Link className="btn btn-secondary btn-sm" to="/insights/entities"><Globe2 size={12}/> Review entity profiles</Link></section><label>Other brand or product names<textarea data-autofocus rows={5} value={brandAliases} onChange={event => setBrandAliases(event.target.value)} placeholder={'Trading name\nProduct name\nPrevious brand name'}/><small>One name per line. Use distinctive names; these are matched in answer text and recognised marketplace URLs.</small></label><label>Competitor domains<textarea rows={5} value={competitorDomains} onChange={event => setCompetitorDomains(event.target.value)} placeholder={'competitor.com\nanother-rival.co.uk'}/><small>These do not count as you. They are labelled separately in the source graph.</small></label></div></Modal>}
 
     {deleteTarget && <Modal onClose={() => setDeleteTarget(null)} size="sm" className="prompt-delete-modal" role="alertdialog" eyebrow={<span className="danger">Remove tracking history</span>} title="Delete this prompt?" description="The prompt and its stored provider results will be removed. This cannot be undone." icon={<AlertTriangle/>} footer={<><button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>Keep prompt</button><button className="btn btn-danger" onClick={remove}><Trash2 size={13}/> Delete prompt</button></>}><blockquote>{deleteTarget.prompt}</blockquote></Modal>}
   </div>;

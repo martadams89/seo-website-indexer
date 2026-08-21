@@ -6,11 +6,13 @@ import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
 import { useSort, SortTh } from '../components/SortableTable';
 import { useApp } from '../AppContext';
+import { useInsights } from '../insights/InsightsContext';
 
 export default function SiteAnalyticsPage() {
   const { siteId = '' } = useParams();
   const navigate = useNavigate();
   const { toast, status } = useApp();
+  const { range, setSiteScope } = useInsights();
   const [data, setData] = useState<SiteAnalytics | null>(null);
   const [llms, setLlms] = useState<LlmsAudit | null>(null);
   const [llmsLoading, setLlmsLoading] = useState(false);
@@ -31,12 +33,13 @@ export default function SiteAnalyticsPage() {
       // A 404 here means this site doesn't belong to the currently active
       // workspace (most often: the user switched workspace while this page
       // was open) — bounce back to the list instead of showing a broken page.
-      if ((e as ApiError).status === 404) { navigate('/analytics', { replace: true }); return; }
+      if ((e as ApiError).status === 404) { navigate('/insights/search', { replace: true }); return; }
       toast('error', e instanceof Error ? e.message : 'Failed to load');
     }
   }, [siteId, toast, navigate]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setSiteScope(siteId); }, [siteId, setSiteScope]);
 
   async function loadLlms() {
     setLlmsLoading(true);
@@ -103,7 +106,7 @@ export default function SiteAnalyticsPage() {
     <div>
       <div className="page-header">
         <div>
-          <Link to="/analytics" className="back-link"><ArrowLeft size={13} /> Analytics</Link>
+          <Link to="/insights/search" className="back-link"><ArrowLeft size={13} /> Search insights</Link>
           <h1 className="page-title">{site.name}</h1>
           <p className="page-subtitle">{site.domain}</p>
         </div>
@@ -148,7 +151,7 @@ export default function SiteAnalyticsPage() {
         </div>
       </div>
 
-      <SearchPerformance siteId={siteId} />
+      <SearchPerformance siteId={siteId} initialDays={range} />
 
       {bingQuota && (
         <div className="empty-note" style={{ marginBottom: 16 }}>

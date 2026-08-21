@@ -154,7 +154,7 @@ export default function SetupPage() {
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <div className="page-header">
-        <h1 className="page-title">Welcome to SEO Website Indexer</h1>
+        <h1 className="page-title">Welcome to Organic Command</h1>
         <p className="page-subtitle">Let's connect your Google account to get started.</p>
       </div>
 

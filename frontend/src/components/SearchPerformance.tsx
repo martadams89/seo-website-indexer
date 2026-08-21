@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { BarChart3, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, X, LineChart } from 'lucide-react';
+import { BarChart3, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, X, LineChart, Lightbulb, Target } from 'lucide-react';
 import { api, type PerformanceResponse, type EnginePerformance } from '../api';
 import { MetricChart, StatCard } from './Charts';
 import { Modal } from './Modal';
@@ -7,7 +7,7 @@ import { useSort, SortTh } from './SortableTable';
 import { useApp } from '../AppContext';
 
 const RANGES = [
-  { label: '7d', days: 7 }, { label: '28d', days: 28 }, { label: '90d', days: 90 }, { label: '365d', days: 365 },
+  { label: '7d', days: 7 }, { label: '30d', days: 30 }, { label: '90d', days: 90 }, { label: '365d', days: 365 },
 ];
 type Metric = 'clicks' | 'impressions' | 'ctr' | 'position';
 const METRICS: Array<{ id: Metric; label: string }> = [
@@ -40,9 +40,9 @@ function DeltaChip({ delta }: { delta?: Delta }) {
   );
 }
 
-export function SearchPerformance({ siteId }: { siteId: string }) {
+export function SearchPerformance({ siteId, initialDays = 30 }: { siteId: string; initialDays?: number }) {
   const { toast } = useApp();
-  const [days, setDays] = useState(28);
+  const [days, setDays] = useState(initialDays);
   const [engine, setEngine] = useState<'google' | 'bing'>('google');
   const [metric, setMetric] = useState<Metric>('clicks');
   const [breakdown, setBreakdown] = useState<Breakdown>('query');
@@ -70,6 +70,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
   }, [siteId, toast]);
 
   useEffect(() => { load(days, engine); }, [load, days, engine]);
+  useEffect(() => { setDays(initialDays); }, [initialDays]);
 
   // Country/device/search-appearance breakdowns come from a separate GSC call.
   useEffect(() => {
@@ -104,6 +105,15 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
 
   const fmt = metric === 'ctr' ? fmtPct : metric === 'position' ? fmtPos : fmtInt;
   const chartColor = metric === 'position' ? 'var(--warn)' : 'var(--accent, #7c6cf5)';
+  const expectedCtr = (position: number) => position <= 3 ? 0.12 : position <= 10 ? 0.04 : 0.015;
+  const opportunities = (active?.queries ?? [])
+    .filter(row => row.impressions >= 25 && row.position >= 4 && row.position <= 20 && row.ctr < expectedCtr(row.position))
+    .map(row => ({ ...row, potentialClicks: Math.max(0, Math.round(row.impressions * expectedCtr(row.position) - row.clicks)) }))
+    .filter(row => row.potentialClicks > 0)
+    .sort((a, b) => b.potentialClicks - a.potentialClicks || b.impressions - a.impressions)
+    .slice(0, 6);
+  const pageOneOpenings = opportunities.filter(row => row.position <= 10).length;
+  const strikingDistance = opportunities.filter(row => row.position > 10).length;
 
   // Sortable breakdown tables (default: clicks desc).
   const breakdownRows = (breakdown === 'query' ? active?.queries : active?.pages) ?? [];
@@ -120,7 +130,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
             <button className={`seg-btn${engine === 'google' ? ' active' : ''}`} onClick={() => setEngine('google')}>Google</button>
             <button className={`seg-btn${engine === 'bing' ? ' active' : ''}`} onClick={() => setEngine('bing')}>Bing</button>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading} title="Refresh cached rollups"><RefreshCw size={12} className={loading ? 'spin' : ''} /></button>
+          <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading} title="Refresh cached rollups" aria-label="Refresh search performance"><RefreshCw size={12} className={loading ? 'spin' : ''} /></button>
         </div>
       </div>
 
@@ -146,7 +156,26 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
           <div className="seg" style={{ margin: '12px 0' }}>
             {METRICS.map(m => <button key={m.id} className={`seg-btn${metric === m.id ? ' active' : ''}`} onClick={() => setMetric(m.id)}>{m.label}</button>)}
           </div>
-          <MetricChart points={active.series.map(s => ({ date: s.date, value: s[metric] }))} format={fmt} color={chartColor} />
+          <MetricChart label={`${METRICS.find(item => item.id === metric)?.label ?? metric} over ${days} days`} points={active.series.map(s => ({ date: s.date, value: s[metric] }))} format={fmt} color={chartColor} />
+
+          <section className="search-opportunity-panel" aria-labelledby="search-opportunities-title">
+            <header>
+              <div><span><Lightbulb size={13} /> Prioritised growth</span><h4 id="search-opportunities-title">Search opportunities</h4><p>Queries already ranking on pages one or two where current click-through trails a conservative benchmark.</p></div>
+              <div className="opportunity-counts"><span><strong>{pageOneOpenings}</strong>page-one gaps</span><span><strong>{strikingDistance}</strong>striking distance</span></div>
+            </header>
+            <div className="opportunity-list">
+              {opportunities.map(row => (
+                <article key={row.query}>
+                  <Target />
+                  <div><strong>{row.query}</strong><small>{fmtInt(row.impressions)} impressions · {fmtPct(row.ctr)} CTR · position {fmtPos(row.position)}</small></div>
+                  <span>up to <strong>+{row.potentialClicks}</strong> clicks</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => openTrend(row.query)} aria-label={`Open position trend for ${row.query}`}><LineChart size={12} /> Trend</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => toggleTrack(row.query)} aria-pressed={isTracked(row.query)}><Bell size={12} /> {isTracked(row.query) ? 'Tracked' : 'Track'}</button>
+                </article>
+              ))}
+              {!opportunities.length && <div className="ops-empty compact"><Target /><strong>No clear quick wins in this range</strong><span>More impressions or a wider period may reveal queries in positions 4–20.</span></div>}
+            </div>
+          </section>
 
           {/* Breakdowns */}
           <div className="flex items-center gap-2" style={{ margin: '16px 0 8px', flexWrap: 'wrap' }}>
@@ -174,8 +203,8 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
                         <td style={{ textAlign: 'right' }}>{fmtInt(r.clicks)}</td><td style={{ textAlign: 'right' }}>{fmtInt(r.impressions)}</td><td style={{ textAlign: 'right' }}>{fmtPct(r.ctr)}</td><td style={{ textAlign: 'right' }}>{r.position ? fmtPos(r.position) : '—'}</td>
                         {breakdown === 'query' && 'query' in r && (
                           <td style={{ whiteSpace: 'nowrap' }}>
-                            <button className="btn btn-ghost btn-sm" title="Position trend" onClick={() => openTrend(r.query)}><LineChart size={12} /></button>
-                            <button className="btn btn-ghost btn-sm" title={isTracked(r.query) ? 'Untrack (stop alerts)' : 'Track for drop alerts'} onClick={() => toggleTrack(r.query)}>
+                            <button className="btn btn-ghost btn-sm" title="Position trend" aria-label={`Open position trend for ${r.query}`} onClick={() => openTrend(r.query)}><LineChart size={12} /></button>
+                            <button className="btn btn-ghost btn-sm" aria-label={`${isTracked(r.query) ? 'Stop tracking' : 'Track'} ${r.query}`} title={isTracked(r.query) ? 'Untrack (stop alerts)' : 'Track for drop alerts'} onClick={() => toggleTrack(r.query)}>
                               <Bell size={12} style={{ color: isTracked(r.query) ? 'var(--accent, #7c6cf5)' : 'var(--text-dim)' }} />
                             </button>
                           </td>
@@ -216,7 +245,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
                   <span key={t.id} className="tracked-chip">
                     <button className="tracked-chip-name" onClick={() => openTrend(t.query)}>{t.query}</button>
                     {t.last_position != null && <span className="text-dim" style={{ fontSize: 12 }}>#{t.last_position.toFixed(1)}</span>}
-                    <button className="tracked-chip-x" onClick={() => toggleTrack(t.query)} title="Untrack"><X size={10} /></button>
+                    <button className="tracked-chip-x" onClick={() => toggleTrack(t.query)} title="Untrack" aria-label={`Stop tracking ${t.query}`}><X size={10} /></button>
                   </span>
                 ))}
               </div>
@@ -239,7 +268,7 @@ export function SearchPerformance({ siteId }: { siteId: string }) {
               : (
               <div style={{ marginTop: 12 }}>
                 <div className="text-dim" style={{ fontSize: 12, marginBottom: 4 }}>Average Google position (lower is better)</div>
-                <MetricChart points={trend.map(p => ({ date: p.day, value: p.position }))} format={fmtPos} color="var(--warn)" height={160} />
+                <MetricChart label={`Average position for ${trendQuery}`} points={trend.map(p => ({ date: p.day, value: p.position }))} format={fmtPos} color="var(--warn)" height={160} />
                 <div className="flex gap-2" style={{ marginTop: 10 }}>
                   <button className="btn btn-secondary btn-sm" onClick={() => toggleTrack(trendQuery)}>
                     <Bell size={12} /> {isTracked(trendQuery) ? 'Untrack' : 'Track for alerts'}

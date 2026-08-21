@@ -17,10 +17,11 @@ const PROVIDER_LABEL: Record<string, string> = {
   perplexity: 'Perplexity', xai: 'Grok', brave: 'Brave Search',
 };
 
-function ScoreRing({ value }: { value: number }) {
+function ScoreRing({ value }: { value: number | null }) {
   return (
-    <div className="command-score-ring" style={{ '--score': `${value * 3.6}deg` } as React.CSSProperties}>
-      <div><strong>{value}</strong><span>health</span></div>
+    <div className={`command-score-ring${value === null ? ' unavailable' : ''}`} style={{ '--score': `${(value ?? 0) * 3.6}deg` } as React.CSSProperties}
+      role="img" aria-label={value === null ? 'Overall health is awaiting measurement' : `Overall health ${value} out of 100`}>
+      <div><strong>{value ?? '—'}</strong><span>{value === null ? 'awaiting data' : 'health'}</span></div>
     </div>
   );
 }
@@ -132,7 +133,7 @@ export default function Dashboard() {
   }
 
   const isRunning = !!status?.scheduler.running;
-  const showReleaseLock = !!status?.scheduler.lock && !isRunning;
+  const showReleaseLock = !!user?.is_super_admin && !!status?.scheduler.lock && !isRunning;
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const metrics = center?.metrics;
   const integrations = center?.integrations;
@@ -143,7 +144,7 @@ export default function Dashboard() {
     { done: !!status?.auth.authenticated, label: 'Connect a Google account', to: '/settings?tab=accounts' },
     { done: sites.length > 0, label: 'Add your first site', to: '/sites' },
     { done: !!platform?.integrations.length, label: 'Connect outcome or delivery evidence', to: '/integrations' },
-    { done: activation.prompts > 0, label: 'Define your buyer-question set', to: '/citations' },
+    { done: activation.prompts > 0, label: 'Define your buyer-question set', to: '/insights/ai' },
     { done: activation.reports > 0, label: 'Create a client-ready report', to: '/reports' },
   ];
 
@@ -168,12 +169,16 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="command-score-block">
-          <ScoreRing value={center?.score.overall ?? 0} />
+          <ScoreRing value={center?.score.overall ?? null} />
           <div className="score-breakdown">
             <span><i style={{ width: `${center?.score.indexation ?? 0}%` }} />Indexation <b>{center?.score.indexation ?? '—'}</b></span>
             <span><i style={{ width: `${center?.score.aiVisibility ?? 0}%` }} />AI visibility <b>{center?.score.aiVisibility ?? '—'}</b></span>
             <span><i style={{ width: `${center?.score.agentReadiness ?? 0}%` }} />Agent ready <b>{center?.score.agentReadiness ?? '—'}</b></span>
             <span><i style={{ width: `${center?.score.operations ?? 0}%` }} />Operations <b>{center?.score.operations ?? '—'}</b></span>
+            <details className="score-explanation">
+              <summary>How this score works · {center?.score.completeness ?? 0}% measured</summary>
+              <ul>{(center?.score.explanation ?? ['Complete the first useful loop to establish a health score.']).map(line => <li key={line}>{line}</li>)}</ul>
+            </details>
           </div>
         </div>
       </section>
@@ -184,9 +189,9 @@ export default function Dashboard() {
       {activationSteps.some(step => !step.done) && <details className="onboarding-checklist" open={activationSteps.filter(step=>step.done).length<3}><summary><span><Sparkles size={14}/><strong>First useful loop</strong><small>{activationSteps.filter(step=>step.done).length}/{activationSteps.length} ready</small></span><div><i style={{width:`${activationSteps.filter(step=>step.done).length/activationSteps.length*100}%`}}/></div></summary><div>{activationSteps.map((step,index)=><Link key={step.label} to={step.to} className={step.done?'done':''}><span>{step.done?<CheckCircle2/>:index+1}</span><strong>{step.label}</strong><ArrowRight/></Link>)}</div></details>}
 
       <section className="command-metrics" aria-label="Workspace metrics">
-        <Link to="/analytics" className="command-metric"><span className="metric-icon cyan"><Globe2 size={17} /></span><div><small>Index coverage</small><strong>{metrics?.indexedRate ?? '—'}{metrics?.indexedRate != null ? '%' : ''}</strong><span>{(metrics?.indexed ?? 0).toLocaleString()} of {(metrics?.urls ?? 0).toLocaleString()} URLs</span></div></Link>
-        <Link to="/analytics" className="command-metric"><span className="metric-icon green"><MousePointerClick size={17} /></span><div><small>Organic clicks · 7d</small><strong>{(metrics?.clicks7d ?? 0).toLocaleString()}</strong><Delta value={metrics?.clicksChange ?? null} /></div></Link>
-        <Link to="/citations" className="command-metric"><span className="metric-icon violet"><Bot size={17} /></span><div><small>AI visibility</small><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><Delta value={metrics?.aiChange ?? null} /></div></Link>
+        <Link to="/insights/search" className="command-metric"><span className="metric-icon cyan"><Globe2 size={17} /></span><div><small>Index coverage</small><strong>{metrics?.indexedRate ?? '—'}{metrics?.indexedRate != null ? '%' : ''}</strong><span>{(metrics?.indexed ?? 0).toLocaleString()} of {(metrics?.urls ?? 0).toLocaleString()} URLs</span></div></Link>
+        <Link to="/insights/search" className="command-metric"><span className="metric-icon green"><MousePointerClick size={17} /></span><div><small>Organic clicks · 7d</small><strong>{(metrics?.clicks7d ?? 0).toLocaleString()}</strong><Delta value={metrics?.clicksChange ?? null} /></div></Link>
+        <Link to="/insights/ai" className="command-metric"><span className="metric-icon violet"><Bot size={17} /></span><div><small>AI visibility</small><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><Delta value={metrics?.aiChange ?? null} /></div></Link>
         <Link to="/actions" className="command-metric"><span className={`metric-icon ${activeWork.length ? 'amber' : 'green'}`}><ShieldCheck size={17} /></span><div><small>Owned actions</small><strong>{activeWork.length}</strong><span>{activeWork.filter(item => item.severity === 'critical').length ? `${activeWork.filter(item => item.severity === 'critical').length} critical now` : 'No critical actions'}</span></div></Link>
       </section>
 
@@ -203,7 +208,7 @@ export default function Dashboard() {
         </div>
 
         <div className="command-panel ai-pulse-panel">
-          <div className="command-panel-head"><div><span className="eyebrow">Generative discovery</span><h2>AI visibility pulse</h2></div><Link to="/citations">Open intelligence <ArrowRight size={13} /></Link></div>
+          <div className="command-panel-head"><div><span className="eyebrow">Generative discovery</span><h2>AI visibility pulse</h2></div><Link to="/insights/ai">Open intelligence <ArrowRight size={13} /></Link></div>
           <div className="visibility-headline"><strong>{metrics?.aiVisibility ?? '—'}{metrics?.aiVisibility != null ? '%' : ''}</strong><div><span>of current answers cite you</span><Delta value={metrics?.aiChange ?? null} /></div></div>
           <VisibilitySparkline points={center?.ai.trend ?? []} />
           <div className="provider-pills">
@@ -215,9 +220,9 @@ export default function Dashboard() {
 
       <section className="command-grid command-secondary-grid">
         <div className="command-panel">
-          <div className="command-panel-head"><div><span className="eyebrow">Search demand</span><h2>Portfolio momentum</h2></div><Link to="/analytics">All analytics <ArrowRight size={13} /></Link></div>
+          <div className="command-panel-head"><div><span className="eyebrow">Search demand</span><h2>Portfolio momentum</h2></div><Link to="/insights/search">All search insights <ArrowRight size={13} /></Link></div>
           <div className="momentum-list">
-            {center?.movers.length ? center.movers.map(site => <Link to={`/analytics/${site.site_id}`} key={site.site_id} className="momentum-row"><span className="site-monogram">{site.name.slice(0, 1).toUpperCase()}</span><span><strong>{site.name}</strong><small>{site.clicks.current.toLocaleString()} clicks · {site.impressions.current.toLocaleString()} impressions</small></span><Delta value={Math.round(site.clicks.changePct)} /></Link>) : <div className="command-empty compact"><Activity size={22} /><strong>No performance history yet</strong><span>Run the workspace to pull Search Console and Bing rollups.</span></div>}
+            {center?.movers.length ? center.movers.map(site => <Link to={`/insights/search/${site.site_id}`} key={site.site_id} className="momentum-row"><span className="site-monogram">{site.name.slice(0, 1).toUpperCase()}</span><span><strong>{site.name}</strong><small>{site.clicks.current.toLocaleString()} clicks · {site.impressions.current.toLocaleString()} impressions</small></span><Delta value={Math.round(site.clicks.changePct)} /></Link>) : <div className="command-empty compact"><Activity size={22} /><strong>No performance history yet</strong><span>Run the workspace to pull Search Console and Bing rollups.</span></div>}
           </div>
         </div>
 

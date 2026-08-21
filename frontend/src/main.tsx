@@ -1,7 +1,8 @@
 import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import './index.css'
+import './styles/streamlined.css'
 import { AppProvider } from './AppContext'
 import { AuthGate } from './auth/AuthGate'
 import { WorkspaceProvider } from './workspace/WorkspaceContext'
@@ -24,6 +25,8 @@ const ReportsPage = lazy(() => import('./pages/Reports'))
 const GovernancePage = lazy(() => import('./pages/Governance'))
 const EntitiesPage = lazy(() => import('./pages/Entities'))
 const ClientPortalPage = lazy(() => import('./pages/ClientPortal'))
+const InsightsLayout = lazy(() => import('./pages/InsightsLayout'))
+const SiteWorkspacePage = lazy(() => import('./pages/SiteWorkspace'))
 
 const loading = <div className="page-loading">Opening workspace…</div>
 
@@ -58,20 +61,30 @@ function InnerRoutes() {
               <SetupPage />
             </div>
           } />
-          <Route path="/portal" element={<ClientPortalPage />} />
+          <Route path="/executive-view" element={<ClientPortalPage />} />
+          <Route path="/portal" element={<Navigate to="/executive-view" replace />} />
           {/* All other pages use the sidebar layout */}
           <Route element={<Layout />}>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/actions"  element={<ActionCenterPage />} />
             <Route path="/sites"    element={<SitesPage />} />
+            <Route path="/sites/:siteId" element={<SiteWorkspacePage />} />
             <Route path="/publishing" element={<PublishingPage />} />
             {/* Google accounts now live under Settings → Google Accounts */}
             <Route path="/accounts" element={<Navigate to="/settings" replace />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/analytics/:siteId" element={<SiteAnalyticsPage />} />
-            <Route path="/intelligence" element={<IntelligencePage />} />
-            <Route path="/entities" element={<EntitiesPage />} />
-            <Route path="/citations" element={<CitationsPage />} />
+            <Route path="/insights" element={<InsightsLayout />}>
+              <Route index element={<Navigate to="search" replace />} />
+              <Route path="search" element={<AnalyticsPage />} />
+              <Route path="search/:siteId" element={<SiteAnalyticsPage />} />
+              <Route path="ai" element={<CitationsPage />} />
+              <Route path="evidence" element={<IntelligencePage />} />
+              <Route path="entities" element={<EntitiesPage />} />
+            </Route>
+            <Route path="/analytics" element={<Navigate to="/insights/search" replace />} />
+            <Route path="/analytics/:siteId" element={<LegacySiteInsightRedirect />} />
+            <Route path="/intelligence" element={<Navigate to="/insights/evidence" replace />} />
+            <Route path="/entities" element={<Navigate to="/insights/entities" replace />} />
+            <Route path="/citations" element={<Navigate to="/insights/ai" replace />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/logs"     element={<LogsPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
@@ -80,4 +93,9 @@ function InnerRoutes() {
           </Route>
         </Routes>
   );
+}
+
+function LegacySiteInsightRedirect() {
+  const { siteId } = useParams();
+  return <Navigate to={`/insights/search/${siteId ?? ''}`} replace />;
 }

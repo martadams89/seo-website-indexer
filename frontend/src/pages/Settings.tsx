@@ -110,7 +110,7 @@ const CRON_PRESETS = [
 
 type TabGroup = 'account' | 'workspace' | 'platform';
 const TAB_GROUP_LABEL: Record<TabGroup, string> = {
-  account: 'Your account', workspace: 'This workspace', platform: 'Platform (super-admin, installation-wide)',
+  account: 'Your account', workspace: 'This workspace', platform: 'Advanced platform controls',
 };
 const TABS: Array<{ id: Tab; label: string; icon: typeof Clock; superAdmin?: boolean; group: TabGroup }> = [
   { id: 'account',   label: 'Account & Security', icon: ShieldCheck, group: 'account' },
@@ -1302,9 +1302,10 @@ export default function SettingsPage() {
     const requested = new URLSearchParams(window.location.search).get('tab');
     const aliases: Record<string, Tab> = { accounts: 'google', notifications: 'notify' };
     const candidate = requested ? (aliases[requested] ?? requested) : null;
-    const allowed: Tab[] = ['account', 'workspace', 'all-workspaces', 'users', 'schedule', 'google', 'keys', 'notify'];
-    return candidate && allowed.includes(candidate as Tab) ? candidate as Tab : user.is_super_admin ? 'schedule' : 'account';
+    const allowed = TABS.filter(item => !item.superAdmin || user.is_super_admin).map(item => item.id);
+    return candidate && allowed.includes(candidate as Tab) ? candidate as Tab : 'account';
   });
+  const [advancedOpen, setAdvancedOpen] = useState(() => TABS.find(item => item.id === tab)?.group === 'platform');
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');
   const [saving, setSaving] = useState<Tab | null>(null);
@@ -1342,11 +1343,18 @@ export default function SettingsPage() {
     setClearLoading(false);
   }
 
+  function selectTab(next: Tab) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', next);
+    window.history.replaceState({}, '', url);
+  }
+
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div className="settings-page">
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">Scheduling, accounts, keys and notifications</p>
+        <p className="page-subtitle">Your account first, then workspace connections and advanced platform controls.</p>
       </div>
 
       {/* Scope banner: makes it unambiguous whether a tab affects the active
@@ -1373,7 +1381,7 @@ export default function SettingsPage() {
 
       {/* Tab bar, grouped by scope so it's clear what's workspace-local vs platform-wide */}
       <div className="settings-tabs" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-        {(['account', 'workspace', 'platform'] as TabGroup[]).map(group => {
+        {(['account', 'workspace'] as TabGroup[]).map(group => {
           const groupTabs = TABS.filter(t => t.group === group && (!t.superAdmin || user.is_super_admin));
           if (groupTabs.length === 0) return null;
           return (
@@ -1383,7 +1391,7 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
                 {groupTabs.map(t => (
-                  <button key={t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+                  <button type="button" key={t.id} aria-pressed={tab === t.id} className={`settings-tab${tab === t.id ? ' active' : ''}`} onClick={() => selectTab(t.id)}>
                     <t.icon size={13} /> {t.label}
                   </button>
                 ))}
@@ -1391,6 +1399,21 @@ export default function SettingsPage() {
             </div>
           );
         })}
+        {user.is_super_admin && (
+          <details className="settings-advanced" open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
+            <summary>
+              <span><ShieldCheck size={13} /> {TAB_GROUP_LABEL.platform}</span>
+              <small>Installation-wide</small>
+            </summary>
+            <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
+              {TABS.filter(item => item.group === 'platform').map(item => (
+                <button type="button" key={item.id} aria-pressed={tab === item.id} className={`settings-tab${tab === item.id ? ' active' : ''}`} onClick={() => selectTab(item.id)}>
+                  <item.icon size={13} /> {item.label}
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
 
       {/* ── Account & Security ── */}

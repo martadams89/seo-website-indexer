@@ -4,6 +4,7 @@ import { RefreshCw, Bell, BellOff, ChevronRight, TrendingUp, TrendingDown, Minus
 import { api, type AnalyticsOverview, type AlertRow, type SiteMover, type SiteMoverMetric } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { useApp } from '../AppContext';
+import { useInsights } from '../insights/InsightsContext';
 
 const SEVERITY_COLOR: Record<string, string> = { info: 'var(--info)', warn: 'var(--warn)', error: 'var(--error)' };
 
@@ -26,6 +27,7 @@ function MoverDelta({ m, lowerIsBetter = false, label }: { m: SiteMoverMetric; l
 
 export default function AnalyticsPage() {
   const { toast } = useApp();
+  const { siteScope, range } = useInsights();
   const [data, setData] = useState<AnalyticsOverview | null>(null);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [movers, setMovers] = useState<SiteMover[]>([]);
@@ -65,20 +67,30 @@ export default function AnalyticsPage() {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, acked: 1 } : a));
   }
 
-  const visibleAlerts = alerts.filter(a => showAcked || !a.acked);
+  const scopedAlerts = alerts.filter(alert => siteScope === 'all' ? true : siteScope === 'workspace' ? alert.site_id == null : alert.site_id === siteScope);
+  const visibleAlerts = scopedAlerts.filter(a => showAcked || !a.acked);
 
   if (loading) return <div className="page-loading">Loading analytics…</div>;
   if (!data) return <div className="page-loading">No analytics data.</div>;
 
-  const { totals, sites } = data;
+  const sites = data.sites.filter(site => siteScope === 'all' ? true : siteScope === 'workspace' ? false : site.site_id === siteScope);
+  const totals = siteScope === 'all' ? data.totals : {
+    sites: sites.length,
+    urls_total: sites.reduce((sum, site) => sum + site.urls_total, 0),
+    urls_indexed: sites.reduce((sum, site) => sum + site.urls_indexed, 0),
+    urls_stale: sites.reduce((sum, site) => sum + site.urls_stale, 0),
+    failures: sites.reduce((sum, site) => sum + site.failures, 0),
+    open_alerts: scopedAlerts.filter(alert => !alert.acked).length,
+  };
+  const scopedMovers = movers.filter(mover => siteScope === 'all' ? true : siteScope === 'workspace' ? false : mover.site_id === siteScope);
   const indexRate = totals.urls_total ? Math.round((totals.urls_indexed / totals.urls_total) * 100) : 0;
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Analytics</h1>
-          <p className="page-subtitle">Index health across every site — funnels, trends and alerts</p>
+          <h1 className="page-title">Search performance</h1>
+          <p className="page-subtitle">Index health, movement and alerts for the selected scope · {range} day context</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={snapshot}>
           <RefreshCw size={12} /> <span className="hide-mobile">Snapshot now</span>
@@ -101,7 +113,7 @@ export default function AnalyticsPage() {
         {sites.map(s => {
           const rate = s.urls_total ? Math.round((s.urls_indexed / s.urls_total) * 100) : 0;
           return (
-            <Link key={s.site_id} to={`/analytics/${s.site_id}`} className="site-card">
+            <Link key={s.site_id} to={`/insights/search/${s.site_id}`} className="site-card">
               <div className="site-card-head">
                 <div>
                   <div className="site-card-name">{s.name}</div>
@@ -132,12 +144,12 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Search movers (WoW) */}
-      {movers.length > 0 && (
+      {scopedMovers.length > 0 && (
         <>
           <h2 className="section-title" style={{ marginTop: 28 }}><Activity size={14} /> Search movers <span className="text-dim" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· Google, last 7d vs prior 7d</span></h2>
           <div className="movers-list">
-            {movers.slice(0, 12).map(m => (
-              <Link key={m.site_id} to={`/analytics/${m.site_id}`} className="mover-row">
+            {scopedMovers.slice(0, 12).map(m => (
+              <Link key={m.site_id} to={`/insights/search/${m.site_id}`} className="mover-row">
                 <div className="mover-site">
                   <div className="mover-site-name">{m.name}</div>
                   <div className="mover-site-domain">{m.domain}</div>

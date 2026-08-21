@@ -212,7 +212,7 @@ function OverviewTab({ site, accounts }: { site: Site; accounts: GoogleAccount[]
         </div>
         <div className="site-fact">
           <span className="site-fact-label">Analytics</span>
-          <Link to={`/analytics/${site.id}`} className="site-fact-value link">Coverage, CWV &amp; GEO <ChevronRight size={11} /></Link>
+          <Link to={`/sites/${site.id}`} className="site-fact-value link">Open website workspace <ChevronRight size={11} /></Link>
         </div>
       </div>
 
@@ -854,11 +854,9 @@ export default function SitesPage() {
                   <tr
                     key={site.id}
                     className={selected === site.id ? 'row-active' : ''}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setSelected(selected === site.id ? null : site.id)}
                   >
                     <td>
-                      <div style={{ fontWeight: 700 }}>{site.name}</div>
+                      <Link className="site-name-link" to={`/sites/${site.id}`}>{site.name}</Link>
                       <div className="text-dim" style={{ fontSize: 12 }}>{site.domain}</div>
                     </td>
                     <td style={{ fontSize: 12 }}>
@@ -884,7 +882,16 @@ export default function SitesPage() {
                         : null}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <ChevronRight size={14} className="text-dim" style={{ transform: selected === site.id ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                      <button
+                        type="button"
+                        className="btn-icon btn-icon-ghost site-expand-button"
+                        aria-label={`${selected === site.id ? 'Hide' : 'Show'} advanced settings for ${site.name}`}
+                        aria-expanded={selected === site.id}
+                        aria-controls={`site-details-${site.id}`}
+                        onClick={() => setSelected(selected === site.id ? null : site.id)}
+                      >
+                        <ChevronRight size={14} className="text-dim" style={{ transform: selected === site.id ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -893,13 +900,15 @@ export default function SitesPage() {
           </div>
 
           {selectedSite && (
-            <SiteDetail
-              key={selectedSite.id}
-              site={selectedSite}
-              accounts={accounts}
-              onChanged={refresh}
-              onDeleted={() => { setSelected(null); refresh(); }}
-            />
+            <div id={`site-details-${selectedSite.id}`}>
+              <SiteDetail
+                key={selectedSite.id}
+                site={selectedSite}
+                accounts={accounts}
+                onChanged={refresh}
+                onDeleted={() => { setSelected(null); refresh(); }}
+              />
+            </div>
           )}
         </>
       )}
