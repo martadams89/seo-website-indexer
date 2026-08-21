@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.4](https://github.com/martadams89/seo-website-indexer/compare/v1.34.3...v1.34.4) (2026-08-21)
+
+
+### 🧹 Maintenance
+
+* **deps:** update npm dependencies (non-major) ([#285](https://github.com/martadams89/seo-website-indexer/issues/285)) ([e0fc321](https://github.com/martadams89/seo-website-indexer/commit/e0fc321743ea8f471253fdb522dfb710cc9894e7))
+
 ## [1.34.3](https://github.com/martadams89/seo-website-indexer/compare/v1.34.2...v1.34.3) (2026-08-20)
 
 
