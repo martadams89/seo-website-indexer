@@ -1,0 +1,36 @@
+name: Docker smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - .dockerignore
+      - backend/package.json
+      - backend/package-lock.json
+      - frontend/package.json
+      - frontend/package-lock.json
+      - .github/workflows/docker-smoke.yml
+
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
