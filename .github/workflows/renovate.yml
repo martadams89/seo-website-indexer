@@ -13,8 +13,8 @@ name: Renovate
 #      auto-merge.)
 #   2. Repo Settings → General → allow auto-merge.
 #   3. Branch protection / ruleset on main → require status checks:
-#      "backend" and "frontend". Docker packaging changes receive their own
-#      path-filtered smoke build.
+#      "backend", "frontend" and "build-and-push". Every PR receives the
+#      Docker smoke build so the required packaging check is never absent.
 on:
   schedule:
     - cron: '0 2 * * *'

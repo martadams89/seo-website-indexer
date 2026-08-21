@@ -3,15 +3,6 @@ name: Docker smoke
 on:
   pull_request:
     branches: [main]
-    paths:
-      - Dockerfile
-      - docker-compose.yml
-      - .dockerignore
-      - backend/package.json
-      - backend/package-lock.json
-      - frontend/package.json
-      - frontend/package-lock.json
-      - .github/workflows/docker-smoke.yml
 
 concurrency:
   group: docker-smoke-${{ github.ref }}
@@ -21,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-push:
+    name: build-and-push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
