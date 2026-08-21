@@ -1,4 +1,5 @@
 import type { Site } from '../db/database.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 export interface DiscoveredListing {
   provider: string;
@@ -425,14 +426,14 @@ export function siteHomepage(site: Site): string {
 
 export async function discoverEntityFromSite(site: Site): Promise<EntityDiscoveryResult> {
   const url = siteHomepage(site);
-  const response = await fetch(url, {
+  const response = await safeFetch(url, {
     headers: { 'User-Agent': 'OrganicCommandEntityDiscovery/1.0', Accept: 'text/html,application/xhtml+xml' },
     redirect: 'follow',
     signal: AbortSignal.timeout(20_000),
-  });
+  }, { label: 'Entity discovery URL' });
   if (!response.ok) throw new Error(`The website returned HTTP ${response.status}.`);
   const contentType = response.headers.get('content-type') || '';
   if (contentType && !/html|xhtml/i.test(contentType)) throw new Error('The website homepage did not return HTML.');
-  const html = (await response.text()).slice(0, 2_000_000);
+  const html = await readResponseText(response, 2_000_000, 'Entity discovery page');
   return parseEntityDiscovery(html, { siteName: site.name, siteUrl: response.url || url });
 }

@@ -5,15 +5,15 @@
  */
 import { buildLlmsTxt, buildRobotsTxt } from './geo-deploy.js';
 import type { Site } from '../db/database.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 async function fetchText(url: string): Promise<{ status: number; text: string }> {
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (llms-audit)' },
       signal: AbortSignal.timeout(15_000),
-      redirect: 'follow',
-    });
-    return { status: res.status, text: res.ok ? await res.text() : '' };
+    }, { label: 'Site audit URL' });
+    return { status: res.status, text: res.ok ? await readResponseText(res, 1_000_000, 'Discovery file') : '' };
   } catch {
     return { status: 0, text: '' };
   }

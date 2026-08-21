@@ -36,6 +36,7 @@ import {
 } from '../db/database.js';
 import { logSystem } from '../utils/logger.js';
 import { uploadVerificationKeyViaFtp } from '../utils/ftp.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -113,12 +114,12 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
     if (site.deploy_webhook_url) {
       logSystem('info', `Triggering IndexNow key deployment webhook: ${site.deploy_webhook_url}`, siteId);
       try {
-        await fetch(site.deploy_webhook_url, {
+        await safeFetch(site.deploy_webhook_url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key, filename: `${key}.txt`, content: key }),
           signal: AbortSignal.timeout(10_000)
-        });
+        }, { label: 'IndexNow deployment webhook URL' });
         logSystem('ok', `IndexNow deployment webhook successfully triggered!`, siteId);
       } catch (e) {
         logSystem('error', `Failed to trigger deployment webhook: ${String(e)}`, siteId);
@@ -146,10 +147,10 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
   logSystem('info', `Starting IndexNow key verification for ${domain}. Fetching: ${url}`, siteId, url);
 
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (indexnow-verifier)' },
       signal: AbortSignal.timeout(10_000),
-    });
+    }, { label: 'IndexNow verification URL' });
 
     if (!res.ok) {
       const errMsg = `Key file returned HTTP ${res.status}. Make sure the container is publicly reachable at ${domain}.`;
@@ -162,7 +163,7 @@ export async function verifyIndexNowKey(siteId: string, domain: string): Promise
       };
     }
 
-    const body = (await res.text()).trim();
+    const body = (await readResponseText(res, 4_096, 'IndexNow key response')).trim();
     const keyMatch = body === key;
 
     if (keyMatch) {

@@ -1,23 +1,15 @@
-import https from 'https';
-import http from 'http';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
-function fetchUrl(url: string): Promise<{ text: string; statusCode: number }> {
-  return new Promise((resolve) => {
-    const client = url.startsWith('https') ? https : http;
-    client
-      .get(url, { headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (auditor)' } }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          resolve({
-            text: Buffer.concat(chunks).toString('utf8'),
-            statusCode: res.statusCode ?? 0
-          });
-        });
-        res.on('error', () => resolve({ text: '', statusCode: 0 }));
-      })
-      .on('error', () => resolve({ text: '', statusCode: 0 }));
-  });
+async function fetchUrl(url: string): Promise<{ text: string; statusCode: number }> {
+  try {
+    const response = await safeFetch(url, {
+      headers: { 'User-Agent': 'OrganicCommand/1.0 (auditor)' },
+      signal: AbortSignal.timeout(15_000),
+    }, { label: 'GEO audit URL' });
+    return { text: await readResponseText(response, 1_000_000, 'GEO audit response'), statusCode: response.status };
+  } catch {
+    return { text: '', statusCode: 0 };
+  }
 }
 
 /**

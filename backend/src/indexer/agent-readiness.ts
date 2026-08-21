@@ -11,6 +11,7 @@
  */
 import { resolveTxt } from 'node:dns/promises';
 import type { Site } from '../db/database.js';
+import { readResponseJson, readResponseText, safeFetch } from '../security/outbound-url.js';
 
 export type AgentCheckStatus = 'pass' | 'fail' | 'neutral';
 
@@ -113,7 +114,7 @@ export async function scanAgentReadiness(url: string): Promise<AgentReadinessRes
     signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) throw new Error(`isitagentready scan failed: HTTP ${res.status}`);
-  return mapScan(await res.json() as RawScan);
+  return mapScan(await readResponseJson<RawScan>(res, 2_000_000, 'Agent-readiness scan response'));
 }
 
 /**
@@ -137,11 +138,11 @@ interface Fetched { ok: boolean; ct: string; headers: Headers; text: string }
 
 async function grab(url: string, accept?: string): Promise<Fetched> {
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: { 'User-Agent': UA, ...(accept ? { Accept: accept } : {}) },
-      signal: AbortSignal.timeout(TIMEOUT), redirect: 'follow',
-    });
-    return { ok: res.ok, ct: res.headers.get('content-type') || '', headers: res.headers, text: res.ok ? (await res.text()).slice(0, 400_000) : '' };
+      signal: AbortSignal.timeout(TIMEOUT),
+    }, { label: 'Agent-readiness site URL' });
+    return { ok: res.ok, ct: res.headers.get('content-type') || '', headers: res.headers, text: res.ok ? await readResponseText(res, 400_000, 'Agent-readiness page') : '' };
   } catch { return { ok: false, ct: '', headers: new Headers(), text: '' }; }
 }
 

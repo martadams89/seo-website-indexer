@@ -23,7 +23,15 @@ export interface CommandAction {
 
 export interface CommandCenter {
   generatedAt: string;
-  score: { overall: number; indexation: number | null; aiVisibility: number | null; agentReadiness: number | null; operations: number };
+  score: {
+    overall: number | null;
+    indexation: number | null;
+    aiVisibility: number | null;
+    agentReadiness: number | null;
+    operations: number;
+    completeness: number;
+    explanation: string[];
+  };
   metrics: {
     sites: number; urls: number; indexed: number; indexedRate: number | null;
     stale: number; failures: number; openAlerts: number;
@@ -46,7 +54,7 @@ export function getCommandCenter(workspaceId: string | null): CommandCenter {
   if (!workspaceId) {
     return {
       generatedAt,
-      score: { overall: 0, indexation: null, aiVisibility: null, agentReadiness: null, operations: 100 },
+      score: { overall: null, indexation: null, aiVisibility: null, agentReadiness: null, operations: 100, completeness: 0, explanation: ['No workspace is selected, so an overall health score is not available.'] },
       metrics: { sites: 0, urls: 0, indexed: 0, indexedRate: null, stale: 0, failures: 0, openAlerts: 0, clicks7d: 0, clicksChange: null, aiPrompts: 0, aiChecks: 0, aiVisibility: null, aiChange: null },
       integrations: { google: 0, bing: 0, aiProviders: 0, notifications: 0 },
       actions: [], movers, ai,
@@ -68,8 +76,18 @@ export function getCommandCenter(workspaceId: string | null): CommandCenter {
   const previousClicks = movers.reduce((sum, site) => sum + site.clicks.previous, 0);
   const clicksChange = previousClicks === 0 ? (currentClicks > 0 ? 100 : null) : Math.round((currentClicks - previousClicks) / previousClicks * 100);
   const aiVisibility = ai.overview.checks ? ai.overview.visibility : null;
-  const scoreParts = [indexedRate, aiVisibility, agentReadiness, operations].filter((value): value is number => value !== null);
-  const overall = scoreParts.length ? clamp(scoreParts.reduce((sum, value) => sum + value, 0) / scoreParts.length) : operations;
+  const measuredParts = [indexedRate, aiVisibility, agentReadiness].filter((value): value is number => value !== null);
+  const scoreParts = [...measuredParts, operations];
+  // Operations alone is not evidence of organic health. Keep the overall score
+  // unavailable until at least one outcome/readiness dimension has data.
+  const overall = measuredParts.length ? clamp(scoreParts.reduce((sum, value) => sum + value, 0) / scoreParts.length) : null;
+  const completeness = Math.round(scoreParts.length / 4 * 100);
+  const explanation = [
+    indexedRate === null ? 'Indexation is awaiting URL coverage data.' : `Indexation contributes ${indexedRate}/100.`,
+    aiVisibility === null ? 'AI visibility is awaiting a completed prompt check.' : `AI visibility contributes ${aiVisibility}/100.`,
+    agentReadiness === null ? 'Agent readiness is awaiting a site scan.' : `Agent readiness contributes ${agentReadiness}/100.`,
+    `Operations contributes ${operations}/100 from open alerts and submission failures.`,
+  ];
 
   const google = getGoogleAccountsForWorkspace(workspaceId).length;
   const bing = listBingAccounts(workspaceId).length;
@@ -80,12 +98,12 @@ export function getCommandCenter(workspaceId: string | null): CommandCenter {
   if (sites.length === 0) actions.push({ id: 'add-site', priority: 'high', kind: 'indexing', title: 'Add your first site', description: 'Connect a sitemap and Search Console property to start the operating loop.', to: '/sites' });
   if (sites.length > 0 && google === 0) actions.push({ id: 'connect-google', priority: 'critical', kind: 'integration', title: 'Connect Google Search Console', description: 'Submission and Google performance data are unavailable until an account is shared with this workspace.', to: '/settings?tab=accounts' });
   if (overview.totals.failures > 0) actions.push({ id: 'submission-failures', priority: 'critical', kind: 'indexing', title: 'Resolve submission failures', description: 'Check reachability, clear fixed records, and let the next run retry them.', to: '/?focus=failures', count: overview.totals.failures });
-  if (errorAlerts > 0) actions.push({ id: 'critical-alerts', priority: 'critical', kind: 'search', title: 'Investigate critical regressions', description: 'Index coverage or another monitored signal has moved sharply.', to: '/analytics', count: errorAlerts });
-  if (overview.totals.urls_stale > 0) actions.push({ id: 'stale-content', priority: 'high', kind: 'indexing', title: 'Refresh changed pages', description: 'These pages changed after Google last inspected them and are ready for resubmission.', to: '/analytics', count: overview.totals.urls_stale });
+  if (errorAlerts > 0) actions.push({ id: 'critical-alerts', priority: 'critical', kind: 'search', title: 'Investigate critical regressions', description: 'Index coverage or another monitored signal has moved sharply.', to: '/insights/search', count: errorAlerts });
+  if (overview.totals.urls_stale > 0) actions.push({ id: 'stale-content', priority: 'high', kind: 'indexing', title: 'Refresh changed pages', description: 'These pages changed after Google last inspected them and are ready for resubmission.', to: '/insights/search', count: overview.totals.urls_stale });
   if (ai.overview.configuredProviders === 0) actions.push({ id: 'connect-ai', priority: 'medium', kind: 'integration', title: 'Connect an answer engine', description: 'Add an API key to measure brand visibility across AI search.', to: '/settings?tab=keys' });
-  else if (ai.overview.prompts === 0) actions.push({ id: 'add-prompts', priority: 'medium', kind: 'ai', title: 'Build an AI visibility prompt set', description: 'Track the discovery, comparison, commercial and brand questions that lead buyers to you.', to: '/citations' });
-  else if (ai.opportunities.length > 0) actions.push({ id: 'citation-gaps', priority: 'medium', kind: 'ai', title: 'Close AI citation gaps', description: 'Prioritize prompts where your sites are absent from the latest grounded answers.', to: '/citations', count: ai.opportunities.length });
-  if (agentReadiness !== null && agentReadiness < 80) actions.push({ id: 'agent-readiness', priority: 'medium', kind: 'experience', title: 'Improve agent readiness', description: 'Strengthen machine-readable discovery, identity and content surfaces.', to: '/analytics', count: 100 - agentReadiness });
+  else if (ai.overview.prompts === 0) actions.push({ id: 'add-prompts', priority: 'medium', kind: 'ai', title: 'Build an AI visibility prompt set', description: 'Track the discovery, comparison, commercial and brand questions that lead buyers to you.', to: '/insights/ai' });
+  else if (ai.opportunities.length > 0) actions.push({ id: 'citation-gaps', priority: 'medium', kind: 'ai', title: 'Close AI citation gaps', description: 'Prioritize prompts where your sites are absent from the latest grounded answers.', to: '/insights/ai', count: ai.opportunities.length });
+  if (agentReadiness !== null && agentReadiness < 80) actions.push({ id: 'agent-readiness', priority: 'medium', kind: 'experience', title: 'Improve agent readiness', description: 'Strengthen machine-readable discovery, identity and content surfaces.', to: '/insights/search', count: 100 - agentReadiness });
   if (notifications === 0) actions.push({ id: 'notifications', priority: 'low', kind: 'integration', title: 'Route operational notifications', description: 'Send run failures and citation changes to Slack, email or your preferred channel.', to: '/settings?tab=notifications' });
 
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 } as const;
@@ -100,7 +118,7 @@ export function getCommandCenter(workspaceId: string | null): CommandCenter {
 
   return {
     generatedAt,
-    score: { overall, indexation: indexedRate, aiVisibility, agentReadiness, operations },
+    score: { overall, indexation: indexedRate, aiVisibility, agentReadiness, operations, completeness, explanation },
     metrics: {
       sites: sites.length, urls: overview.totals.urls_total, indexed: overview.totals.urls_indexed,
       indexedRate, stale: overview.totals.urls_stale, failures: overview.totals.failures,

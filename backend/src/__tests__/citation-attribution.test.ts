@@ -74,6 +74,8 @@ describe('entity-aware AI citation attribution', () => {
     expect(insights.overview).toMatchObject({ checks: 5, cited: 4, visibility: 80, directCitations: 1, thirdPartyCitations: 2, mentionOnlyCitations: 1 });
     expect(insights.sources.find(source => source.domain === 'play.google.com')).toMatchObject({ attributed: true, entities: ['Acme Scout'] });
     expect(insights.sources.find(source => source.domain === 'g2.com')).toMatchObject({ attributed: true });
+    expect(citations.getAiInsights(workspace.id, siteId, 30).overview.checks).toBe(5);
+    expect(citations.getAiInsights(workspace.id, null, 30).overview.checks).toBe(0);
   });
 
   it('uses configurable trading names to uplift old results without rerunning a paid prompt', () => {

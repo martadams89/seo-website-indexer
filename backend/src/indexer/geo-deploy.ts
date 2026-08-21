@@ -14,6 +14,7 @@
 import { uploadFileViaFtp } from '../utils/ftp.js';
 import { logSystem } from '../utils/logger.js';
 import { type Site } from '../db/database.js';
+import { safeFetch } from '../security/outbound-url.js';
 
 function normaliseDomain(domain: string): string {
   let host = domain;
@@ -84,7 +85,7 @@ export function buildLlmsSitemap(site: Site, hasFull = false): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`;
 }
 
-export type DeployTarget = 'robots' | 'llms';
+export type DeployTarget = 'robots' | 'llms' | 'llms-sitemap';
 
 export interface DeployResult {
   target: DeployTarget;
@@ -96,18 +97,18 @@ export interface DeployResult {
 async function deployViaWebhook(site: Site, filename: string, content: string): Promise<DeployResult | null> {
   if (!site.deploy_webhook_url) return null;
   try {
-    const res = await fetch(site.deploy_webhook_url, {
+    const res = await safeFetch(site.deploy_webhook_url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename, content, contentType: 'text/plain' }),
       signal: AbortSignal.timeout(10_000),
-    });
+    }, { label: 'Deployment webhook URL' });
     if (!res.ok) {
-      return { target: filename === 'robots.txt' ? 'robots' : 'llms', ok: false, method: 'webhook', message: `Webhook returned HTTP ${res.status}` };
+      return { target: filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap', ok: false, method: 'webhook', message: `Webhook returned HTTP ${res.status}` };
     }
-    return { target: filename === 'robots.txt' ? 'robots' : 'llms', ok: true, method: 'webhook', message: 'Webhook accepted' };
+    return { target: filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap', ok: true, method: 'webhook', message: 'Webhook accepted' };
   } catch (e) {
-    return { target: filename === 'robots.txt' ? 'robots' : 'llms', ok: false, method: 'webhook', message: `Webhook error: ${String(e)}` };
+    return { target: filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap', ok: false, method: 'webhook', message: `Webhook error: ${String(e)}` };
   }
 }
 
@@ -125,14 +126,14 @@ async function deployViaFtp(site: Site, filename: string, content: string): Prom
       filename,
       content,
     );
-    return { target: filename === 'robots.txt' ? 'robots' : 'llms', ok: true, method: 'ftp', message: 'Uploaded via FTP' };
+    return { target: filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap', ok: true, method: 'ftp', message: 'Uploaded via FTP' };
   } catch (e) {
-    return { target: filename === 'robots.txt' ? 'robots' : 'llms', ok: false, method: 'ftp', message: `FTP error: ${String(e)}` };
+    return { target: filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap', ok: false, method: 'ftp', message: `FTP error: ${String(e)}` };
   }
 }
 
 async function deployFile(site: Site, filename: string, content: string): Promise<DeployResult> {
-  const target: DeployTarget = filename === 'robots.txt' ? 'robots' : 'llms';
+  const target: DeployTarget = filename === 'robots.txt' ? 'robots' : filename === 'llms.txt' ? 'llms' : 'llms-sitemap';
   const viaWebhook = await deployViaWebhook(site, filename, content);
   if (viaWebhook) return viaWebhook;
   const viaFtp = await deployViaFtp(site, filename, content);

@@ -1,6 +1,7 @@
 import { getSiteById, type Site } from '../db/database.js';
 import { getAccessTokenForAccount } from '../auth/google-oauth.js';
 import { logSystem } from '../utils/logger.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 import {
   assertWithinBudget, createWorkItem, getIntegration, providerLabel, recordMetric, recordUsage,
   updateContentAction, updateIntegrationSync, type ContentAction, type Integration,
@@ -22,8 +23,8 @@ function baseUrl(value: unknown): string {
 }
 
 async function jsonFetch<T>(url: string, init: RequestInit = {}, timeout = 30_000): Promise<T> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeout) });
-  const text = await res.text();
+  const res = await safeFetch(url, { ...init, signal: AbortSignal.timeout(timeout) }, { label: 'Integration endpoint' });
+  const text = await readResponseText(res, 5_000_000, 'Integration response');
   let body: unknown = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
   if (!res.ok) {
@@ -116,7 +117,7 @@ async function syncPageSpeed(integration: Integration): Promise<SyncResult> {
   }
   if (regressions.length) createWorkItem({ workspaceId: integration.workspace_id, siteId: site.id, source: 'pagespeed',
     sourceRef: `${integration.id}:${day()}`, title: 'Page experience is below budget',
-    description: `${regressions.join(', ')}. Review the evidence before shipping a fix.`, severity: 'high', deepLink: `/intelligence?source=pagespeed`, evidence: { target, regressions } });
+    description: `${regressions.join(', ')}. Review the evidence before shipping a fix.`, severity: 'high', deepLink: `/insights/evidence?source=pagespeed`, evidence: { target, regressions } });
   recordUsage({ workspace_id: integration.workspace_id, user_id: null, provider: 'google', operation: 'pagespeed.runPagespeed', quantity: 2, unit: 'request', estimated_cost: 0, metadata: { integration_id: integration.id, url: target } });
   return { ok: true, observations, message: 'Audited mobile and desktop performance, accessibility, best practices and SEO.' };
 }
@@ -164,7 +165,7 @@ async function syncCloudflare(integration: Integration): Promise<SyncResult> {
   if ((total?.ratio?.status5xx ?? 0) >= 0.02) createWorkItem({ workspaceId: integration.workspace_id, siteId: integration.site_id,
     source: 'cloudflare', sourceRef: `${integration.id}:5xx:${day()}`, title: 'Origin error rate is elevated',
     description: `${((total?.ratio?.status5xx ?? 0) * 100).toFixed(1)}% of edge requests returned 5xx in the last 24 hours.`,
-    severity: 'critical', deepLink: '/intelligence?source=cloudflare', evidence: { ratio: total?.ratio?.status5xx, window: '24h' } });
+    severity: 'critical', deepLink: '/insights/evidence?source=cloudflare', evidence: { ratio: total?.ratio?.status5xx, window: '24h' } });
   recordUsage({ workspace_id: integration.workspace_id, user_id: null, provider: 'cloudflare', operation: 'graphql.analytics', quantity: 1, unit: 'request', estimated_cost: 0, metadata: { integration_id: integration.id } });
   return { ok: true, observations, message: 'Imported edge traffic, cache, error and top-path evidence for the last 24 hours.' };
 }
@@ -351,7 +352,7 @@ export async function publishContentAction(action: ContentAction): Promise<Conte
 export async function verifyContentAction(action: ContentAction): Promise<ContentAction> {
   if (action.status !== 'published') throw new Error('Only a published change can be verified.');
   if (action.preview_url) {
-    const res = await fetch(action.preview_url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(20_000) });
+    const res = await safeFetch(action.preview_url, { method: 'GET', signal: AbortSignal.timeout(20_000) }, { label: 'Publishing preview URL' });
     if (!res.ok) throw new Error(`Published URL returned HTTP ${res.status}.`);
   }
   const next = updateContentAction(action.workspace_id, action.id, { status: 'verified' })!;

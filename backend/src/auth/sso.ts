@@ -16,6 +16,7 @@
 import { randomUUID } from 'crypto';
 import { getUserByEmail, createUser, countUsers, type User } from './users.js';
 import { bootstrapUserWorkspace } from './workspaces.js';
+import { readResponseJson, safeFetch, validateOutboundUrl } from '../security/outbound-url.js';
 
 interface ProviderConfig {
   id: string;
@@ -49,6 +50,11 @@ function providerConfigs(): ProviderConfig[] {
       userinfoUrl: process.env.SSO_OIDC_USERINFO_URL,
       scope: process.env.SSO_OIDC_SCOPE || 'openid email profile',
     });
+  }
+  for (const provider of out) {
+    validateOutboundUrl(provider.authUrl, { label: `${provider.name} authorization URL` });
+    validateOutboundUrl(provider.tokenUrl, { label: `${provider.name} token URL` });
+    validateOutboundUrl(provider.userinfoUrl, { label: `${provider.name} user-info URL` });
   }
   return out;
 }
@@ -94,20 +100,20 @@ export async function ssoHandleCallback(
   if (!p) return null;
   if (!consumeState(state)) throw new Error('Invalid or expired SSO state.');
 
-  const tokenRes = await fetch(p.tokenUrl, {
+  const tokenRes = await safeFetch(p.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id: p.clientId, client_secret: p.clientSecret,
       code, grant_type: 'authorization_code', redirect_uri: redirectUri,
     }).toString(),
-  });
-  const token = await tokenRes.json() as { access_token?: string; error?: string; error_description?: string };
+  }, { label: `${p.name} token URL` });
+  const token = await readResponseJson<{ access_token?: string; error?: string; error_description?: string }>(tokenRes, 1_000_000, 'SSO token response');
   if (!token.access_token) throw new Error(token.error_description || token.error || 'Token exchange failed.');
 
-  const infoRes = await fetch(p.userinfoUrl, { headers: { Authorization: `Bearer ${token.access_token}` } });
+  const infoRes = await safeFetch(p.userinfoUrl, { headers: { Authorization: `Bearer ${token.access_token}` } }, { label: `${p.name} user-info URL` });
   if (!infoRes.ok) throw new Error(`Userinfo request failed (HTTP ${infoRes.status}).`);
-  const info = await infoRes.json() as { email?: string; email_verified?: boolean; name?: string };
+  const info = await readResponseJson<{ email?: string; email_verified?: boolean; name?: string }>(infoRes, 1_000_000, 'SSO user-info response');
   if (!info.email) throw new Error('SSO provider did not return an email.');
   const email = info.email.toLowerCase();
 

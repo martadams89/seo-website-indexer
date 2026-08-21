@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { encrypt, decrypt } from '../utils/crypto.js';
+import { runMigrations } from './migrations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../..', 'data');
@@ -24,6 +25,7 @@ export function getDb(): Database.Database {
     // throwing SQLITE_BUSY.
     _db.pragma('busy_timeout = 5000');
     initSchema(_db);
+    runMigrations(_db);
     migrateSettingsToAccounts(_db);
     migrateGoogleAccountWorkspaceShares(_db);
     backfillSiteAccounts(_db);
@@ -1203,8 +1205,8 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
     ftp_pass: encrypt(site.ftp_pass ?? null),
   };
   getDb().prepare(`
-    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path, workspace_id, bing_account_id)
-    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path, @workspace_id, @bing_account_id)
+    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path, workspace_id, bing_account_id, geo_manage)
+    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path, @workspace_id, @bing_account_id, @geo_manage)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       domain = excluded.domain,
@@ -1223,7 +1225,8 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
       -- workspace never moves on a plain edit (COALESCE preserves it); bing
       -- account is set/cleared explicitly by the caller.
       workspace_id = COALESCE(excluded.workspace_id, sites.workspace_id),
-      bing_account_id = excluded.bing_account_id
+      bing_account_id = excluded.bing_account_id,
+      geo_manage = excluded.geo_manage
   `).run(merged);
 }
 

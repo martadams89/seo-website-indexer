@@ -4,6 +4,7 @@
  * budget and dilute canonicals.
  */
 import { getDb, type Site } from '../db/database.js';
+import { safeFetch } from '../security/outbound-url.js';
 
 export interface HygieneIssue {
   url: string;
@@ -17,12 +18,12 @@ async function probe(url: string): Promise<HygieneIssue | null> {
   for (let i = 0; i < 6; i++) {
     let res: Response;
     try {
-      res = await fetch(current, {
+      res = await safeFetch(current, {
         method: 'HEAD',
         redirect: 'manual',
         headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (hygiene)' },
         signal: AbortSignal.timeout(15_000),
-      });
+      }, { label: 'Site hygiene URL', maxRedirects: 0 });
     } catch (e) {
       return { url, kind: 'broken', detail: `fetch failed: ${e instanceof Error ? e.message : e}` };
     }

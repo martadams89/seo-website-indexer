@@ -12,6 +12,7 @@ import { logSystem } from '../utils/logger.js';
 import { recordAlert } from '../analytics/stats.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
 import { assertWithinBudget, listLocalEntities, recordUsage, type LocalEntity } from '../platform/store.js';
+import { safeFetch } from '../security/outbound-url.js';
 
 export const PROVIDERS = ['openai', 'anthropic', 'gemini', 'perplexity', 'xai', 'brave'] as const;
 export type Provider = typeof PROVIDERS[number];
@@ -121,7 +122,7 @@ async function askGemini(turns: ChatTurn[], key: string, modelId?: string): Prom
     const title = c.web?.title;
     if (uri && uri.includes('vertexaisearch.cloud.google.com')) {
       try {
-        const r = await fetch(uri, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6_000) });
+        const r = await safeFetch(uri, { method: 'HEAD', signal: AbortSignal.timeout(6_000) }, { label: 'Citation source URL', maxRedirects: 0 });
         const loc = r.headers.get('location');
         if (loc && loc.startsWith('http')) return loc;
       } catch { /* fall through to title */ }
@@ -664,8 +665,8 @@ export async function runDuePrompts(): Promise<number> {
 }
 
 /** Run all enabled prompts (used by the scheduler's citation sweep). */
-export async function runAllPrompts(workspaceId: string | null = null): Promise<number> {
-  const prompts = listPrompts(workspaceId).filter(p => p.enabled);
+export async function runAllPrompts(workspaceId: string | null = null, siteScope?: string | null): Promise<number> {
+  const prompts = listPrompts(workspaceId).filter(p => p.enabled && (siteScope === undefined ? true : p.site_id === siteScope));
   let n = 0;
   for (const p of prompts) {
     try { await runPrompt(p.id, workspaceId); n++; } catch { /* logged in runPrompt */ }
@@ -801,8 +802,12 @@ function decorateStoredResult<T extends object>(row: T, identity: CitationIdenti
     attributions: JSON.stringify(classification.attributions), attribution_version: 1 } as T;
 }
 
-/** Portfolio-level GEO intelligence derived from root runs only. */
-export function getAiInsights(workspaceId: string | null): AiInsights {
+/** GEO intelligence derived from root runs, optionally scoped by site and time. */
+export function getAiInsights(
+  workspaceId: string | null,
+  siteScope: string | null | undefined = undefined,
+  days?: number,
+): AiInsights {
   const empty: AiInsights = {
     overview: { prompts: 0, configuredProviders: 0, checks: 0, cited: 0, visibility: 0, previousVisibility: null, change: null, sourceDomains: 0,
       directCitations: 0, thirdPartyCitations: 0, mentionOnlyCitations: 0 },
@@ -810,7 +815,9 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
   };
   if (!workspaceId) return empty;
 
-  const prompts = listPrompts(workspaceId);
+  const prompts = listPrompts(workspaceId).filter(prompt => (
+    siteScope === undefined ? true : prompt.site_id === siteScope
+  ));
   const configured = configuredProviders(workspaceId);
   const rawRows = getDb().prepare(`
     SELECT r.*, p.prompt, p.category, p.site_id
@@ -818,13 +825,21 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
     WHERE p.workspace_id = ? AND r.parent_id IS NULL
     ORDER BY r.created_at DESC, r.id DESC
   `).all(workspaceId) as InsightResult[];
+  const cutoff = days ? Date.now() - days * 86_400_000 : null;
+  const scopedRows = rawRows.filter(row => {
+    if (siteScope !== undefined && row.site_id !== siteScope) return false;
+    if (cutoff === null) return true;
+    const normalized = row.created_at.includes('T') ? row.created_at : `${row.created_at.replace(' ', 'T')}Z`;
+    const observed = Date.parse(normalized);
+    return Number.isFinite(observed) && observed >= cutoff;
+  });
   const identityCache = new Map<string, CitationIdentity>();
   const identityFor = (siteId: string | null) => {
     const key = siteId ?? '*';
     if (!identityCache.has(key)) identityCache.set(key, citationIdentity(workspaceId, siteId));
     return identityCache.get(key)!;
   };
-  const rows = rawRows.map(row => decorateStoredResult(row as unknown as Record<string, unknown>, identityFor(row.site_id)) as unknown as InsightResult);
+  const rows = scopedRows.map(row => decorateStoredResult(row as unknown as Record<string, unknown>, identityFor(row.site_id)) as unknown as InsightResult);
 
   const latest = new Map<string, InsightResult>();
   const previous = new Map<string, InsightResult>();
@@ -851,20 +866,20 @@ export function getAiInsights(workspaceId: string | null): AiInsights {
     return { provider, checks: providerRows.length, cited: providerCited, visibility: providerRows.length ? Math.round(providerCited / providerRows.length * 100) : 0 };
   });
 
-  const days = new Map<string, { checks: number; cited: number }>();
+  const daily = new Map<string, { checks: number; cited: number }>();
   for (const row of [...rows].reverse()) {
     if (row.error || !configured.includes(row.provider)) continue;
     const day = row.created_at.slice(0, 10);
-    const item = days.get(day) ?? { checks: 0, cited: 0 };
+    const item = daily.get(day) ?? { checks: 0, cited: 0 };
     item.checks += 1;
     if (row.cited) item.cited += 1;
-    days.set(day, item);
+    daily.set(day, item);
   }
-  const trend = [...days.entries()].slice(-30).map(([day, item]) => ({
+  const trend = [...daily.entries()].slice(-(days ?? 30)).map(([day, item]) => ({
     day, ...item, visibility: item.checks ? Math.round(item.cited / item.checks * 100) : 0,
   }));
 
-  const owned = citationIdentity(workspaceId).domains.map(item => item.domain);
+  const owned = citationIdentity(workspaceId, typeof siteScope === 'string' ? siteScope : null).domains.map(item => item.domain);
   const competitors = (getWorkspaceSetting(workspaceId, 'ai_competitor_domains') ?? '')
     .split(/[\s,]+/).map(d => d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
   const domainMap = new Map<string, { citations: number; providers: Set<Provider>; attributionKinds: Set<CitationAttributionKind>; entities: Set<string> }>();
