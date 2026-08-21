@@ -29,7 +29,7 @@ Official references: [Data API quickstart](https://developers.google.com/analyti
 
 | Service | Minimum external permission | Where it is configured |
 | --- | --- | --- |
-| Google Search Console | OAuth `webmasters`; Owner or Full user on the property | Settings → Google Accounts, then Sites & Submissions |
+| Google Search Console | OAuth `webmasters`; Owner or Full user on the property | Settings → Google Accounts, then Sites |
 | Google Analytics 4 | OAuth `analytics.readonly`; GA4 Viewer or higher | Integrations |
 | PageSpeed Insights | PageSpeed Insights API key; no OAuth | Integrations |
 | Chrome UX Report | Chrome UX Report API key; no OAuth | Settings → API Keys |
@@ -39,8 +39,8 @@ Official references: [Data API quickstart](https://developers.google.com/analyti
 | WordPress | Application password for a user able to edit and publish the target post type | Integrations |
 | Shopify | `read_content` and `write_content` | Integrations |
 | Webflow | `sites:read`, `cms:read`, `cms:write` | Integrations |
-| Bing Webmaster | Verified site plus an API key or delegated OAuth | Settings → API Keys, then Sites & Submissions |
-| IndexNow | Public ownership key file at the site root | Sites & Submissions → site → IndexNow |
+| Bing Webmaster | Verified site plus an API key or delegated OAuth | Settings → API Keys, then Sites |
+| IndexNow | Public ownership key file at the site root | Sites → site → IndexNow |
 | OpenAI | Project key allowed to list models and create Responses | Settings → API Keys |
 | Anthropic | API key allowed to list models and create Messages with web search | Settings → API Keys |
 | Gemini | Gemini API key allowed to list models and generate content with Google Search grounding | Settings → API Keys |
@@ -248,7 +248,7 @@ IndexNow uses proof of site control rather than an account permission. The per-s
 https://example.com/YOUR_KEY.txt
 ```
 
-The file body must contain only `YOUR_KEY`. Generate and verify it under **Sites & Submissions → site → IndexNow**. The application can serve the path behind a reverse proxy or deploy it through the site’s configured FTP/SFTP or webhook route. See [IndexNow key hosting](https://www.indexnow.org/documentation) and [the project indexing guide](INDEXING.md#set-up-indexnow).
+The file body must contain only `YOUR_KEY`. Generate and verify it under **Sites → site → IndexNow**. The application can serve the path behind a reverse proxy or deploy it through the site’s configured FTP/SFTP or webhook route. See [IndexNow key hosting](https://www.indexnow.org/documentation) and [the project indexing guide](INDEXING.md#set-up-indexnow).
 
 ## AI visibility providers
 

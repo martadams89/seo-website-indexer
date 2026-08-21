@@ -6,7 +6,7 @@ It does not publish changes to your website or directory accounts. Saving a reco
 
 ## Start from a website
 
-1. Add the website under **Sites & Submissions**.
+1. Add the website under **Sites**.
 2. Open **Markets & Entities** and choose **Add entity**.
 3. Select the website and click **Discover public facts**.
 4. Review every populated field, correct anything stale and mark a listing verified only after checking it.

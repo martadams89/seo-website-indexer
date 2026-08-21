@@ -6,7 +6,7 @@
  */
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { KeyRound, ShieldCheck, Loader2, Fingerprint } from 'lucide-react';
-import { api, type CurrentUser, type ApiError } from '../api';
+import { api, apiUrl, type CurrentUser, type ApiError } from '../api';
 import { loginWithPasskey } from './webauthn';
 
 interface AuthValue {
@@ -275,7 +275,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'login' | 'signup'; onAuthed: () =
               <div className="auth-sso">
                 <div className="auth-divider"><span>or</span></div>
                 {ssoProviders.map(p => (
-                  <a key={p.id} className="btn btn-secondary" href={`/api/auth/sso/${p.id}/start`}
+                  <a key={p.id} className="btn btn-secondary" href={apiUrl(`/api/auth/sso/${p.id}/start`)}
                     style={{ width: '100%', justifyContent: 'center' }}>
                     Continue with {p.name}
                   </a>

@@ -20,13 +20,13 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Area | What you can do |
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. A prioritised opportunity finder highlights high-impression queries already within striking distance. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
-| Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`. |
+| Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
 | Work and publishing | Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
-| Reports | Build scheduled reports, send digests and provide a read-only client portal. |
+| Reports | Build scheduled reports, send digests and provide an authenticated, read-only Executive View. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
 All external services are optional. A basic install can run sitemap checks and IndexNow without connecting an analytics or AI provider.
@@ -58,7 +58,7 @@ For an internet-facing installation, set a stable `APP_SECRET`, keep `/data` on 
 After signing in:
 
 1. Create or select a workspace.
-2. Add a site and its sitemap URL under **Sites & Submissions**.
+2. Add a site and its sitemap URL under **Sites**.
 3. Connect a Google account if you want Search Console data and submissions.
 4. Put the site's IndexNow key file in place if you want URL submissions.
 5. Add any analytics, AI, publishing or notification services you need.
@@ -129,7 +129,11 @@ Most settings live in the dashboard. These environment variables control the con
 | `HOST` | `0.0.0.0` | Bind address. |
 | `DATA_DIR` | `/data` | SQLite database, encryption key and backup directory. |
 | `APP_SECRET` | generated | Encrypts OAuth tokens and delivery credentials. Set a stable value in production so restores remain portable. |
-| `CORS_ORIGIN` | request origin | Comma-separated allowed browser origins when the frontend is hosted separately. |
+| `PUBLIC_URL` | request origin | Canonical HTTPS origin used by passkeys, SSO callbacks and Secure cookie detection. Recommended behind a proxy. |
+| `TRUST_PROXY` | `false` | Trust proxy-supplied client/protocol headers. Enable only behind a proxy that overwrites them. |
+| `CORS_ORIGIN` | disabled | Explicit comma-separated browser origins when the frontend is hosted separately. The bundled UI is same-origin. |
+| `OUTBOUND_HOST_ALLOWLIST` | unset | Exact comma-separated hostnames allowed to bypass public-address checks for trusted internal services. |
+| `ALLOW_INSECURE_OUTBOUND`, `ALLOW_PRIVATE_OUTBOUND` | `false` | Broad outbound-policy exceptions for controlled deployments; prefer the hostname allowlist. |
 | `BACKUP_KEEP` | `7` | Number of nightly SQLite backups to keep. |
 | `RATE_LIMIT_MAX` | `300` | General requests allowed per `RATE_LIMIT_WINDOW`. |
 | `AUTH_RATE_LIMIT_MAX` | `10` | Sign-in requests allowed per `AUTH_RATE_LIMIT_WINDOW`. |
@@ -149,6 +153,8 @@ The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, reco
 - Workspace access is checked by the API, not only hidden in the interface.
 - Service tokens are hashed, scoped to one workspace and can be expired or revoked.
 - Administrative actions, impersonation and security changes are recorded in the audit history.
+- User-configured HTTP, webhook, SSO and FTP destinations are checked against loopback, private and reserved networks before connection and again after redirects/DNS resolution.
+- Cross-origin browser access is disabled unless an explicit `CORS_ORIGIN` allowlist is configured; forwarded client addresses are ignored unless `TRUST_PROXY` is enabled.
 
 Use HTTPS in production, protect access to the data volume, keep `APP_SECRET` out of source control and back up both the database and the key needed to decrypt stored credentials.
 

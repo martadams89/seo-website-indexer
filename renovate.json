@@ -22,10 +22,8 @@
       "enabled": false
     },
     {
-      "description": "Auto-merge everything \u2014 major/minor/patch/pin/digest \u2014 once required CI is green (backend tests+build, frontend lint+build, full Docker build). CI is the gate, not semver.",
+      "description": "Auto-merge low-risk patch, pin and digest updates after required CI passes. Minor and major updates stay reviewable.",
       "matchUpdateTypes": [
-        "major",
-        "minor",
         "patch",
         "pin",
         "digest"
@@ -34,25 +32,24 @@
       "platformAutomerge": true
     },
     {
-      "description": "Group all non-major npm updates into one weekly PR per workspace",
+      "description": "Group review-required npm minor updates to reduce PR noise without mixing them into automerged patches",
       "matchManagers": [
         "npm"
       ],
       "matchUpdateTypes": [
-        "minor",
-        "patch"
+        "minor"
       ],
-      "groupName": "npm dependencies (non-major)"
+      "groupName": "npm dependencies (minor)"
     },
     {
-      "description": "better-sqlite3 majors track Node ABI \u2014 still auto-merges (the Docker build step compiles/installs the native addon, so a real ABI break fails CI), but flagged for a look since it's a native module",
+      "description": "better-sqlite3 majors track Node ABI and always require review even when CI is green",
       "matchPackageNames": [
         "better-sqlite3"
       ],
       "matchUpdateTypes": [
         "major"
       ],
-      "automerge": true,
+      "automerge": false,
       "addLabels": [
         "needs-review"
       ]
@@ -60,5 +57,5 @@
   ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 3,
-  "description": "Self-hosted via .github/workflows/renovate.yml (weekly cron + manual dispatch); cadence lives there, not here."
+  "description": "Self-hosted via .github/workflows/renovate.yml (daily at 02:00 UTC plus manual dispatch); cadence lives there, not here."
 }

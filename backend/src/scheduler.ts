@@ -58,6 +58,7 @@ import { snapshotAllPerformance } from './analytics/perf-store.js';
 import { snapshotAllAgentReadiness } from './analytics/agent-readiness-store.js';
 import { sendWorkspaceNotification, configuredChannels, notificationEventEnabled } from './utils/notify.js';
 import { runPlatformAutomation } from './platform/automation.js';
+import { readResponseText, safeFetch } from './security/outbound-url.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -318,12 +319,12 @@ async function _doRun(
         for (const entry of targets) {
           if (activeRun.stopRequested) break;
           try {
-            const res = await fetch(entry.url, {
+            const res = await safeFetch(entry.url, {
               headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (schema-crawler)' },
               signal: AbortSignal.timeout(5000)
-            });
+            }, { label: 'Schema audit URL' });
             if (res.ok) {
-              const html = await res.text();
+              const html = await readResponseText(res, 2_000_000, 'Schema audit page');
               const audit = parseSemanticSchema(html);
               upsertUrlState({
                 url: entry.url,

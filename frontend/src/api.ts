@@ -1,56 +1,8 @@
-// api.ts — typed API client for the SEO Website Indexer backend
-
-const BASE = import.meta.env.VITE_API_URL ?? '';
-
-// ── Active workspace (the tenant scope for every request) ────────────────────
-// The backend reads X-Workspace-Id to decide which workspace's data a request
-// sees. We persist the choice in localStorage so a reload keeps the same tenant.
-const WS_STORAGE_KEY = 'active-workspace-id';
-let activeWorkspaceId: string | null =
-  typeof localStorage !== 'undefined' ? localStorage.getItem(WS_STORAGE_KEY) : null;
-
-export function getActiveWorkspaceId(): string | null { return activeWorkspaceId; }
-export function setActiveWorkspaceId(id: string | null): void {
-  activeWorkspaceId = id;
-  try {
-    if (id) localStorage.setItem(WS_STORAGE_KEY, id);
-    else localStorage.removeItem(WS_STORAGE_KEY);
-  } catch { /* storage unavailable — header still set for this session */ }
-}
-
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = new Headers(options?.headers);
-  if (options?.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  // CSRF-lite: marks the request as coming from our SPA. The backend enforces
-  // this header on all state-changing requests.
-  const method = (options?.method ?? 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-    headers.set('X-Requested-With', 'seo-indexer-ui');
-  }
-  // Tenant scope — the backend validates access and ignores an inaccessible id.
-  if (activeWorkspaceId) headers.set('X-Workspace-Id', activeWorkspaceId);
-
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: 'same-origin', // send the session cookie
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as Record<string, unknown>;
-    const err = new Error((body.error as string) ?? `HTTP ${res.status}`) as ApiError;
-    err.status = res.status;
-    err.body = body;
-    throw err;
-  }
-  return res.json() as Promise<T>;
-}
-
-export interface ApiError extends Error {
-  status?: number;
-  body?: Record<string, unknown>;
-}
+// api.ts — domain contracts and API operations. Transport/session concerns live
+// in api/client.ts so they can be tested and evolved independently.
+import { apiFetch, apiUrl, getActiveWorkspaceId } from './api/client';
+export { apiBlob, apiUrl, getActiveWorkspaceId, setActiveWorkspaceId } from './api/client';
+export type { ApiError } from './api/client';
 
 export interface CurrentUser {
   id: string;
@@ -197,14 +149,6 @@ export interface LogEntry {
   created_at?: string;
 }
 
-export interface DeviceFlowState {
-  device_code: string;
-  user_code: string;
-  verification_url: string;
-  expires_in: number;
-  interval: number;
-}
-
 export interface SiteProbe {
   sitemap: { ok: boolean; urlCount: number; hasLastmod: boolean; error?: string };
   indexNowKey: string;
@@ -311,14 +255,6 @@ export const api = {
     }),
   beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
-  startDeviceFlow: (clientId?: string, clientSecret?: string) =>
-    apiFetch<DeviceFlowState>('/api/auth/device-flow/start', {
-      method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
-    }),
-  pollDeviceFlow: (deviceCode: string, interval: number, expiresIn: number) =>
-    apiFetch<{ ok: boolean; message: string }>('/api/auth/device-flow/poll', {
-      method: 'POST', body: JSON.stringify({ deviceCode, interval, expiresIn }),
-    }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 
     apiFetch<GSCSite[]>(`/api/auth/gsc-sites${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''}`),
@@ -410,7 +346,7 @@ export const api = {
 
   // GEO files
   deployGeo: (siteId: string) =>
-    apiFetch<{ ok: boolean; robots: string; llms: string }>(`/api/sites/${siteId}/deploy-geo`, { method: 'POST' }),
+    apiFetch<GeoDeployResult>(`/api/sites/${siteId}/deploy-geo`, { method: 'POST' }),
 
   // Admin: release stuck lock
   releaseLock: () => apiFetch<{ ok: boolean }>('/api/scheduler/release-lock', { method: 'POST' }),
@@ -482,6 +418,7 @@ export const api = {
 
   // ── llms.txt lifecycle ──
   getLlmsAudit: (siteId: string) => apiFetch<LlmsAudit>(`/api/sites/${siteId}/llms-audit`),
+  getSiteFileHistory: (siteId: string) => apiFetch<SiteFileSnapshot[]>(`/api/sites/${siteId}/file-history`),
   generateLlms: (siteId: string) =>
     apiFetch<GeneratedLlms>(`/api/sites/${siteId}/llms/generate`, { method: 'POST' }),
   saveLlms: (siteId: string, content: string) =>
@@ -537,11 +474,19 @@ export const api = {
   updateAiPrompt: (id: number, data: Partial<AiPrompt>) => apiFetch<AiPrompt>(`/api/ai/prompts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteAiPrompt: (id: number) => apiFetch<{ ok: boolean }>(`/api/ai/prompts/${id}`, { method: 'DELETE' }),
   getAiResults: () => apiFetch<AiResult[]>('/api/ai/results'),
-  getAiInsights: () => apiFetch<AiInsights>('/api/ai/insights'),
+  getAiInsights: (scope: { siteId?: string | null; scoped?: boolean; days?: 7 | 30 | 90 } = {}) => {
+    const query = new URLSearchParams();
+    if (scope.scoped) query.set('scoped', 'true');
+    if (scope.siteId) query.set('site_id', scope.siteId);
+    if (scope.days) query.set('days', String(scope.days));
+    return apiFetch<AiInsights>(`/api/ai/insights${query.size ? `?${query}` : ''}`);
+  },
   getAiConfig: () => apiFetch<AiCitationConfig>('/api/ai/config'),
   saveAiConfig: (data: { competitorDomains: string; brandAliases: string }) => apiFetch<{ ok: boolean }>('/api/ai/config', { method: 'PUT', body: JSON.stringify(data) }),
   runAiPrompt: (id: number) => apiFetch<{ results: AiRunResult[] }>(`/api/ai/run/${id}`, { method: 'POST' }),
-  runAllAiPrompts: () => apiFetch<{ ran: number }>('/api/ai/run-all', { method: 'POST' }),
+  runAllAiPrompts: (scope: { siteId?: string | null; scoped?: boolean } = {}) => apiFetch<{ ran: number }>('/api/ai/run-all', {
+    method: 'POST', body: JSON.stringify({ site_id: scope.siteId ?? null, scoped: scope.scoped ?? false }),
+  }),
   getAiThread: (promptId: number, provider: string) =>
     apiFetch<AiResult[]>(`/api/ai/prompts/${promptId}/thread/${provider}`),
   replyAiThread: (promptId: number, provider: string, message: string) =>
@@ -696,7 +641,10 @@ export interface CommandAction {
 }
 export interface CommandCenter {
   generatedAt: string;
-  score: { overall: number; indexation: number | null; aiVisibility: number | null; agentReadiness: number | null; operations: number };
+  score: {
+    overall: number | null; indexation: number | null; aiVisibility: number | null;
+    agentReadiness: number | null; operations: number; completeness: number; explanation: string[];
+  };
   metrics: {
     sites: number; urls: number; indexed: number; indexedRate: number | null; stale: number;
     failures: number; openAlerts: number; clicks7d: number; clicksChange: number | null;
@@ -757,6 +705,21 @@ export interface LlmsAudit {
   drift: boolean;
   custom: string | null;
   aiProvider: string | null;
+}
+export interface GeoFileDeployResult { target: 'robots' | 'llms' | 'llms-sitemap'; ok: boolean; method: 'webhook' | 'ftp' | 'none'; message: string }
+export interface GeoDeployResult { robots: GeoFileDeployResult; llms: GeoFileDeployResult; llmsSitemap: GeoFileDeployResult }
+export interface SiteFileSnapshot {
+  id: number;
+  site_id: string;
+  file_kind: 'robots.txt' | 'llms.txt';
+  source: 'live' | 'deployment';
+  http_status: number | null;
+  content_hash: string;
+  content: string;
+  matches_generated: number | null;
+  observed_at: string;
+  added_lines: number;
+  removed_lines: number;
 }
 export interface GeneratedLlms { content: string; provider: string; model: string; pagesScanned: number }
 export interface HygieneReport {
@@ -861,7 +824,7 @@ export function createLogStream(onMessage: (entry: LogEntry) => void, onAlive?: 
     // EventSource can't set headers, so pass the active workspace as a query
     // param — the stream only sends this workspace's logs.
     const ws = getActiveWorkspaceId();
-    es = new EventSource(`${BASE}/api/logs/stream${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`);
+    es = new EventSource(apiUrl(`/api/logs/stream${ws ? `?workspace=${encodeURIComponent(ws)}` : ''}`), { withCredentials: true });
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as { type: string } & LogEntry;

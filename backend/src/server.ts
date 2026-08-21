@@ -7,8 +7,6 @@
  *  GET  /health                   — liveness probe
  *  GET  /api/status               — auth status + scheduler info
  *  POST /api/auth/service-account — configure service account JSON
- *  POST /api/auth/device-flow/start  — start OAuth Device Flow
- *  POST /api/auth/device-flow/poll   — poll for device flow completion
  *  POST /api/auth/clear           — clear all auth credentials
  *
  *  GET  /api/sites                — list all sites
@@ -100,7 +98,7 @@ import {
   restartScheduler,
   forceStopRun,
 } from './scheduler.js';
-import { deployGeoFiles } from './indexer/geo-deploy.js';
+import { buildLlmsTxt, buildRobotsTxt, deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
 import { getCommandCenter } from './analytics/command-center.js';
 import { auditSiteLlms } from './indexer/llms-audit.js';
@@ -144,16 +142,23 @@ import {
 import { ssoProviders, ssoAuthorizeUrl, ssoHandleCallback } from './auth/sso.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 import { registerPlatformRoutes } from './platform/routes.js';
+import { addAnnotation } from './platform/store.js';
+import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
+import { listSiteFileSnapshots, recordSiteFileSnapshot } from './db/site-files.js';
+import { createSiteSchema, runAllPromptsSchema, updateSiteSchema } from './http/schemas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = path.join(__dirname, '../frontend/dist');
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
+const TRUST_PROXY = ['1', 'true', 'yes', 'on'].includes((process.env.TRUST_PROXY ?? '').toLowerCase());
+const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
 
 // ── Fastify Setup ─────────────────────────────────────────────────────────────
 
 const isDev = process.env.NODE_ENV !== 'production';
 const app = Fastify({
+  trustProxy: TRUST_PROXY,
   logger: isDev
     ? {
         level: process.env.LOG_LEVEL ?? 'info',
@@ -187,7 +192,9 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body,
 });
 
 await app.register(fastifyCors, {
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
+  // Same-origin is the secure default. Split-host deployments must opt in to
+  // an explicit list instead of reflecting arbitrary requesting origins.
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(value => value.trim()).filter(Boolean) : false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
 });
@@ -343,13 +350,14 @@ const WORKSPACE_GATE_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
 
 // Maps a mutating request's path to the workspace capability it requires (for
 // 'editor' members only — owners/admins/super-admins always pass, viewers
-// never do). Paths with no mapping (e.g. AI citations, gated separately by
-// canUseAiCitations) require no specific capability beyond "not a viewer".
+// never do). Any unmapped mutation is denied for editors, so newly added API
+// routes fail closed until their required capability is declared here.
 function capabilityForPath(path: string): Capability | null {
   if (path.startsWith('/api/sites') || path.startsWith('/api/submit/') || path.startsWith('/api/runs')
     || path.startsWith('/api/performance/') || path.startsWith('/api/crux/')
     || path.startsWith('/api/bing/quota/') || path.startsWith('/api/bing/submit/')
-    || path.startsWith('/api/url-failures')) {
+    || path.startsWith('/api/url-failures') || path.startsWith('/api/alerts')
+    || path.startsWith('/api/analytics/')) {
     return 'manage_sites';
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
@@ -361,7 +369,8 @@ function capabilityForPath(path: string): Capability | null {
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
   if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
   if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
-  if (path.startsWith('/api/platform/reports') || path.startsWith('/api/platform/views')) return 'manage_reports';
+  if (path.startsWith('/api/platform/reports') || path.startsWith('/api/platform/views')
+    || path.startsWith('/api/platform/digest')) return 'manage_reports';
   if (path.startsWith('/api/platform/budgets') || path.startsWith('/api/platform/webhooks') || path.startsWith('/api/platform/tokens') || path.startsWith('/api/platform/governance')) return 'manage_governance';
   return null;
 }
@@ -400,24 +409,31 @@ app.addHook('preHandler', async (req, reply) => {
   if (cap && !hasCapability(ctx.user, ctx.workspaceId, cap)) {
     return reply.status(403).send({ error: `You don't have "${cap.replace('_', ' ')}" permission in this workspace — ask a workspace admin.` });
   }
+  if (!cap && !isAiOperation) {
+    return reply.status(403).send({ error: 'This operation is not available to workspace editors.' });
+  }
 });
 
 // Cookie helpers — HttpOnly session cookie, Secure behind https/proxy.
-function setSessionCookie(req: { headers: Record<string, unknown> }, reply: { header: (k: string, v: string) => void }, token: string) {
-  const proto = String(req.headers['x-forwarded-proto'] ?? '').includes('https');
+function requestOrigin(req: { protocol?: string; headers: Record<string, unknown> }): string {
+  if (PUBLIC_URL) return PUBLIC_URL.origin;
+  const protocol = req.protocol === 'https' ? 'https' : 'http';
+  const host = String(req.headers.host ?? 'localhost');
+  return `${protocol}://${host}`;
+}
+function setSessionCookie(req: { protocol?: string; headers: Record<string, unknown> }, reply: { header: (k: string, v: string) => void }, token: string) {
+  const secure = requestOrigin(req).startsWith('https://');
   reply.header('Set-Cookie',
-    `sid=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${proto ? '; Secure' : ''}`);
+    `sid=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${secure ? '; Secure' : ''}`);
 }
 function clearSessionCookie(reply: { header: (k: string, v: string) => void }) {
   reply.header('Set-Cookie', 'sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
 }
 // WebAuthn relying-party id (the registrable domain, no port) + origin, derived
 // from the request so one build works on localhost and any deployed host.
-function rpInfo(req: { headers: Record<string, unknown> }): { rpID: string; origin: string } {
-  const proto = String(req.headers['x-forwarded-proto'] ?? '').includes('https') ? 'https' : 'http';
-  const host = String(req.headers['x-forwarded-host'] ?? req.headers['host'] ?? 'localhost');
-  const rpID = host.split(':')[0];
-  return { rpID, origin: `${proto}://${host}` };
+function rpInfo(req: { protocol?: string; headers: Record<string, unknown> }): { rpID: string; origin: string } {
+  const origin = requestOrigin(req);
+  return { rpID: new URL(origin).hostname, origin };
 }
 function currentUser(req: unknown): User { return (req as RequestCtx).ctx.user; }
 function currentWorkspace(req: unknown): string | null { return (req as RequestCtx).ctx.workspaceId; }
@@ -428,8 +444,8 @@ function auditActor(req: unknown): User {
   return ctx.impersonator ?? ctx.user;
 }
 function requestIp(req: { ip?: string; headers: Record<string, unknown> }): string | null {
-  const forwarded = req.headers['x-forwarded-for'];
-  return (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip) ?? null;
+  // Fastify only incorporates forwarded addresses when TRUST_PROXY is enabled.
+  return req.ip ?? null;
 }
 function escapeHtml(value: unknown): string {
   return String(value)
@@ -1483,7 +1499,18 @@ app.get('/api/sites', async (req) => {
   }));
 });
 
-app.post('/api/sites', async (req, reply) => {
+function validateSiteTargets(domain: string, sitemapUrl: string, deployWebhook?: string | null): string | null {
+  try {
+    validateOutboundUrl(/^https?:\/\//i.test(domain) ? domain : `https://${domain}`, { label: 'Site URL' });
+    validateOutboundUrl(sitemapUrl, { label: 'Sitemap URL' });
+    if (deployWebhook?.trim()) validateOutboundUrl(deployWebhook, { label: 'Deployment webhook URL' });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+app.post('/api/sites', { schema: createSiteSchema }, async (req, reply) => {
   const {
     name,
     domain,
@@ -1512,6 +1539,8 @@ app.post('/api/sites', async (req, reply) => {
   if (!name || !domain || !sitemapUrl || !gscUrl) {
     return reply.status(400).send({ error: 'name, domain, sitemapUrl, and gscUrl are required.' });
   }
+  const urlError = validateSiteTargets(domain, sitemapUrl, deploy_webhook_url);
+  if (urlError) return reply.status(400).send({ error: urlError });
   const workspaceId = requireWorkspace(req);
   // A site may only be linked to a Google account explicitly delegated to its
   // workspace.
@@ -1542,7 +1571,7 @@ app.post('/api/sites', async (req, reply) => {
   return { ok: true, id, indexNowKey: key };
 });
 
-app.put('/api/sites/:id', async (req, reply) => {
+app.put('/api/sites/:id', { schema: updateSiteSchema }, async (req, reply) => {
   const { id } = req.params as { id: string };
   const existing = getSiteById(id);
   if (!existing) return reply.status(404).send({ error: 'Site not found.' });
@@ -1595,6 +1624,12 @@ app.put('/api/sites/:id', async (req, reply) => {
       return reply.status(400).send({ error: 'That Bing account is not in this workspace.' });
     }
   }
+
+  const nextDomain = updates.domain ?? existing.domain;
+  const nextSitemap = updates.sitemap_url ?? updates.sitemapUrl ?? existing.sitemap_url;
+  const nextWebhook = updates.deploy_webhook_url !== undefined ? updates.deploy_webhook_url : existing.deploy_webhook_url;
+  const urlError = validateSiteTargets(nextDomain, nextSitemap, nextWebhook);
+  if (urlError) return reply.status(400).send({ error: urlError });
 
   try {
     upsertSite({
@@ -1844,6 +1879,16 @@ app.put('/api/notifications/config', async (req, reply) => {
   const wsId = requireWorkspace(req);
   if (!hasCapability(currentUser(req), wsId, 'manage_notifications')) return reply.status(403).send({ error: 'You do not have permission to manage workspace notifications.' });
   const body = (req.body ?? {}) as Record<string, string>;
+  for (const key of ['notify_slack_webhook', 'notify_discord_webhook', 'notify_ntfy_server', 'notify_webhook_url']) {
+    const value = body[key]?.trim();
+    if (!value) continue;
+    try { validateOutboundUrl(value, { label: key.replaceAll('_', ' ') }); }
+    catch (error) { return reply.status(400).send({ error: error instanceof Error ? error.message : 'Notification URL is invalid.' }); }
+  }
+  if (body.notify_ntfy_topic?.trim() && /^https?:\/\//i.test(body.notify_ntfy_topic)) {
+    try { validateOutboundUrl(body.notify_ntfy_topic, { label: 'ntfy topic URL' }); }
+    catch (error) { return reply.status(400).send({ error: error instanceof Error ? error.message : 'ntfy topic URL is invalid.' }); }
+  }
   for (const key of NOTIFY_KEYS) {
     if (body[key] !== undefined) setWorkspaceSetting(wsId, key, String(body[key]));
   }
@@ -1924,9 +1969,9 @@ app.post('/api/url-failures/check', async (req, reply) => {
   const failure = getAllUrlFailures().find(f => f.site_id === siteId && f.url === url && f.api === api && siteIds.has(f.site_id));
   if (!failure) return reply.status(404).send({ error: 'Failure record not found.' });
   try {
-    let res = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'SEO-Website-Indexer/1.0 failure-check' } });
+    let res = await safeFetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'OrganicCommand/1.0 failure-check' } }, { label: 'Failure-check URL' });
     if (res.status === 405) {
-      res = await fetch(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'SEO-Website-Indexer/1.0 failure-check', Range: 'bytes=0-1023' } });
+      res = await safeFetch(url, { method: 'GET', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': 'OrganicCommand/1.0 failure-check', Range: 'bytes=0-1023' } }, { label: 'Failure-check URL' });
       await res.body?.cancel().catch(() => undefined);
     }
     return {
@@ -1957,16 +2002,21 @@ app.delete('/api/url-failures', async (req, reply) => {
 
 // ── Backups ───────────────────────────────────────────────────────────────────
 
-app.get('/api/backups', async () => listBackups());
+app.get('/api/backups', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
+  return listBackups();
+});
 
-app.post('/api/backups', async () => {
+app.post('/api/backups', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
   const result = backupNow();
   return { ok: true, ...result };
 });
 
 // ── Lock control (admin) ──────────────────────────────────────────────────────
 
-app.post('/api/scheduler/release-lock', async (_req, reply) => {
+app.post('/api/scheduler/release-lock', async (req, reply) => {
+  if (!requireSuperAdmin(req, reply)) return;
   // Only allow if no run is in process memory anywhere (safety).
   if (isRunning()) {
     return reply.status(409).send({ error: 'A run is currently active in-process. Stop it first.' });
@@ -1994,6 +2044,22 @@ app.post('/api/sites/:id/deploy-geo', async (req, reply) => {
   }
   try {
     const result = await deployGeoFiles(site);
+    const workspaceId = requireWorkspace(req);
+    if (result.robots.ok) {
+      recordSiteFileSnapshot({ workspaceId, siteId: site.id, fileKind: 'robots.txt', source: 'deployment', content: buildRobotsTxt(site), matchesGenerated: true });
+    }
+    if (result.llms.ok) {
+      recordSiteFileSnapshot({ workspaceId, siteId: site.id, fileKind: 'llms.txt', source: 'deployment', content: site.llms_txt_content?.trim() || buildLlmsTxt(site), matchesGenerated: true });
+    }
+    addAnnotation({
+      workspaceId,
+      siteId: site.id,
+      userId: currentUser(req).id,
+      kind: 'deployment',
+      title: `Discovery files deployed for ${site.name}`,
+      note: [result.robots, result.llms, result.llmsSitemap].map(file => `${file.target}: ${file.ok ? 'ok' : file.message}`).join(' · '),
+      metadata: { robots: result.robots, llms: result.llms, llmsSitemap: result.llmsSitemap },
+    });
     return result;
   } catch (e) {
     return reply.status(502).send({ error: e instanceof Error ? e.message : String(e) });
@@ -2203,6 +2269,27 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
   const site = getSiteById((req.params as { id: string }).id);
   if (!site) return reply.code(404).send({ error: 'Site not found' });
   const audit = await auditSiteLlms(site);
+  const workspaceId = requireWorkspace(req);
+  const normalise = (value: string) => value.replace(/\s+/g, ' ').trim();
+  recordSiteFileSnapshot({
+    workspaceId,
+    siteId: site.id,
+    fileKind: 'llms.txt',
+    source: 'live',
+    status: audit.live.status,
+    content: audit.live.text,
+    matchesGenerated: !audit.drift,
+  });
+  recordSiteFileSnapshot({
+    workspaceId,
+    siteId: site.id,
+    fileKind: 'robots.txt',
+    source: 'live',
+    status: audit.robotsLive.status,
+    content: audit.robotsLive.text,
+    matchesGenerated: audit.robotsLive.status === 200
+      && normalise(audit.robotsLive.text) === normalise(audit.robotsGenerated),
+  });
   // Drift only matters when the tool owns the files; hand-maintained (monitor-
   // only) sites are EXPECTED to be richer than the generated baseline.
   if (audit.drift && site.geo_manage) {
@@ -2211,6 +2298,13 @@ app.get('/api/sites/:id/llms-audit', async (req, reply) => {
   // Surface any saved custom (AI-generated / edited) llms.txt + whether an AI
   // provider is available to generate one.
   return { ...audit, custom: site.llms_txt_content ?? null, aiProvider: llmsGenerationProvider() };
+});
+
+app.get('/api/sites/:id/file-history', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.code(404).send({ error: 'Site not found' });
+  const workspaceId = requireWorkspace(req);
+  return listSiteFileSnapshots(workspaceId, site.id, Number((req.query as { limit?: string }).limit ?? 50));
 });
 
 // Agent-readiness (isitagentready-style): run the live battery of checks, store
@@ -2421,7 +2515,17 @@ app.delete('/api/ai/prompts/:id', async (req) => {
 });
 
 app.get('/api/ai/results', async (req) => getResults(200, currentWorkspace(req)));
-app.get('/api/ai/insights', async (req) => getAiInsights(currentWorkspace(req)));
+app.get('/api/ai/insights', async (req, reply) => {
+  const workspaceId = requireWorkspace(req);
+  const query = (req.query ?? {}) as { scoped?: string; site_id?: string; days?: string };
+  const siteScope = query.scoped === 'true' ? (query.site_id || null) : undefined;
+  if (typeof siteScope === 'string' && !getSitesForWorkspace(workspaceId).some(site => site.id === siteScope)) {
+    return reply.code(404).send({ error: 'Website not found' });
+  }
+  const requestedDays = Number(query.days);
+  const days = requestedDays === 7 || requestedDays === 30 || requestedDays === 90 ? requestedDays : undefined;
+  return getAiInsights(workspaceId, siteScope, days);
+});
 app.get('/api/ai/config', async (req) => {
   const wsId = currentWorkspace(req);
   const settings = wsId ? getWorkspaceSettings(wsId) : {};
@@ -2453,10 +2557,16 @@ app.post('/api/ai/run/:promptId', async (req, reply) => {
     throw error;
   }
 });
-app.post('/api/ai/run-all', async (req) => {
+app.post('/api/ai/run-all', { schema: runAllPromptsSchema }, async (req, reply) => {
   const wsId = currentWorkspace(req);
-  assertAiCitationAllowed(req, Math.max(1, listPrompts(wsId).length));
-  return { ran: await runAllPrompts(wsId) };
+  const body = (req.body ?? {}) as { site_id?: string | null; scoped?: boolean };
+  const siteScope = body.scoped ? (body.site_id ?? null) : undefined;
+  if (typeof siteScope === 'string' && !getSitesForWorkspace(wsId ?? '').some(site => site.id === siteScope)) {
+    return reply.code(404).send({ error: 'Website not found' });
+  }
+  const promptCount = listPrompts(wsId).filter(prompt => siteScope === undefined ? true : prompt.site_id === siteScope).length;
+  assertAiCitationAllowed(req, Math.max(1, promptCount));
+  return { ran: await runAllPrompts(wsId, siteScope) };
 });
 
 // Probe each configured provider's live model list (version-ranked) + the
@@ -2515,7 +2625,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
 registerPlatformRoutes(app);
 
 await app.listen({ port: PORT, host: HOST });
-console.log(`\n🚀 SEO Website Indexer running at http://localhost:${PORT}\n`);
+console.log(`\n🚀 Organic Command running at http://${HOST}:${PORT}\n`);
 
 // Bound the SQLite log table on long-lived installs (30-day retention).
 try {

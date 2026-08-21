@@ -1,4 +1,5 @@
 import net from 'net';
+import { assertSafeHostname } from '../security/outbound-url.js';
 
 export interface FtpConfig {
   host: string;
@@ -19,7 +20,8 @@ export function uploadVerificationKeyViaFtp(config: FtpConfig, filename: string,
 /**
  * Generic alias — uploads any text file to a path under `config.path` on the FTP server.
  */
-export function uploadFileViaFtp(config: FtpConfig, filename: string, content: string): Promise<void> {
+export async function uploadFileViaFtp(config: FtpConfig, filename: string, content: string): Promise<void> {
+  await assertSafeHostname(config.host, { label: 'FTP host' });
   return new Promise((resolve, reject) => {
     const host = config.host;
     const port = config.port || 21;
@@ -105,14 +107,19 @@ export function uploadFileViaFtp(config: FtpConfig, filename: string, content: s
 
               state = 'STOR';
 
-              // Establish TCP data socket connection
-              dataSocket = net.connect({ host: dataIp, port: dataPort }, () => {
-                controlSocket.write(`STOR ${remotePath}\r\n`);
-              });
-
-              dataSocket.on('error', (err) => {
+              // A malicious FTP server can advertise a private PASV target.
+              // Revalidate it before opening the second socket (FTP bounce).
+              assertSafeHostname(dataIp, { label: 'FTP passive data host' }).then(() => {
+                dataSocket = net.connect({ host: dataIp, port: dataPort }, () => {
+                  controlSocket.write(`STOR ${remotePath}\r\n`);
+                });
+                dataSocket.on('error', (err) => {
+                  cleanUp();
+                  reject(new Error(`FTP Data socket error: ${err.message}`));
+                });
+              }).catch(error => {
                 cleanUp();
-                reject(new Error(`FTP Data socket error: ${err.message}`));
+                reject(error);
               });
             } else {
               cleanUp();

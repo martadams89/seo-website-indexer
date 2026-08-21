@@ -20,6 +20,8 @@ import {
   createReportTemplate, defaultReportRecipients, deleteReportTemplate, generateReport, getReportRun,
   listReportRuns, listReportTemplates, sendWorkspaceDigest, updateReportTemplate,
 } from './reports.js';
+import { validateOutboundUrl } from '../security/outbound-url.js';
+import { createServiceTokenSchema, createWebhookSchema, upsertBudgetSchema } from '../http/schemas.js';
 
 interface RequestContext { ctx: { user: User; impersonator: User | null; workspaceId: string | null } }
 const context = (req: FastifyRequest) => (req as unknown as RequestContext).ctx;
@@ -49,6 +51,20 @@ function csvCell(value: unknown): string {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function integrationConfigError(config: Record<string, unknown> | undefined): string | null {
+  try {
+    for (const [key, value] of Object.entries(config ?? {})) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      if (/(^|_)(url|uri|endpoint|base_url)$/i.test(key)) {
+        validateOutboundUrl(value, { label: `Integration ${key.replaceAll('_', ' ')}` });
+      }
+    }
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function pageBelongsToSite(pageUrl: string, site: { domain: string; gsc_url: string }): boolean {
@@ -82,12 +98,14 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
     const ws = workspace(req); const body = (req.body ?? {}) as { provider?: IntegrationProvider; site_id?: string | null; name?: string; config?: Record<string, unknown>; cadence_minutes?: number };
     if (!body.provider || !INTEGRATION_PROVIDERS.includes(body.provider)) return reply.code(400).send({ error: 'A supported provider is required.' });
     if (body.site_id) assertSite(req, body.site_id);
+    const configError = integrationConfigError(body.config); if (configError) return reply.code(400).send({ error: configError });
     return publicIntegration(createIntegration({ workspaceId: ws, siteId: body.site_id, provider: body.provider, name: body.name,
       config: body.config, cadenceMinutes: body.cadence_minutes, createdBy: user(req).id }));
   });
   app.patch('/api/platform/integrations/:id', async (req, reply) => {
     const ws = workspace(req); const body = (req.body ?? {}) as { site_id?: string | null; name?: string; config?: Record<string, unknown>; enabled?: boolean; cadence_minutes?: number };
     if (body.site_id) assertSite(req, body.site_id);
+    const configError = integrationConfigError(body.config); if (configError) return reply.code(400).send({ error: configError });
     const row = updateIntegration(ws, (req.params as { id: string }).id, { siteId: body.site_id, name: body.name, config: body.config, enabled: body.enabled, cadenceMinutes: body.cadence_minutes });
     return row ? publicIntegration(row) : reply.code(404).send({ error: 'Integration not found' });
   });
@@ -103,9 +121,9 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
     return listMetrics(workspace(req), { source: query.source, metric: query.metric, siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: Number(query.limit) || 1000 });
   });
   app.get('/api/platform/metrics/export.csv', async (req, reply) => {
-    const query = req.query as { site_id?: string; workspace_only?: string; from?: string; to?: string };
+    const query = req.query as { source?: string; site_id?: string; workspace_only?: string; from?: string; to?: string };
     if (query.site_id) assertSite(req, query.site_id);
-    const rows = listMetrics(workspace(req), { siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: 5000 });
+    const rows = listMetrics(workspace(req), { source: query.source, siteId: query.site_id, workspaceOnly: query.workspace_only === 'true', from: query.from, to: query.to, limit: 5000 });
     const columns = ['observed_at','source','site_id','metric','dimension','value','unit','provenance'];
     reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="organic-evidence.csv"');
     return [columns.join(','), ...rows.map(row => columns.map(column => csvCell((row as unknown as Record<string, unknown>)[column])).join(','))].join('\n');
@@ -277,7 +295,7 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
     return [columns.join(','), ...rows.map(row => columns.map(column => csvCell((row as unknown as Record<string, unknown>)[column])).join(','))].join('\n');
   });
   app.get('/api/platform/budgets', async req => ({ policies: listBudgets(workspace(req)), status: budgetStatus(workspace(req)) }));
-  app.post('/api/platform/budgets', async (req, reply) => {
+  app.post('/api/platform/budgets', { schema: upsertBudgetSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as { id?: string; user_id?: string; provider?: string; period?: string; limit_value?: number; limit_unit?: string; warning_pct?: number; hard_limit?: boolean };
     if (body.limit_value == null || body.limit_value < 0) return reply.code(400).send({ error: 'A non-negative limit is required.' });
     if (body.user_id && !listWorkspaceMembers(workspace(req)).some(member => member.user_id === body.user_id)) return reply.code(400).send({ error: 'Budget user is not a workspace member.' });
@@ -288,15 +306,15 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
   app.delete('/api/platform/budgets/:id', async (req, reply) => deleteBudget(workspace(req), (req.params as { id: string }).id) ? { ok: true } : reply.code(404).send({ error: 'Budget not found' }));
 
   app.get('/api/platform/webhooks', async req => listWebhooks(workspace(req)));
-  app.post('/api/platform/webhooks', async (req, reply) => {
+  app.post('/api/platform/webhooks', { schema: createWebhookSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as { name?: string; url?: string; events?: string[] }; if (!body.name?.trim() || !body.url?.trim()) return reply.code(400).send({ error: 'Name and URL are required.' });
-    try { const target = new URL(body.url); if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol'); }
-    catch { return reply.code(400).send({ error: 'Webhook URL must use HTTP or HTTPS.' }); }
+    try { validateOutboundUrl(body.url, { label: 'Webhook URL' }); }
+    catch (error) { return reply.code(400).send({ error: error instanceof Error ? error.message : 'Webhook URL is invalid.' }); }
     return createWebhook({ workspaceId: workspace(req), name: body.name, url: body.url, events: body.events?.length ? body.events : ['*'] });
   });
   app.delete('/api/platform/webhooks/:id', async (req, reply) => deleteWebhook(workspace(req), (req.params as { id: string }).id) ? { ok: true } : reply.code(404).send({ error: 'Webhook not found' }));
   app.get('/api/platform/tokens', async req => listServiceTokens(workspace(req)));
-  app.post('/api/platform/tokens', async (req, reply) => {
+  app.post('/api/platform/tokens', { schema: createServiceTokenSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as { name?: string; scopes?: string[]; expires_at?: string }; if (!body.name?.trim() || !body.scopes?.length) return reply.code(400).send({ error: 'Name and at least one scope are required.' });
     const scopes = [...new Set(body.scopes)]; if (scopes.some(scope => !SERVICE_TOKEN_SCOPES.includes(scope))) return reply.code(400).send({ error: 'One or more service-token scopes are invalid.' });
     return createServiceToken({ workspaceId: workspace(req), userId: user(req).id, name: body.name, scopes, expiresAt: body.expires_at });

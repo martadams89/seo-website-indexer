@@ -11,6 +11,7 @@
 import { effectiveSetting, getUrlsBySite, type Site } from '../db/database.js';
 import { isNonHtmlUrl } from './../indexer/sitemap.js';
 import { resolveModel } from './models.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 // ── Provider text completion (no web search) ─────────────────────────────────
 
@@ -98,9 +99,9 @@ function extractMeta(url: string, html: string): PageMeta {
 
 async function fetchMeta(url: string): Promise<PageMeta> {
   try {
-    const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8_000), headers: { 'User-Agent': 'SEO-Website-Indexer/llms-generator' } });
+    const res = await safeFetch(url, { signal: AbortSignal.timeout(8_000), headers: { 'User-Agent': 'OrganicCommand/llms-generator' } }, { label: 'LLMS source page URL' });
     if (!res.ok) return { url };
-    const html = (await res.text()).slice(0, 100_000);
+    const html = await readResponseText(res, 100_000, 'LLMS source page');
     return extractMeta(url, html);
   } catch { return { url }; }
 }

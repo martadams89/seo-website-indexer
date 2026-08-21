@@ -31,10 +31,11 @@ Before exposing the application to the internet:
 2. Set a stable, random `APP_SECRET` and keep a separate copy in your secrets manager.
 3. Keep `/data` on persistent storage and copy its backups to another machine or storage service.
 4. Set `CORS_ORIGIN` if the dashboard is served from a different origin.
-5. Configure SMTP if users need invitations and self-service password resets.
-6. Decide whether local passwords, SSO or both should be available.
-7. Sign in as the first super-admin, enable MFA and create named accounts for other people.
-8. Pin a versioned image tag if you require controlled upgrade windows.
+5. Set `PUBLIC_URL` to the canonical HTTPS origin and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers.
+6. Configure SMTP if users need invitations and self-service password resets.
+7. Decide whether local passwords, SSO or both should be available.
+8. Sign in as the first super-admin, enable MFA and create named accounts for other people.
+9. Pin a versioned image tag if you require controlled upgrade windows.
 
 A suitable secret can be generated with:
 
@@ -52,7 +53,12 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `HOST` | `0.0.0.0` | Address the server binds to. |
 | `DATA_DIR` | `/data` | Directory containing the database, generated encryption key and backups. |
 | `APP_SECRET` | generated in `/data/.key` | Encrypts OAuth tokens and delivery credentials. Set it explicitly for portable restores. |
-| `CORS_ORIGIN` | request origin | Comma-separated browser origins allowed to call the API. |
+| `PUBLIC_URL` | request origin | Canonical HTTPS origin for cookies, passkeys and SSO. |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` values. Enable only behind a proxy that overwrites them. |
+| `CORS_ORIGIN` | disabled | Comma-separated browser origins allowed to call the API when the frontend is separate. |
+| `OUTBOUND_HOST_ALLOWLIST` | unset | Exact trusted hostnames that may resolve to private/reserved addresses. |
+| `ALLOW_INSECURE_OUTBOUND` | `false` | Permit HTTP user-configured targets. Use only on a controlled network. |
+| `ALLOW_PRIVATE_OUTBOUND` | `false` | Permit all private/reserved targets. Prefer the exact hostname allowlist. |
 | `LOG_LEVEL` | application default | Pino log level, such as `info`, `warn` or `error`. |
 | `BACKUP_KEEP` | `7` | Number of nightly SQLite backups to retain. |
 | `RATE_LIMIT_MAX` | `300` | General requests allowed per IP during `RATE_LIMIT_WINDOW`. |
@@ -63,6 +69,8 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `GSC_INSPECTION_DAILY_LIMIT` | `2000` | Daily Google URL Inspection allowance per Search Console property. |
 
 The liveness endpoint is `GET /api/livez`. The readiness endpoint is `GET /api/healthz` and also checks the database and scheduler.
+
+User-configured site, webhook, connector, SSO and FTP targets are blocked when they resolve to loopback, link-local, private or reserved addresses. Redirect targets are checked again. For an intentional internal integration, add only its exact hostname to `OUTBOUND_HOST_ALLOWLIST`; the two broad `ALLOW_*` switches should be a last resort.
 
 ## Sign-in methods
 

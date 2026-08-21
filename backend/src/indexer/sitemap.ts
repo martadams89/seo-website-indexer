@@ -1,5 +1,4 @@
-import https from 'https';
-import http from 'http';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 export interface SitemapEntry {
   url: string;
@@ -12,30 +11,13 @@ export interface SitemapEntry {
  * Fetches a URL and returns the body as a string.
  * Follows redirects up to 5 times.
  */
-function fetchUrl(url: string, redirects = 0): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (redirects > 5) return reject(new Error('Too many redirects'));
-    const client = url.startsWith('https') ? https : http;
-    client
-      .get(url, { headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (sitemap-reader)' }, timeout: 20_000 }, (res) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(fetchUrl(res.headers.location, redirects + 1));
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
-        }
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-        res.on('error', reject);
-      })
-      .on('error', reject)
-      // 'timeout' only fires an event — the socket must be destroyed to abort,
-      // which then rejects through the 'error' handler above.
-      .on('timeout', function (this: import('node:http').ClientRequest) {
-        this.destroy(new Error(`Timeout fetching ${url}`));
-      });
-  });
+async function fetchUrl(url: string): Promise<string> {
+  const response = await safeFetch(url, {
+    headers: { 'User-Agent': 'OrganicCommand/1.0 (sitemap-reader)' },
+    signal: AbortSignal.timeout(20_000),
+  }, { label: 'Sitemap URL' });
+  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
+  return readResponseText(response, 20_000_000, 'Sitemap response');
 }
 
 /**

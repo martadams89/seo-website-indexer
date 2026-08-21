@@ -14,6 +14,7 @@
  */
 import { getDb, getWorkspaceSetting } from '../db/database.js';
 import { sendEmail, emailConfigured } from './email.js';
+import { safeFetch } from '../security/outbound-url.js';
 
 export type Channel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
 export const CHANNELS: Channel[] = ['slack', 'discord', 'ntfy', 'telegram', 'webhook', 'email'];
@@ -35,7 +36,7 @@ export interface NotificationDelivery {
 const ws = (workspaceId: string, key: string) => getWorkspaceSetting(workspaceId, key);
 
 async function post(url: string, init: RequestInit): Promise<void> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+  const res = await safeFetch(url, { ...init, signal: AbortSignal.timeout(15_000) }, { label: 'Notification endpoint' });
   if (!res.ok) throw new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
 }
 

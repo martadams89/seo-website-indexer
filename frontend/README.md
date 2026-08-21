@@ -1,73 +1,41 @@
-# React + TypeScript + Vite
+# Organic Command frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React and TypeScript interface for SEO Website Indexer. The app is organised around five primary destinations: Overview, Sites, Work, Insights and Reports. Less common publishing, integration, entity and governance tools are progressively disclosed by the selected workspace view.
 
-Currently, two official plugins are available:
+## Local development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run the backend on port 3000, then start Vite:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Vite proxies `/api` to `http://localhost:3000`. The active tenant is sent as `X-Workspace-Id` by `src/api/client.ts`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Structure
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+| Path | Responsibility |
+| --- | --- |
+| `src/pages` | Route-level screens and the unified site workspace. |
+| `src/insights` | Persistent website/date scope shared across insight tabs. |
+| `src/components` | Reusable charts, dialogs and operational controls. |
+| `src/api/client.ts` | HTTP transport, session and workspace headers. |
+| `src/api.ts` | Domain contracts and endpoint operations. |
+| `src/styles/streamlined.css` | New shell and workspace surfaces; legacy styles remain in `index.css` while they are migrated. |
+
+## Quality checks
+
+```bash
+npm test
+npm run lint
+npm run build
+npm run test:theme
+npm run test:typography
+npm run test:ui
+npm run test:integrations
+npm run test:intelligence
+npm run test:action-centre
 ```
+
+Use semantic HTML and labelled controls, keep visible filters in the shared Insights context, and add new product surfaces to the streamlined style layer rather than extending the legacy monolithic stylesheet.

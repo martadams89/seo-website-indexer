@@ -1,5 +1,6 @@
 import { getDb, getSitesForWorkspace, getUrlsBySite } from '../db/database.js';
 import { createWorkItem, recordMetric, recordUsage } from './store.js';
+import { readResponseText, safeFetch } from '../security/outbound-url.js';
 
 export interface PageAudit {
   url: string; status: number; title: string; description: string; canonical: string;
@@ -34,8 +35,8 @@ function tagWithAttribute(html: string, tagName: string, attribute: string, valu
 }
 
 export async function inspectPage(url: string): Promise<PageAudit> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'OrganicCommandAudit/1.0' }, redirect: 'follow', signal: AbortSignal.timeout(20_000) });
-  const html = (await res.text()).slice(0, 2_000_000);
+  const res = await safeFetch(url, { headers: { 'User-Agent': 'OrganicCommandAudit/1.0' }, signal: AbortSignal.timeout(20_000) }, { label: 'Content audit URL' });
+  const html = await readResponseText(res, 2_000_000, 'Content audit page');
   const title = decodeHtmlEntities(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? '').trim();
   const description = tagAttribute(tagWithAttribute(html, 'meta', 'name', 'description'), 'content');
   const canonicalTag = [...html.matchAll(/<link\b[^>]*>/gi)].find(match => tagAttribute(match[0], 'rel').toLowerCase().split(/\s+/).includes('canonical'))?.[0] ?? '';
@@ -82,11 +83,11 @@ export async function auditContentInventory(workspaceId: string, siteId?: string
       if (page.internalLinks === 0) pageIssues.push('no internal links');
       if (pageIssues.length) { issues++; createWorkItem({ workspaceId, siteId: site.id, source: 'content_audit', sourceRef: page.url,
         title: `Content issue on ${new URL(page.url).pathname || '/'}`, description: pageIssues.join(', '), severity: page.status >= 500 ? 'critical' : page.status >= 400 ? 'high' : 'medium',
-        deepLink: `/intelligence?source=content_audit`, evidence: { ...page, issues: pageIssues } }); }
+        deepLink: `/insights/evidence?source=content_audit`, evidence: { ...page, issues: pageIssues } }); }
     }
     for (const [title, duplicateUrls] of titleMap) if (duplicateUrls.length > 1) { issues++; createWorkItem({ workspaceId, siteId: site.id, source: 'content_audit',
       sourceRef: `duplicate:${title}`, title: 'Duplicate page titles found', description: `${duplicateUrls.length} sampled pages use the same title.`, severity: 'medium',
-      deepLink: '/intelligence?source=content_audit', evidence: { title, urls: duplicateUrls } }); }
+      deepLink: '/insights/evidence?source=content_audit', evidence: { title, urls: duplicateUrls } }); }
     recordUsage({ workspace_id: workspaceId, user_id: null, provider: 'internal', operation: 'content.audit', quantity: results.length, unit: 'page', estimated_cost: 0, metadata: { site_id: site.id, sampled: true } });
   }
   return { sites: sites.length, pages, issues };

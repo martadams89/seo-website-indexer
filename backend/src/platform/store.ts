@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { getDb } from '../db/database.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
+import { safeFetch } from '../security/outbound-url.js';
 
 export const INTEGRATION_PROVIDERS = [
   'ga4', 'pagespeed', 'cloudflare', 'plausible', 'matomo',
@@ -447,8 +448,9 @@ export async function dispatchWorkspaceEvent(workspaceId: string, event: string,
     const secret = decrypt(hook.secret) ?? '';
     const signature = createHmac('sha256', secret).update(body).digest('hex');
     try {
-      const res = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json',
-        'X-Organic-Event': event, 'X-Organic-Signature': `sha256=${signature}` }, body, signal: AbortSignal.timeout(15_000) });
+      const res = await safeFetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json',
+        'X-Organic-Event': event, 'X-Organic-Signature': `sha256=${signature}` }, body, signal: AbortSignal.timeout(15_000) },
+      { label: 'Automation webhook URL' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       getDb().prepare("UPDATE outbound_webhooks SET failure_count=0,last_delivery_at=datetime('now'),last_error=NULL WHERE id=?").run(hook.id);
     } catch (error) {

@@ -1,8 +1,8 @@
 name: Renovate
 
 # Self-hosted Renovate — no third-party GitHub App. Runs on a schedule (and on
-# demand), opens dependency PRs, and auto-merges the safe ones once the
-# required checks pass. Renovate also updates the renovatebot/github-action
+# demand), groups routine dependency PRs, and auto-merges patch/pin/digest
+# updates once required checks pass. Renovate also updates the action
 # pin below, so it keeps itself current too.
 #
 # Setup (one-time):
@@ -13,7 +13,8 @@ name: Renovate
 #      auto-merge.)
 #   2. Repo Settings → General → allow auto-merge.
 #   3. Branch protection / ruleset on main → require status checks:
-#      "backend", "frontend", "build-and-push".
+#      "backend", "frontend" and "build-and-push". Every PR receives the
+#      Docker smoke build so the required packaging check is never absent.
 on:
   schedule:
     - cron: '0 2 * * *'

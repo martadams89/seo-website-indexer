@@ -33,7 +33,7 @@ async function json<T>(res: Response): Promise<T> { return (await res.json()) as
 beforeAll(async () => {
   proc = spawn('node', ['--import', 'tsx', 'src/server.ts'], {
     cwd: process.cwd(),
-    env: { ...process.env, DATA_DIR: TMP, APP_SECRET: 'http-authz-secret-123', PORT: String(PORT), LOG_LEVEL: 'silent' },
+    env: { ...process.env, DATA_DIR: TMP, APP_SECRET: 'http-authz-secret-123', HOST: '127.0.0.1', PORT: String(PORT), LOG_LEVEL: 'silent' },
     stdio: 'ignore',
   });
   // Wait for the server to accept connections.
@@ -77,6 +77,11 @@ describe('cross-tenant HTTP authorization', () => {
     expect((await req('POST', '/api/auth/set-required-password', { sid: userSid, body: { newPassword: 'password456' } })).status).toBe(200);
     const userWs = (await json<Array<{ id: string }>>(await req('GET', '/api/workspaces', { sid: userSid })))[0].id;
     expect(userWs).not.toBe(adminWs);
+
+    // Instance-wide operations are reserved for the super-admin, even when a
+    // regular user owns their own workspace.
+    expect((await req('GET', '/api/backups', { sid: userSid, ws: userWs })).status).toBe(403);
+    expect((await req('POST', '/api/scheduler/release-lock', { sid: userSid, ws: userWs })).status).toBe(403);
 
     // The regular user must NOT be able to touch the admin's site via any route.
     for (const route of [
@@ -131,6 +136,8 @@ describe('cross-tenant HTTP authorization', () => {
     expect((await req('PUT', '/api/workspace/keys', { sid: userSid, ws: adminWs, body: { perplexity_api_key: 'editor-key' } })).status).toBe(200);
     expect((await req('PUT', '/api/notifications/config', { sid: userSid, ws: adminWs, body: { notify_run_complete: 'false' } })).status).toBe(200);
     expect((await req('PUT', '/api/ai/models', { sid: userSid, ws: adminWs, body: { model_openai: 'gpt-test' } })).status).toBe(200);
+    expect((await req('POST', '/api/analytics/snapshot', { sid: userSid, ws: adminWs })).status).toBe(200);
+    expect((await req('POST', '/api/platform/digest/send', { sid: userSid, ws: adminWs })).status).toBe(200);
     expect((await json<{ metrics: { sites: number } }>(await req('GET', '/api/command-center', { sid: userSid, ws: adminWs }))).metrics.sites).toBe(1);
 
     // The normalized platform APIs preserve the same tenancy boundary. An
