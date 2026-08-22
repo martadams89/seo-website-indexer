@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.35.1](https://github.com/martadams89/seo-website-indexer/compare/v1.35.0...v1.35.1) (2026-08-22)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.9.0 ([#289](https://github.com/martadams89/seo-website-indexer/issues/289)) ([2ade411](https://github.com/martadams89/seo-website-indexer/commit/2ade41123d37be94c8078fb18753c855cac3f78f))
+* **deps:** update dependency jsdom to v30 ([#290](https://github.com/martadams89/seo-website-indexer/issues/290)) ([6f038a9](https://github.com/martadams89/seo-website-indexer/commit/6f038a94c9a7a3767a3a5dd8f9ae96c9b0761aa9))
+
 ## [1.35.0](https://github.com/martadams89/seo-website-indexer/compare/v1.34.4...v1.35.0) (2026-08-21)
 
 
