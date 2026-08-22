@@ -15,44 +15,23 @@
   },
   "packageRules": [
     {
-      "description": "frontend/'s typescript-eslint crashes outright on TypeScript 7 (peer range is still <6.1.0, and it's a real runtime TypeError, not just a stale peer warning) \u2014 hold major TS bumps there until typescript-eslint ships TS7 support. backend/ has no such dependency and can update freely. Remove once typescript-eslint's peer range covers ^7.",
+      "description": "frontend/'s typescript-eslint crashes outright on TypeScript 7 (peer range is still <6.1.0, and it's a real runtime TypeError, not just a stale peer warning) — hold major TS bumps there until typescript-eslint ships TS7 support. backend/ has no such dependency and can update freely. Remove once typescript-eslint's peer range covers ^7.",
       "matchFileNames": ["frontend/package.json"],
       "matchDepNames": ["typescript"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
     {
-      "description": "Auto-merge low-risk patch, pin and digest updates after required CI passes. Minor and major updates stay reviewable.",
+      "description": "Auto-merge everything — major/minor/patch/pin/digest — once required CI is green. CI is the gate, not semver.",
       "matchUpdateTypes": [
+        "major",
+        "minor",
         "patch",
         "pin",
         "digest"
       ],
       "automerge": true,
       "platformAutomerge": true
-    },
-    {
-      "description": "Group review-required npm minor updates to reduce PR noise without mixing them into automerged patches",
-      "matchManagers": [
-        "npm"
-      ],
-      "matchUpdateTypes": [
-        "minor"
-      ],
-      "groupName": "npm dependencies (minor)"
-    },
-    {
-      "description": "better-sqlite3 majors track Node ABI and always require review even when CI is green",
-      "matchPackageNames": [
-        "better-sqlite3"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "automerge": false,
-      "addLabels": [
-        "needs-review"
-      ]
     }
   ],
   "prConcurrentLimit": 5,
