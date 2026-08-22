@@ -1,9 +1,9 @@
 name: Renovate
 
 # Self-hosted Renovate — no third-party GitHub App. Runs on a schedule (and on
-# demand), groups routine dependency PRs, and auto-merges patch/pin/digest
-# updates once required checks pass. Renovate also updates the action
-# pin below, so it keeps itself current too.
+# demand), groups routine dependency PRs, and auto-merges dependency updates
+# once required checks pass. Renovate also updates the action pin below, so it
+# keeps itself current too.
 #
 # Setup (one-time):
 #   1. Create a fine-grained PAT (this repo only) with Read+Write on:
