@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "deslopper": {
+      "source": "jv-k/deslopper",
+      "sourceType": "github",
+      "skillPath": "skills/deslopper/SKILL.md",
+      "computedHash": "5637d8c2ea61c415c95e156c9f8688d9bafcd8575c4c1ea2b770c74c8b8de3a1"
+    }
+  }
+}
