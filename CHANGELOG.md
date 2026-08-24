@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.35.2](https://github.com/martadams89/seo-website-indexer/compare/v1.35.1...v1.35.2) (2026-08-24)
+
+
+### 🧹 Maintenance
+
+* **deps:** lock file maintenance ([#295](https://github.com/martadams89/seo-website-indexer/issues/295)) ([3191b33](https://github.com/martadams89/seo-website-indexer/commit/3191b333d30d070e0f74168e87faa815d2cd0b8b))
+* **deps:** update dependency @types/react-dom to ^19.2.5 ([#293](https://github.com/martadams89/seo-website-indexer/issues/293)) ([04b096d](https://github.com/martadams89/seo-website-indexer/commit/04b096db2f07cff1d736ac40567bf167afab3e30))
+* **deps:** update renovatebot/github-action action to v46.2.3 ([#294](https://github.com/martadams89/seo-website-indexer/issues/294)) ([9e51d5e](https://github.com/martadams89/seo-website-indexer/commit/9e51d5eab7974066d9280760861098c37cb185d4))
+
 ## [1.35.1](https://github.com/martadams89/seo-website-indexer/compare/v1.35.0...v1.35.1) (2026-08-22)
 
 
