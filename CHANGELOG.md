@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.35.3](https://github.com/martadams89/seo-website-indexer/compare/v1.35.2...v1.35.3) (2026-08-25)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.9.1 ([#297](https://github.com/martadams89/seo-website-indexer/issues/297)) ([21ca707](https://github.com/martadams89/seo-website-indexer/commit/21ca707ef61250672508b02ce4dab52c96fb156e))
+* **deps:** update dependency typescript-eslint to ^8.68.0 ([#299](https://github.com/martadams89/seo-website-indexer/issues/299)) ([b254b4b](https://github.com/martadams89/seo-website-indexer/commit/b254b4b5386fc5f2f4cb64979755e23f5b6757e5))
+* **deps:** update renovatebot/github-action action to v46.2.4 ([#298](https://github.com/martadams89/seo-website-indexer/issues/298)) ([7600b91](https://github.com/martadams89/seo-website-indexer/commit/7600b91cd60fc125c84505d86ec28eadf5b61337))
+
 ## [1.35.2](https://github.com/martadams89/seo-website-indexer/compare/v1.35.1...v1.35.2) (2026-08-24)
 
 
