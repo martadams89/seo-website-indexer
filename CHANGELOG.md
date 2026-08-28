@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.35.5](https://github.com/martadams89/seo-website-indexer/compare/v1.35.4...v1.35.5) (2026-08-27)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint-plugin-react-refresh to ^0.5.5 ([#304](https://github.com/martadams89/seo-website-indexer/issues/304)) ([3cb3ecf](https://github.com/martadams89/seo-website-indexer/commit/3cb3ecfc50a3ad5623dd2e1383d0d01fbaffa9a5))
+* **deps:** update dependency node to v24.20.0 ([#305](https://github.com/martadams89/seo-website-indexer/issues/305)) ([9185656](https://github.com/martadams89/seo-website-indexer/commit/9185656bf4472b731fd518f175db374a4a42b689))
+
 ## [1.35.4](https://github.com/martadams89/seo-website-indexer/compare/v1.35.3...v1.35.4) (2026-08-26)
 
 
