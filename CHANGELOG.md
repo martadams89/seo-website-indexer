@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.35.6](https://github.com/martadams89/seo-website-indexer/compare/v1.35.5...v1.35.6) (2026-08-28)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^9.0.6 ([#309](https://github.com/martadams89/seo-website-indexer/issues/309)) ([7f19be9](https://github.com/martadams89/seo-website-indexer/commit/7f19be9824cb1728182db8707428fbd06d39807f))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @testing-library/react to ^16.3.3 ([#307](https://github.com/martadams89/seo-website-indexer/issues/307)) ([0223201](https://github.com/martadams89/seo-website-indexer/commit/0223201e18407da34642bc0c65e91593a1003e07))
+* **deps:** update dependency @vitejs/plugin-react to ^6.1.1 ([#308](https://github.com/martadams89/seo-website-indexer/issues/308)) ([d191987](https://github.com/martadams89/seo-website-indexer/commit/d1919876bbac95b8f7ddfe7d48a9d0f1146c6caf))
+
 ## [1.35.5](https://github.com/martadams89/seo-website-indexer/compare/v1.35.4...v1.35.5) (2026-08-27)
 
 
