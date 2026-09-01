@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.35.9](https://github.com/martadams89/seo-website-indexer/compare/v1.35.8...v1.35.9) (2026-08-31)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.38.0 ([#318](https://github.com/martadams89/seo-website-indexer/issues/318)) ([c5910d6](https://github.com/martadams89/seo-website-indexer/commit/c5910d60b700d16cf09555fc8da94b8b75b11791))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.2.5 ([#317](https://github.com/martadams89/seo-website-indexer/issues/317)) ([58ce553](https://github.com/martadams89/seo-website-indexer/commit/58ce5532d8bb66f105206123618f7121827755f2))
+
 ## [1.35.8](https://github.com/martadams89/seo-website-indexer/compare/v1.35.7...v1.35.8) (2026-08-30)
 
 
