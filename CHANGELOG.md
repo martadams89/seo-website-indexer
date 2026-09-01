@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.35.10](https://github.com/martadams89/seo-website-indexer/compare/v1.35.9...v1.35.10) (2026-09-01)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^9.1.0 ([#321](https://github.com/martadams89/seo-website-indexer/issues/321)) ([01490da](https://github.com/martadams89/seo-website-indexer/commit/01490daa4c3007f0ff16921c6a88689823ed584c))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency typescript-eslint to ^8.69.0 ([#320](https://github.com/martadams89/seo-website-indexer/issues/320)) ([110ddac](https://github.com/martadams89/seo-website-indexer/commit/110ddacae27d25920b0480d81447211da7f813fb))
+
 ## [1.35.9](https://github.com/martadams89/seo-website-indexer/compare/v1.35.8...v1.35.9) (2026-08-31)
 
 
