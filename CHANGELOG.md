@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.35.12](https://github.com/martadams89/seo-website-indexer/compare/v1.35.11...v1.35.12) (2026-09-03)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @simplewebauthn/browser to v14 ([#328](https://github.com/martadams89/seo-website-indexer/issues/328)) ([44d5bc5](https://github.com/martadams89/seo-website-indexer/commit/44d5bc5ba6ba6dd76c408b2cbcd32264da72fe66))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint-plugin-react-refresh to ^0.5.6 ([#327](https://github.com/martadams89/seo-website-indexer/issues/327)) ([58a3176](https://github.com/martadams89/seo-website-indexer/commit/58a317605a59e3c207bc25d7de5e0bec3b50782e))
+
 ## [1.35.11](https://github.com/martadams89/seo-website-indexer/compare/v1.35.10...v1.35.11) (2026-09-02)
 
 
