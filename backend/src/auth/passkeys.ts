@@ -21,7 +21,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
+  AuthenticatorTransport,
 } from '@simplewebauthn/server';
 import { getDb } from '../db/database.js';
 import { getUserById, type User } from './users.js';
@@ -130,7 +130,7 @@ export async function finishRegistration(
 export async function beginAuthentication(rpID: string, email?: string): Promise<PublicKeyCredentialRequestOptionsJSON & { challengeId: string }> {
   // If an email is given we can scope allowCredentials; otherwise rely on
   // discoverable credentials (resident keys) so the browser offers any passkey.
-  let allow: Array<{ id: string; transports?: AuthenticatorTransportFuture[] }> | undefined;
+  let allow: Array<{ id: string; transports?: AuthenticatorTransport[] }> | undefined;
   if (email) {
     const user = getDb().prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase()) as { id: string } | undefined;
     if (user) {
