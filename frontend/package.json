@@ -19,7 +19,7 @@
   "dependencies": {
     "@simplewebauthn/browser": "^14.0.0",
     "date-fns": "^4.4.0",
-    "lucide-react": "^1.39.0",
+    "lucide-react": "^1.40.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3"
