@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.35.13](https://github.com/martadams89/seo-website-indexer/compare/v1.35.12...v1.35.13) (2026-09-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @simplewebauthn/server to v14 ([#329](https://github.com/martadams89/seo-website-indexer/issues/329)) ([5238aa3](https://github.com/martadams89/seo-website-indexer/commit/5238aa319e388be6c39c414e2c5700415d2622a0))
+* **deps:** update dependency lucide-react to ^1.40.0 ([#333](https://github.com/martadams89/seo-website-indexer/issues/333)) ([129d5e0](https://github.com/martadams89/seo-website-indexer/commit/129d5e0f1fa541c8febc27090a585c2924fa5cdd))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/react-dom to ^19.2.7 ([#332](https://github.com/martadams89/seo-website-indexer/issues/332)) ([cdecd50](https://github.com/martadams89/seo-website-indexer/commit/cdecd500b6443f9b73fdbf365ab03629335a18bd))
+* **deps:** update dependency vitest to v5 ([#334](https://github.com/martadams89/seo-website-indexer/issues/334)) ([517355b](https://github.com/martadams89/seo-website-indexer/commit/517355b9123e55b77062eb2bb783cee460952575))
+
 ## [1.35.12](https://github.com/martadams89/seo-website-indexer/compare/v1.35.11...v1.35.12) (2026-09-03)
 
 
