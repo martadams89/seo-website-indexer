@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.35.14](https://github.com/martadams89/seo-website-indexer/compare/v1.35.13...v1.35.14) (2026-09-05)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @simplewebauthn/server to ^14.0.1 ([#335](https://github.com/martadams89/seo-website-indexer/issues/335)) ([6eea07e](https://github.com/martadams89/seo-website-indexer/commit/6eea07e14d561270f31980287018ce2eb73c8530))
+* **deps:** update dependency fastify to ^5.12.3 ([#336](https://github.com/martadams89/seo-website-indexer/issues/336)) ([1af1c6d](https://github.com/martadams89/seo-website-indexer/commit/1af1c6d9ac277219772de827a58b9481d749526a))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.10.0 ([#337](https://github.com/martadams89/seo-website-indexer/issues/337)) ([a67e21c](https://github.com/martadams89/seo-website-indexer/commit/a67e21cb2e8d58dc345bb59b41146d9d3f052f69))
+
 ## [1.35.13](https://github.com/martadams89/seo-website-indexer/compare/v1.35.12...v1.35.13) (2026-09-04)
 
 
