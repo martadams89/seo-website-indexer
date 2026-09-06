@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.35.15](https://github.com/martadams89/seo-website-indexer/compare/v1.35.14...v1.35.15) (2026-09-06)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.41.0 ([#340](https://github.com/martadams89/seo-website-indexer/issues/340)) ([1064703](https://github.com/martadams89/seo-website-indexer/commit/1064703c05e851b7a9fdc568e7d0b3a1bbb22f7e))
+* **deps:** update dependency nodemailer to v10 ([#341](https://github.com/martadams89/seo-website-indexer/issues/341)) ([d4812c2](https://github.com/martadams89/seo-website-indexer/commit/d4812c209455eb36652553286dd6dd2eb21855ed))
+
 ## [1.35.14](https://github.com/martadams89/seo-website-indexer/compare/v1.35.13...v1.35.14) (2026-09-05)
 
 
