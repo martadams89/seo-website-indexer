@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.36.0](https://github.com/martadams89/seo-website-indexer/compare/v1.35.15...v1.36.0) (2026-09-08)
+
+
+### ✨ Features
+
+* self-hosted SEO, GEO, ASO and backlink discovery workbench ([#348](https://github.com/martadams89/seo-website-indexer/issues/348)) ([269020d](https://github.com/martadams89/seo-website-indexer/commit/269020debadb709f14f05a9caad7cfba1e2f08a8))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.42.0 ([#347](https://github.com/martadams89/seo-website-indexer/issues/347)) ([54b56f2](https://github.com/martadams89/seo-website-indexer/commit/54b56f2f3aea47e2d3a24de02aca8c6806cf70f2))
+* **deps:** update dependency nodemailer to ^10.0.1 ([#345](https://github.com/martadams89/seo-website-indexer/issues/345)) ([9365a64](https://github.com/martadams89/seo-website-indexer/commit/9365a647070883c83016ed1e6c96b2831d0fc5eb))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency typescript-eslint to ^8.70.0 ([#346](https://github.com/martadams89/seo-website-indexer/issues/346)) ([3180b45](https://github.com/martadams89/seo-website-indexer/commit/3180b45bf435c665a962ff47ccdfdfdd2e91ebcc))
+* **deps:** update renovatebot/github-action action to v46.2.6 ([#343](https://github.com/martadams89/seo-website-indexer/issues/343)) ([e61ade3](https://github.com/martadams89/seo-website-indexer/commit/e61ade391d7dddc7244954cd4fd37cbf4f3e0721))
+
 ## [1.35.15](https://github.com/martadams89/seo-website-indexer/compare/v1.35.14...v1.35.15) (2026-09-06)
 
 
