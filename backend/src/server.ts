@@ -141,6 +141,7 @@ import {
 } from './auth/passkeys.js';
 import { ssoProviders, ssoAuthorizeUrl, ssoHandleCallback } from './auth/sso.js';
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
+import { registerDiscoveryRoutes } from './platform/discovery-routes.js';
 import { registerPlatformRoutes } from './platform/routes.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
@@ -368,6 +369,7 @@ function capabilityForPath(path: string): Capability | null {
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
   if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
+  if (path.startsWith('/api/platform/discovery')) return 'manage_content';
   if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
   if (path.startsWith('/api/platform/reports') || path.startsWith('/api/platform/views')
     || path.startsWith('/api/platform/digest')) return 'manage_reports';
@@ -2623,6 +2625,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
 });
 
 registerPlatformRoutes(app);
+registerDiscoveryRoutes(app);
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 Organic Command running at http://${HOST}:${PORT}\n`);

@@ -20,6 +20,7 @@ type NavItem = { to: string; icon: typeof Activity; label: string; detail: strin
 const MODE_RANK: Record<ExperienceMode, number> = { core: 0, growth: 1, agency: 2 };
 const PRIMARY_NAV: NavItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Overview', detail: 'Health, priorities and progress' },
+  { to: '/discovery', icon: Search, label: 'Discovery', detail: 'Website audits, search opportunities, app stores and backlinks' },
   { to: '/sites', icon: Globe, label: 'Sites', detail: 'Indexing and site workspaces' },
   { to: '/actions', icon: BriefcaseBusiness, label: 'Work', detail: 'Owned actions and remediation' },
   { to: '/insights', icon: BarChart3, label: 'Insights', detail: 'Search, AI and connected evidence' },
@@ -50,6 +51,14 @@ export default function Layout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('organic:sidebar-collapsed') === 'true');
   const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer open
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 820px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 820px)');
+    const change = () => { setIsMobile(query.matches); if (!query.matches) setMobileOpen(false); };
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [activityOpen, setActivityOpen] = useState(false);
@@ -128,13 +137,13 @@ export default function Layout() {
   }, [experienceMode]);
 
   useEffect(() => {
-    const openPanel = commandOpen ? commandRef.current : activityOpen ? activityRef.current : null;
+    const openPanel = commandOpen ? commandRef.current : activityOpen ? activityRef.current : mobileOpen ? sidebarRef.current : null;
     if (!openPanel) return;
     previousFocus.current = document.activeElement as HTMLElement | null;
-    const focusable = () => [...openPanel.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(element => !element.hasAttribute('disabled'));
+    const focusable = () => [...openPanel.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(element => !element.hasAttribute('disabled') && element.getClientRects().length>0);
     focusable()[0]?.focus();
     const trap = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setCommandOpen(false); setActivityOpen(false); return; }
+      if (event.key === 'Escape') { setCommandOpen(false); setActivityOpen(false); setMobileOpen(false); return; }
       if (event.key !== 'Tab') return;
       const items = focusable(); if (!items.length) return;
       const first = items[0]; const last = items.at(-1)!;
@@ -143,7 +152,7 @@ export default function Layout() {
     };
     document.addEventListener('keydown', trap);
     return () => { document.removeEventListener('keydown', trap); previousFocus.current?.focus(); };
-  }, [commandOpen, activityOpen]);
+  }, [commandOpen, activityOpen, mobileOpen]);
 
   const shellClass = [
     'app-shell',
@@ -164,7 +173,10 @@ export default function Layout() {
       <button type="button" className="sidebar-overlay" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />
 
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      <aside className="sidebar" ref={sidebarRef} inert={isMobile && !mobileOpen}
+        role={isMobile && mobileOpen ? "dialog" : undefined} aria-modal={isMobile && mobileOpen ? true : undefined}
+        aria-label="Workspace navigation">
+        <button type="button" className="sidebar-mobile-close" aria-label="Close navigation drawer" onClick={() => setMobileOpen(false)}><X size={20}/></button>
         {/* Desktop collapse toggle */}
         <button
           className="sidebar-toggle"
@@ -179,7 +191,7 @@ export default function Layout() {
           <div className="sidebar-logo-icon">🔍</div>
           <div>
             <div className="sidebar-logo-text">Organic Command</div>
-            <div className="sidebar-logo-sub">SEO + GEO operations</div>
+            <div className="sidebar-logo-sub">SEO · GEO · ASO</div>
           </div>
         </div>
 
@@ -244,7 +256,7 @@ export default function Layout() {
               {status?.auth.authenticated ? (
                 <span className="text-dim truncate">Google Connected</span>
               ) : (
-                <span className="text-warn">Not authenticated</span>
+                <span className="text-warn">Google not connected</span>
               )}
             </span>
           </div>
@@ -321,7 +333,7 @@ export default function Layout() {
             boxShadow: status?.auth.authenticated ? '0 0 6px var(--ok)' : 'none',
           }} />
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {status?.auth.authenticated ? 'Connected' : 'Not auth'}
+            {status?.auth.authenticated ? 'Google on' : 'Google off'}
           </span>
         </div>
       </div>
@@ -335,7 +347,7 @@ export default function Layout() {
       )}
 
       {/* ── Main ── */}
-      <main className="main-content" id="main-content" tabIndex={-1}>
+      <main inert={isMobile&&mobileOpen} className="main-content" id="main-content" tabIndex={-1}>
         <div className="global-toolbar">
           <div><span>{active?.name ?? 'Workspace'}</span><strong>{ALL_NAV.find(item => item.to === location.pathname || (item.to !== '/' && location.pathname.startsWith(`${item.to}/`)))?.label ?? 'Workspace detail'}</strong></div>
           <div className="global-toolbar-actions">
