@@ -7,6 +7,7 @@ import { AppProvider } from './AppContext'
 import { AuthGate } from './auth/AuthGate'
 import { WorkspaceProvider } from './workspace/WorkspaceContext'
 import Layout from './Layout'
+const Discovery = lazy(() => import('./pages/Discovery'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const SitesPage = lazy(() => import('./pages/Sites'))
 const LogsPage = lazy(() => import('./pages/Logs'))
@@ -66,6 +67,7 @@ function InnerRoutes() {
           {/* All other pages use the sidebar layout */}
           <Route element={<Layout />}>
             <Route path="/"         element={<Dashboard />} />
+            <Route path="/discovery" element={<Discovery />} />
             <Route path="/actions"  element={<ActionCenterPage />} />
             <Route path="/sites"    element={<SitesPage />} />
             <Route path="/sites/:siteId" element={<SiteWorkspacePage />} />

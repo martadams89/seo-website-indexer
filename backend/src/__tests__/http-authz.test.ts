@@ -85,6 +85,15 @@ describe('cross-tenant HTTP authorization', () => {
 
     // The regular user must NOT be able to touch the admin's site via any route.
     for (const route of [
+      { method: 'GET', path: `/api/platform/discovery/candidates?site_id=${siteId}` },
+      { method: 'GET', path: `/api/platform/discovery/candidates/imports?site_id=${siteId}` },
+      { method: 'POST', path: '/api/platform/discovery/candidates/import', body: { site_id: siteId, text: '{}', provenance: 'test' } },
+      { method: 'POST', path: '/api/platform/discovery/candidates/bulk', body: { site_id: siteId, ids: ['foreign'], action: 'promote' } },
+      { method: 'GET', path: `/api/platform/discovery/audits?site_id=${siteId}` },
+      { method: 'POST', path: '/api/platform/discovery/audits', body: { site_id: siteId } },
+      { method: 'GET', path: `/api/platform/discovery/backlinks?site_id=${siteId}` },
+      { method: 'POST', path: '/api/platform/discovery/backlinks/import', body: { site_id: siteId, csv: 'source_url', provenance: 'test' } },
+      { method: 'GET', path: `/api/platform/discovery/opportunities?site_id=${siteId}` },
       { method: 'GET', path: `/api/sites/${siteId}/urls` },
       { method: 'GET', path: `/api/analytics/site/${siteId}` },
       { method: 'GET', path: `/api/performance/${siteId}?days=7` },
@@ -117,6 +126,25 @@ describe('cross-tenant HTTP authorization', () => {
     expect(await json<unknown[]>(await req('GET', `/api/ai/prompts/${promptId}/thread/openai`, { sid: userSid, ws: userWs }))).toEqual([]);
     expect((await req('POST', `/api/ai/run/${promptId}`, { sid: userSid, ws: userWs })).status).toBe(404);
     expect((await req('POST', `/api/ai/prompts/${promptId}/reply`, { sid: userSid, ws: userWs, body: { provider: 'openai', message: 'leak it' } })).status).toBe(404);
+
+    // Discovery documents, histories and the portfolio preserve workspace scope.
+    const brief = await json<{ id: string }>(await req('POST', '/api/platform/discovery/documents', {
+      sid: adminSid, ws: adminWs, body: { kind: 'brief', site_id: siteId, body: { title: 'Private content plan' } },
+    }));
+    expect(brief.id).toBeTruthy();
+    expect(await json<unknown[]>(await req('GET', `/api/platform/discovery/documents/${brief.id}/history`, { sid: userSid, ws: userWs }))).toEqual([]);
+    expect((await req('POST', `/api/platform/discovery/documents/${brief.id}/review`, { sid: userSid, ws: userWs, body: { site_id: siteId } })).status).toBe(404);
+    expect(await json<unknown[]>(await req('GET', '/api/platform/discovery/coverage', { sid: userSid, ws: userWs }))).toEqual([]);
+    expect((await json<Array<{ id: string }>>(await req('GET', '/api/platform/discovery/coverage', { sid: adminSid, ws: adminWs })))[0].id).toBe(siteId);
+    expect((await req('GET', '/api/platform/discovery/jobs/foreign-job', { sid: userSid, ws: userWs })).status).toBe(404);
+    expect((await req('POST', '/api/platform/discovery/jobs/foreign-job/cancel', { sid: userSid, ws: userWs, body: {} })).status).toBe(404);
+
+    // A viewer can read evidence but cannot trigger network work or change records.
+    expect((await req('POST', `/api/workspaces/${adminWs}/members`, { sid: adminSid, ws: adminWs, body: { email: userEmail, role: 'viewer' } })).status).toBe(200);
+    expect((await req('GET', '/api/platform/discovery/coverage', { sid: userSid, ws: adminWs })).status).toBe(200);
+    for (const route of ['candidates/import', 'candidates/bulk', 'candidates/foreign/review', 'candidates/foreign/notes', 'audits', 'listings', 'documents', 'backlinks/import', 'backlinks/check', 'jobs/foreign-job/cancel']) {
+      expect((await req('POST', `/api/platform/discovery/${route}`, { sid: userSid, ws: adminWs, body: { site_id: siteId } })).status).toBe(403);
+    }
 
     // Super-admin can attach an existing user to another workspace and inspect
     // their complete tenant/security profile.

@@ -1,5 +1,6 @@
-import { getDb, getWorkspaceSettings } from '../db/database.js';
+import { getDb, getWorkspaceSettings, getSitesForWorkspace } from '../db/database.js';
 import { runDuePrompts } from '../ai/citations.js';
+import { checkBacklinks } from './backlinks.js';
 import { auditContentInventory } from './content-audit.js';
 import { syncIntegration } from './connectors.js';
 import { runDueDigests, runDueReports } from './reports.js';
@@ -19,6 +20,7 @@ export async function runPlatformAutomation(): Promise<{ integrations: number; p
     const workspaces = getDb().prepare('SELECT id FROM workspaces').all() as Array<{ id: string }>; let audited = 0;
     let retained = 0;
     for (const workspace of workspaces) {
+      for (const site of getSitesForWorkspace(workspace.id).filter(s => s.enabled)) await checkBacklinks(workspace.id, site.id, true).catch(() => null);
       const result = await auditContentInventory(workspace.id).catch(() => null); if (result?.pages) audited += result.pages;
       const days = Math.min(Math.max(Number(getWorkspaceSettings(workspace.id).retention_days || 365), 30), 3650);
       // Usage is intentionally absent: the billback ledger is immutable. These

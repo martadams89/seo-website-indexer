@@ -2,7 +2,7 @@
 
 # SEO Website Indexer
 
-**A self-hosted dashboard for indexing, search performance, AI visibility and website operations across multiple clients or teams.**
+**A self-hosted SEO, GEO and ASO workbench for indexing, search performance, backlinks, content and website operations across multiple clients or teams.**
 
 [![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github)](https://github.com/martadams89/seo-website-indexer/releases)
@@ -23,6 +23,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. A prioritised opportunity finder highlights high-impression queries already within striking distance. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
+| Discovery workbench | Inspect page evidence and audit changes, verify imported backlinks, develop app-store listings and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
 | Work and publishing | Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
@@ -71,6 +72,8 @@ The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair 
 For brand and local knowledge, **Markets & Entities** can read public JSON-LD and page metadata from a configured site, turn the result into editable fields and keep the approved record as a workspace source of truth. See the [markets and entities guide](docs/MARKETS_AND_ENTITIES.md) for setup, examples and score semantics.
 
 AI visibility uses that reviewed identity when classifying stored and future answers. A citation can therefore count when it points to your own site, a known App Store/Google Play/review-marketplace profile, or names the tracked brand without linking the website. The interface keeps those evidence types separate so indirect visibility is not misreported as a direct backlink.
+
+The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, public-crawl backlink candidates, imports and monitoring, app-store drafts, content planning, measured changes and local technical tools. The [111-cycle implementation log](docs/IMPROVEMENT_CYCLES.md) lists the individual improvements. The [public-crawl candidate guide](docs/CRAWL_CANDIDATES.md) explains supported extracts, review, live verification, exports and resource limits.
 
 ## Users and workspaces
 

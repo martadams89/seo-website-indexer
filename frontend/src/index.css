@@ -2035,7 +2035,7 @@ body::before {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 .global-toolbar > div { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-dim); }
-.global-toolbar > div span::after { content: '/'; margin-left: 9px; color: var(--border-bright); }
+.global-toolbar > div:first-child > span::after { content: '/'; margin-left: 9px; color: var(--border-bright); }
 .global-toolbar > div strong { color: var(--text-secondary); font-weight: 600; }
 .command-trigger {
   width: min(280px, 32vw); height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 9px 0 12px;
