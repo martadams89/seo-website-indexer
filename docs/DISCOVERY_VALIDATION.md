@@ -1,17 +1,17 @@
 # Discovery upgrade validation
 
-The baseline upgrade and all 111 sequential cycles are recorded in [IMPROVEMENT_CYCLES.md](IMPROVEMENT_CYCLES.md). The final integration pass checked the following.
+The baseline upgrade and all 112 sequential cycles are recorded in [IMPROVEMENT_CYCLES.md](IMPROVEMENT_CYCLES.md). The final integration pass checked the following.
 
 | Check | Result |
 | --- | --- |
-| Backend suite | 183 tests passed across 27 files |
-| Frontend suite | 25 tests passed across 6 files |
+| Backend suite | 189 tests passed across 27 files |
+| Frontend suite | 28 tests passed across 7 files |
 | Backend TypeScript build | Passed |
 | Frontend TypeScript and Vite production build | Passed |
 | ESLint | Passed with no errors; the repository's existing warning policy remains in place |
 | Theme, typography, shared-dialog contracts | Passed |
 | Integration-guide, Intelligence-scope and Action Centre contracts | Passed |
-| Cycle ledger | Exactly 001–111, in order, with no gaps or duplicate numbers |
+| Cycle ledger | Exactly 001–112, in order, with no gaps or duplicate numbers |
 | Git whitespace checks | Passed |
 
 Candidate tests additionally cover WAT extraction, physical error line numbers, unsafe sources, dates, UTF-8 and link budgets, preview rollback, receipt retention, tenant isolation, review transitions, evidence-preserving promotion and investigation-task deduplication. Component checks cover read-only access, preview, immediate note export, selection reset and bounded pagination.
@@ -34,6 +34,10 @@ These checks do not constitute exhaustive device, browser or accessibility certi
 
 Docker is unavailable in this execution environment. The repository's existing Docker smoke workflow remains the container-build gate when the branch reaches GitHub. No Docker build, GitHub CI run, deployment or release is claimed by this local validation record.
 
+## Cycle 112 validation
+
+Comparison tests cover retained duplicate observations, changed anchors/dates, reordered evidence, unknown dates, empty/rejected extracts, unchanged live monitor status, preview rollback, receipt/snapshot pruning, legacy snapshots, tenant boundaries and expanded-snapshot budgets. Component checks cover selected imports, CSV evidence, filtering, stale-result clearing, legacy availability, refresh and load failures. The API's real authorization test includes foreign-site comparison access. No new browser/device coverage is claimed for the comparison panel.
+
 ## Next improvement idea
 
-Cycle 112: compare candidate observations across crawl releases. Preserve each source/date and distinguish changes in archive coverage from links confirmed lost by live verification. This remains an idea beyond the completed 111 cycles.
+Cycle 113: save named comparison presets with source and coverage assumptions for recurring extract reviews.

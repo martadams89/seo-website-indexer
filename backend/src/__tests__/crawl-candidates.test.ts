@@ -1,3 +1,4 @@
+import { compareCrawlImports } from '../platform/crawl-comparison.js';
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { getDb, getSiteById, upsertSite } from '../db/database.js';
 import { createUser } from '../auth/users.js';
@@ -172,4 +173,91 @@ it('validates notes and attaches them to a deduplicated investigation task', () 
     notes: 'Check editorial relevance',
     crawl_date: '2020-01-01T00:00:00.000Z',
   });
+});
+
+it('compares releases while preserving duplicate observations and live monitor evidence', () => {
+  const candidate = add();
+  const before = crawlImportHistory(ws, site().id)[0].id;
+  reviewCrawlCandidate(ws, site(), candidate.id, 'promote');
+  getDb().prepare("UPDATE backlinks SET status='present'").run();
+  importCrawlCandidates(
+    ws,
+    site(),
+    [
+      record({ anchor: 'Updated anchor', crawl_date: '2021-01-01' }),
+      record({ source_url: 'https://second.example/story' }),
+    ].join('\n'),
+    'Second release',
+    false,
+  );
+  const after = crawlImportHistory(ws, site().id)[0].id;
+  const result = compareCrawlImports(ws, site().id, before, after);
+  expect(result.counts).toEqual({
+    newly_observed: 1,
+    not_observed: 0,
+    observed_both: 1,
+    evidence_changed: 1,
+  });
+  expect(result.rows.find((r) => r.status === 'observed_both')).toMatchObject({
+    before: [{ anchor: 'Historical anchor', crawl_date: '2020-01-01T00:00:00.000Z' }],
+    after: [{ anchor: 'Updated anchor', crawl_date: '2021-01-01T00:00:00.000Z' }],
+  });
+  expect(listBacklinks(ws, site().id)[0].status).toBe('present');
+  expect(listCrawlCandidates(ws, site().id).find((r) => r.id === candidate.id)?.anchor).toBe(
+    'Historical anchor',
+  );
+});
+it('reports sample absence without claiming a lost link, including empty and rejected extracts', () => {
+  add();
+  const before = crawlImportHistory(ws, site().id)[0].id;
+  importCrawlCandidates(ws, site(), 'not JSON', 'Incomplete extract', false);
+  const result = compareCrawlImports(ws, site().id, before, crawlImportHistory(ws, site().id)[0].id);
+  expect(result.counts.not_observed).toBe(1);
+  expect(result.after.rejected_records).toBe(1);
+  expect(result.methodology).toContain('does not mean a live backlink was lost');
+  expect(listCrawlCandidates(ws, site().id)[0].state).toBe('pending');
+});
+it('leaves comparison snapshots untouched on preview and prunes them with import receipts', () => {
+  add();
+  importCrawlCandidates(ws, site(), record(), 'Preview', true);
+  expect(getDb().prepare('SELECT * FROM crawl_import_observations').all()).toHaveLength(1);
+  for (let i = 0; i < 31; i++) importCrawlCandidates(ws, site(), record(), `Release ${i}`, false);
+  expect(getDb().prepare('SELECT * FROM crawl_import_observations').all()).toHaveLength(30);
+});
+it('rejects foreign, same and legacy comparisons without manufacturing history', () => {
+  add();
+  const id = crawlImportHistory(ws, site().id)[0].id;
+  expect(() => compareCrawlImports(other, site().id, id, 'other')).toThrow('Import not found');
+  expect(() => compareCrawlImports(ws, 'foreign-site', id, 'other')).toThrow('Import not found');
+  expect(() => compareCrawlImports(ws, site().id, id, id)).toThrow('different imports');
+  getDb().prepare('DELETE FROM crawl_import_observations WHERE import_id=?').run(id);
+  expect(crawlImportHistory(ws, site().id)[0].comparable).toBe(0);
+  expect(() => compareCrawlImports(ws, site().id, id, 'other')).toThrow('older import');
+});
+it('compares evidence sets independently of record order while preserving each observation', () => {
+  importCrawlCandidates(
+    ws,
+    site(),
+    [record(), record({ anchor: 'Alternative', crawl_date: null })].join('\n'),
+    'A',
+    false,
+  );
+  const before = crawlImportHistory(ws, site().id)[0].id;
+  importCrawlCandidates(
+    ws,
+    site(),
+    [record({ anchor: 'Alternative', crawl_date: null }), record(), record()].join('\n'),
+    'B',
+    false,
+  );
+  const result = compareCrawlImports(ws, site().id, before, crawlImportHistory(ws, site().id)[0].id);
+  expect(result.counts.evidence_changed).toBe(0);
+  expect(result.rows[0].after).toHaveLength(3);
+});
+
+it('bounds expanded WAT snapshots before persisting any observations', () => {
+  const text=wat(Array.from({length:500},(_,i)=>({path:'A@/href',url:`https://example.com/${i}`})),{'WARC-Target-URI':`https://publisher.example/${'a'.repeat(3000)}`});
+  expect(()=>importCrawlCandidates(ws,site(),text,'Large snapshot',false)).toThrow('snapshot budget');
+  expect(crawlImportHistory(ws,site().id)).toEqual([]);
+  expect(listCrawlCandidates(ws,site().id)).toEqual([]);
 });

@@ -73,7 +73,18 @@ For brand and local knowledge, **Markets & Entities** can read public JSON-LD an
 
 AI visibility uses that reviewed identity when classifying stored and future answers. A citation can therefore count when it points to your own site, a known App Store/Google Play/review-marketplace profile, or names the tracked brand without linking the website. The interface keeps those evidence types separate so indirect visibility is not misreported as a direct backlink.
 
-The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, public-crawl backlink candidates, imports and monitoring, app-store drafts, content planning, measured changes and local technical tools. The [111-cycle implementation log](docs/IMPROVEMENT_CYCLES.md) lists the individual improvements. The [public-crawl candidate guide](docs/CRAWL_CANDIDATES.md) explains supported extracts, review, live verification, exports and resource limits.
+The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, public-crawl backlink candidates, imports and monitoring, app-store drafts, content planning, measured changes and local technical tools. The [112-cycle implementation log](docs/IMPROVEMENT_CYCLES.md) lists the individual improvements. The [public-crawl candidate guide](docs/CRAWL_CANDIDATES.md) explains supported extracts, review, live verification, exports and resource limits.
+
+### Seeing updates in a Docker installation
+
+Merging a feature into `main` updates the source. The published `latest` image changes after a tagged release's **Build & Publish Docker Image** workflow succeeds. Pulling an image alone does not replace an already-running container. With the supplied Compose configuration:
+
+```sh
+docker compose pull seo-indexer
+docker compose up -d seo-indexer
+```
+
+Then reload the browser and open **Discovery**. Installations pinned to a version tag must update that tag first. The existing data volume is retained.
 
 ## Users and workspaces
 

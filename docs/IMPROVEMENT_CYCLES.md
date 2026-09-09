@@ -1,4 +1,4 @@
-# 111 improvement cycles
+# 112 improvement cycles
 
 Baseline: the discovery workbench, SEO/GEO audit snapshots, Search Console opportunities, versioned ASO drafts, backlink imports/verification and initial responsive fixes were implemented first (commits `5fc33a5` and `65cfd7b`). The cycles below extend that baseline. A cycle is a specific implemented improvement, not a promise or an entire competing SaaS product.
 
@@ -117,3 +117,5 @@ Each entry records the idea, resulting behaviour and verification. Related cycle
 | 109 | Separate recent, older and undated crawl evidence so stale candidates do not masquerade as fresh links. | Backend and frontend production builds passed |
 | 110 | Retain and display import receipts with crawl provenance, duplicate counts and rejection totals; previews leave no history. | Backend and frontend production builds passed |
 | 111 | Turn historical backlink candidates into deduplicated investigation tasks with their source evidence attached. | Backend and frontend production builds passed |
+
+| 112 | Retain bounded per-import observations and compare crawl extracts with dated anchor evidence, sample-aware absence labels, filters and CSV export; preserve live backlink states. | Backend comparison, retention and scope tests; frontend interaction tests; builds and lint |
