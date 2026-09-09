@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.1](https://github.com/martadams89/seo-website-indexer/compare/v1.38.0...v1.38.1) (2026-09-09)
+
+
+### 🐛 Bug Fixes
+
+* allow deletion of ASO drafts, content briefs and measurement plans ([#355](https://github.com/martadams89/seo-website-indexer/issues/355)) ([e51d812](https://github.com/martadams89/seo-website-indexer/commit/e51d81277f1f9a025807062ad5f44ca840afe554))
+
 ## [1.38.0](https://github.com/martadams89/seo-website-indexer/compare/v1.37.0...v1.38.0) (2026-09-09)
 
 
