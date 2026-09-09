@@ -41,7 +41,7 @@ function rangeDates(days: number): { startDate: string; endDate: string } {
 
 // ── Google Search Console — searchAnalytics.query ────────────────────────────
 
-async function gscQuery(
+export async function gscQuery(
   token: string, gscUrl: string, body: Record<string, unknown>
 ): Promise<Array<{ keys?: string[]; clicks: number; impressions: number; ctr: number; position: number }>> {
   const res = await fetch(`${GSC_BASE}/sites/${encodeURIComponent(gscUrl)}/searchAnalytics/query`, {

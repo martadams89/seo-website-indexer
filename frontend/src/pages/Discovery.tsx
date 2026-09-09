@@ -122,7 +122,7 @@ export default function Discovery() {
           {tab === 'experiments' && <Experiments siteId={siteId} canEdit={canEdit} setBusy={setBusy} />}
           {tab === 'content' && <ContentStudio siteId={siteId} canEdit={canEdit} setBusy={setBusy} />}
           {tab === 'audit' && <WebsiteAudit siteId={siteId} canEdit={canEdit} setBusy={setBusy} />}
-          {tab === 'opportunities' && <SearchOpportunities siteId={siteId} />}
+          {tab === 'opportunities' && <SearchOpportunities siteId={siteId} canEdit={canEdit} />}
           {tab === 'apps' && <AppStoreStudio siteId={siteId} canEdit={canEdit} setBusy={setBusy} />}
           {tab === 'backlinks' && <BacklinkMonitor siteId={siteId} canEdit={canEdit} setBusy={setBusy} />}
         </div>

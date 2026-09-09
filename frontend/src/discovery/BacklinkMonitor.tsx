@@ -1,3 +1,4 @@
+import { LinkDiscovery } from './LinkDiscovery';
 import { useEffect, useState } from 'react';
 import { Download, Link2, RefreshCw } from 'lucide-react';
 import { discovery, type Backlink } from './api';
@@ -148,6 +149,18 @@ export function BacklinkMonitor({
           </button>
         </div>
       </header>
+      <LinkDiscovery
+        siteId={siteId}
+        canEdit={canEdit && !working}
+        monitor
+        onBusy={(value) => {
+          setWorking(value);
+          setBusy(value);
+        }}
+        onComplete={async () =>
+          setRows(await discovery.get<Backlink[]>(`backlinks?site_id=${encodeURIComponent(siteId)}`))
+        }
+      />
       {error && (
         <p className="discovery-error" role="alert">
           {error}

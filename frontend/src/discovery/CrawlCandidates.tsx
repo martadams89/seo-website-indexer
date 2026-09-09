@@ -1,3 +1,4 @@
+import { LinkDiscovery } from './LinkDiscovery';
 import { CrawlComparison } from './CrawlComparison';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { exportCsv } from './export';
@@ -154,16 +155,26 @@ export function CrawlCandidates({
           <p>Discover potential links in public-crawl extracts, then review their source pages.</p>
         </div>
       </header>
+      <LinkDiscovery
+        siteId={siteId}
+        canEdit={canEdit && !busy}
+        monitor={false}
+        onBusy={(value) => {
+          working(value);
+          setBusy(value);
+        }}
+        onComplete={refresh}
+      />
       <p className="discovery-note">
-        Crawl evidence is historical, not a live backlink. Import a bounded Common Crawl WAT JSON extract or
-        normalised NDJSON. This tool does not search the whole web or download entire crawl archives.
+        Discover sources online above, or import a bounded Common Crawl WAT JSON extract or normalised NDJSON.
+        Search discovery covers a sample of pages. Archive imports remain historical evidence.
       </p>
       {error && (
         <p role="alert" className="discovery-error">
           {error}
         </p>
       )}
-      <details className="discovery-panel" open={!rows.length}>
+      <details className="discovery-panel">
         <summary>Import public-crawl metadata</summary>
         <div className="discovery-form">
           <label>

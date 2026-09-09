@@ -157,11 +157,12 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
   });
   app.post('/api/platform/work-items/bulk', async (req, reply) => {
     const ws = workspace(req); const body = (req.body ?? {}) as { ids?: string[]; changes?: { status?: string; assignee_user_id?: string | null; due_at?: string | null; snoozed_until?: string | null; severity?: string }; preview?: boolean };
-    const ids = [...new Set(body.ids ?? [])].slice(0, 200); if (!ids.length) return reply.code(400).send({ error: 'Select at least one work item.' });
+    if (!Array.isArray(body.ids) || body.ids.length > 200 || body.ids.some(id => typeof id !== 'string')) return reply.code(400).send({error:'Choose up to 200 work item IDs.'});
+    const ids = [...new Set(body.ids)]; if (!ids.length) return reply.code(400).send({ error: 'Select at least one work item.' });
     if (body.changes?.status && !WORK_ITEM_STATUSES.includes(body.changes.status)) return reply.code(400).send({ error: 'Status is invalid.' });
     if (body.changes?.severity && !WORK_ITEM_SEVERITIES.includes(body.changes.severity)) return reply.code(400).send({ error: 'Severity is invalid.' });
     if (body.changes?.assignee_user_id && !listWorkspaceMembers(ws).some(member => member.user_id === body.changes!.assignee_user_id)) return reply.code(400).send({ error: 'Assignee is not a workspace member.' });
-    const current = listWorkItems(ws, { includeSnoozed: true, limit: 500 }).filter(item => ids.includes(item.id));
+    const current = ids.map(id => getWorkItem(ws,id)).filter(Boolean);
     if (body.preview) return { preview: true, affected: current.length, items: current };
     const changes = body.changes ?? {}; return { updated: bulkUpdateWorkItems(ws, ids, { status: changes.status, assigneeUserId: changes.assignee_user_id, dueAt: changes.due_at, snoozedUntil: changes.snoozed_until, severity: changes.severity }) };
   });

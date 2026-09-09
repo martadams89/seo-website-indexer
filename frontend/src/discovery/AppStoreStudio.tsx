@@ -1,3 +1,4 @@
+import { StoreSearch } from './StoreSearch';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { useEffect, useState } from 'react';
 import { Save, Plus, Download, Smartphone } from 'lucide-react';
@@ -123,6 +124,27 @@ export function AppStoreStudio({
           New draft
         </button>
       </header>
+      <StoreSearch
+        canEdit={canEdit && !saving}
+        onBusy={setBusy}
+        onUse={(listing) => {
+          if (!confirmDiscard()) return;
+          setId('');
+          setDraft(listing);
+          setTerms('');
+          setAnalysis(null);
+          setHistory([]);
+          setDirty(true);
+          setSaved(false);
+        }}
+      />
+      {draft.source_url && (
+        <p className="discovery-note">
+          Imported from {draft.source_url} ·{' '}
+          {draft.fetched_at ? new Date(draft.fetched_at).toLocaleString() : 'Date not supplied'}. Review and
+          save the draft below.
+        </p>
+      )}
       {error && (
         <p role="alert" className="discovery-error">
           {error}

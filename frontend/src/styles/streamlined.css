@@ -1237,3 +1237,23 @@ kbd {
 
 .sidebar-mobile-close{display:none;}
 @media(max-width:820px){.sidebar-mobile-close{display:grid;place-items:center;align-self:flex-end;flex:0 0 40px;width:40px;min-height:40px;border:1px solid var(--border);border-radius:8px;color:var(--text-primary);background:var(--bg-input);}.sidebar{overflow-y:auto;overscroll-behavior:contain;}.sidebar-footer{flex-shrink:0;}}
+
+/* Selection controls remain usable above and inside narrow work cards. */
+.work-selection-toolbar, .work-bulk-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-block:12px; min-width:0; }
+.work-bulk-actions label { display:flex; flex-direction:column; gap:6px; min-width:0; max-width:100%; }
+.work-bulk-actions .btn { white-space:normal; }
+.action-centre-page .work-item > input[type='checkbox'] { width:18px; height:18px; min-width:18px; margin:4px 0; cursor:pointer; }
+/* Provider traffic lights must fit the summary rather than widening its row. */
+.prompt-library-list, .prompt-library-list > article, .prompt-result-summary, .prompt-row-actions { min-width:0; max-width:100%; }
+.prompt-result-summary > div { display:flex; flex-wrap:wrap; justify-content:center; gap:5px; min-width:0; max-width:100%; }
+.prompt-result-summary > div > i { flex:0 0 8px; width:8px; height:8px; }
+@media (max-width:650px) {
+ .prompt-library-list > article { grid-template-columns:minmax(0,1fr); }
+ .prompt-library-list .prompt-library-copy { grid-column:1; min-width:0; }
+ .prompt-library-list .prompt-result-summary { grid-column:1; width:100%; display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:flex-start; }
+ .prompt-result-summary > span { flex:0 1 auto; }
+ .prompt-result-summary > div { flex:1 1 80px; justify-content:flex-end; }
+ .prompt-library-list .prompt-row-actions { grid-column:1; grid-row:3; justify-content:flex-start; flex-wrap:wrap; }
+ .prompt-library-copy :where(h3,small), .citation-status, .citation-status small { overflow-wrap:anywhere; white-space:normal; }
+ .work-selection-toolbar .btn { flex:1 1 auto; white-space:normal; }
+}

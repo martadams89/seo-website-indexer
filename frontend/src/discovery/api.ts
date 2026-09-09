@@ -75,6 +75,9 @@ export type AuditData = {
   } | null;
 };
 export type ListingDraft = {
+  source_url?: string;
+  source_id?: string;
+  fetched_at?: string;
   platform: 'apple' | 'google';
   locale: string;
   name: string;
@@ -123,6 +126,15 @@ export type Backlink = {
   checked_at: string | null;
 };
 export type OpportunityData = {
+  queries?: OpportunityData['opportunities'];
+  query_count?: number;
+  sync?: {
+    connected: boolean;
+    property: string;
+    last_success: string | null;
+    error: string | null;
+    truncated: boolean;
+  };
   from: string;
   previousFrom: string;
   to: string;
