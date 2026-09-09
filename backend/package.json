@@ -1,6 +1,6 @@
 {
   "name": "seo-website-indexer-backend",
-  "version": "1.36.0",
+  "version": "1.37.0",
   "description": "Self-hosted SEO and GEO operations platform",
   "type": "module",
   "main": "dist/server.js",
