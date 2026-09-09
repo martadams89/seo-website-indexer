@@ -253,13 +253,26 @@ export function registerDiscoveryRoutes(app: FastifyInstance) {
   app.get('/api/platform/discovery/listings/:id/history', async (req) =>
     listingHistory(scope(req).workspaceId, (req.params as { id: string }).id),
   );
-  app.delete('/api/platform/discovery/listings/:id', async (req, reply) =>
-    getDb()
-      .prepare('DELETE FROM app_listings WHERE workspace_id=? AND id=?')
-      .run(scope(req).workspaceId, (req.params as { id: string }).id).changes
-      ? { ok: true }
-      : reply.code(404).send({ error: 'Listing not found' }),
-  );
+  for (const [resource, table] of [
+    ['listings', 'app_listings'],
+    ['documents', 'discovery_documents'],
+  ] as const) {
+    app.delete(`/api/platform/discovery/${resource}/:id`, async (req, reply) => {
+      const ctx = scope(req);
+      const id = (req.params as { id: string }).id;
+      const removed = getDb()
+        .prepare(`DELETE FROM ${table} WHERE workspace_id=? AND id=?`)
+        .run(ctx.workspaceId, id).changes;
+      if (!removed) return reply.code(404).send({ error: 'Draft not found' });
+      recordAuditEvent({
+        actorUserId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        action: `discovery.${resource}.delete`,
+        detail: { id },
+      });
+      return { ok: true };
+    });
+  }
   app.get('/api/platform/discovery/backlinks', async (req) => {
     const s = site(req, (req.query as { site_id?: string }).site_id);
     return listBacklinks(scope(req).workspaceId, s.id);
