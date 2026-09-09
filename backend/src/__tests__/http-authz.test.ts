@@ -88,6 +88,8 @@ describe('cross-tenant HTTP authorization', () => {
       { method: 'GET', path: `/api/platform/discovery/candidates/compare?site_id=${siteId}&before_id=a&after_id=b` },
       { method: 'GET', path: `/api/platform/discovery/candidates?site_id=${siteId}` },
       { method: 'GET', path: `/api/platform/discovery/candidates/imports?site_id=${siteId}` },
+      { method: 'POST', path: '/api/platform/discovery/links/discover', body: { site_id: siteId } },
+      { method: 'POST', path: '/api/platform/discovery/opportunities/sync', body: { site_id: siteId } },
       { method: 'POST', path: '/api/platform/discovery/candidates/import', body: { site_id: siteId, text: '{}', provenance: 'test' } },
       { method: 'POST', path: '/api/platform/discovery/candidates/bulk', body: { site_id: siteId, ids: ['foreign'], action: 'promote' } },
       { method: 'GET', path: `/api/platform/discovery/audits?site_id=${siteId}` },
@@ -143,8 +145,13 @@ describe('cross-tenant HTTP authorization', () => {
     // A viewer can read evidence but cannot trigger network work or change records.
     expect((await req('POST', `/api/workspaces/${adminWs}/members`, { sid: adminSid, ws: adminWs, body: { email: userEmail, role: 'viewer' } })).status).toBe(200);
     expect((await req('GET', '/api/platform/discovery/coverage', { sid: userSid, ws: adminWs })).status).toBe(200);
-    for (const route of ['candidates/import', 'candidates/bulk', 'candidates/foreign/review', 'candidates/foreign/notes', 'audits', 'listings', 'documents', 'backlinks/import', 'backlinks/check', 'jobs/foreign-job/cancel']) {
+    for (const route of ['links/discover', 'opportunities/sync', 'stores/search', 'stores/lookup', 'candidates/import', 'candidates/bulk', 'candidates/foreign/review', 'candidates/foreign/notes', 'audits', 'listings', 'documents', 'backlinks/import', 'backlinks/check', 'jobs/foreign-job/cancel']) {
       expect((await req('POST', `/api/platform/discovery/${route}`, { sid: userSid, ws: adminWs, body: { site_id: siteId } })).status).toBe(403);
+    }
+
+    expect((await req('POST', '/api/platform/work-items/bulk', { sid: userSid, ws: adminWs, body: { ids: ['anything'], changes: { status: 'done' } } })).status).toBe(403);
+    for (const ids of [Array.from({ length: 201 }, (_, i) => String(i)), [123]]) {
+      expect((await req('POST', '/api/platform/work-items/bulk', { sid: adminSid, ws: adminWs, body: { ids, changes: { status: 'done' }, preview: true } })).status).toBe(400);
     }
 
     // Super-admin can attach an existing user to another workspace and inspect

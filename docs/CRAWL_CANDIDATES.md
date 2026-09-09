@@ -1,8 +1,10 @@
 # Public-crawl backlink candidates
 
-Open **Discovery → Link candidates**, select your site, and import an extract of external pages linking to it. Review candidates individually or select up to 50 pending candidates to monitor or dismiss together. A candidate is historical evidence: promotion creates an **unverified** backlink. Open the backlink monitor and run a check to observe whether the source still links to you.
+Open **Discovery → Link candidates**, select your site, and choose **Discover link candidates** to search online and inspect linking pages. Narrow by publisher, topic or brand phrase. You can also import an extract of external pages linking to it. Review candidates individually or select up to 50 pending candidates to monitor or dismiss together. A candidate records an observation, rather than continuous live status: promotion creates an **unverified** backlink. Open the backlink monitor and run a check to observe whether the source still links to you.
 
-The importer works locally without an SEO subscription. It does not query a reverse backlink index, download crawl archives, or claim complete coverage of the web. A missing candidate says nothing about whether a backlink exists. Host counts describe the imported source/target pairs, not authority or quality.
+Online discovery uses public search or a configured Brave Search key, connected Bing Webmaster link reports and saved AI citation sources. Its source checks and limitations are explained in the [Discovery guide](DISCOVERY.md). No upload is required.
+
+The optional file importer works locally without an SEO subscription. It does not query a reverse backlink index, download crawl archives, or claim complete coverage of the web. A missing candidate says nothing about whether a backlink exists. Host counts describe the imported source/target pairs, not authority or quality.
 
 ## Input formats
 

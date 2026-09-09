@@ -20,13 +20,13 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Area | What you can do |
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. A prioritised opportunity finder highlights high-impression queries already within striking distance. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
-| Discovery workbench | Inspect page evidence and audit changes, verify imported backlinks, develop app-store listings and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |
+| Discovery workbench | Inspect page evidence and audit changes, discover and verify backlinks online, search Apple and Google Play for listing drafts and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
-| Work and publishing | Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
+| Work and publishing | Select multiple work items to start, resolve, dismiss, reopen or assign together. Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
 | Reports | Build scheduled reports, send digests and provide an authenticated, read-only Executive View. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
@@ -73,7 +73,15 @@ For brand and local knowledge, **Markets & Entities** can read public JSON-LD an
 
 AI visibility uses that reviewed identity when classifying stored and future answers. A citation can therefore count when it points to your own site, a known App Store/Google Play/review-marketplace profile, or names the tracked brand without linking the website. The interface keeps those evidence types separate so indirect visibility is not misreported as a direct backlink.
 
-The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, public-crawl backlink candidates, imports and monitoring, app-store drafts, content planning, measured changes and local technical tools. The [112-cycle implementation log](docs/IMPROVEMENT_CYCLES.md) lists the individual improvements. The [public-crawl candidate guide](docs/CRAWL_CANDIDATES.md) explains supported extracts, review, live verification, exports and resource limits.
+The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, online backlink and candidate discovery, imports and monitoring, app-store search and drafts, content planning, measured changes and local technical tools. The [112-cycle implementation log](docs/IMPROVEMENT_CYCLES.md) lists the individual improvements. The [public-crawl candidate guide](docs/CRAWL_CANDIDATES.md) explains supported extracts, review, live verification, exports and resource limits.
+
+### Automatic discovery
+
+- **Search opportunities:** select a site to fetch its Search Console query history automatically. Google must be linked to that website with an accessible property; sync failures appear in the report. **All queries** includes observations below the priority threshold.
+- **App store studio:** search Apple App Store or Google Play by app or publisher, preview public metadata and use it as a new editable draft. Private store fields remain blank.
+- **Backlinks / Link candidates:** choose **Discover** to search online and inspect source pages. Uses configured Brave Search or public Bing search, connected Bing Webmaster link reports and saved AI citation sources. No upload is required; coverage depends on the sources available.
+
+See the [Discovery guide](docs/DISCOVERY.md) for setup, source limits and verification semantics.
 
 ### Seeing updates in a Docker installation
 

@@ -534,3 +534,4 @@
     align-items: flex-start;
   }
 }
+.store-description-preview { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; max-height:320px; overflow:auto; line-height:1.6; padding:12px; background:var(--bg-input); border-radius:8px; }

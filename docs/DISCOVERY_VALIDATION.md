@@ -38,6 +38,20 @@ Docker is unavailable in this execution environment. The repository's existing D
 
 Comparison tests cover retained duplicate observations, changed anchors/dates, reordered evidence, unknown dates, empty/rejected extracts, unchanged live monitor status, preview rollback, receipt/snapshot pruning, legacy snapshots, tenant boundaries and expanded-snapshot budgets. Component checks cover selected imports, CSV evidence, filtering, stale-result clearing, legacy availability, refresh and load failures. The API's real authorization test includes foreign-site comparison access. No new browser/device coverage is claimed for the comparison panel.
 
+## Automatic discovery and mobile follow-up
+
+The follow-up suite passes **199 backend tests in 28 files** and **33 frontend tests in 8 files**, both production builds and ESLint. Added coverage verifies:
+
+- aggregate query thresholds, lower-volume observations, full-window Search Console sync, coalesced requests, visible failures, retained cache and account/property changes;
+- Apple search/lookup and unavailable private fields, Play link parsing and full-description extraction;
+- online source discovery, observed anchors, rel evidence, monitor history, dismissed candidates, Brave selection and unverified Bing reports;
+- real HTTP workspace boundaries, viewer restrictions and bulk-input limits;
+- store preview before use, discovery reloads, search error/priority views and confirmed/cancelled bulk actions.
+
+Live public Apple and Google Play requests found DampApp Pro. Parsing its Play page returned its publisher, short description and 3,944-character full description. These are public provider checks; no live customer Google OAuth credentials were available for this validation.
+
+Browser QA used disposable data with a long site name and prompt. At **320px**, the citation card contained all six provider lights and its separate action row; the document width remained 320px. At **390px**, selecting all three visible Work fixtures checked all three boxes, exposed every bulk action and kept document width at 390px. The browser-control connection timed out during the subsequent native confirmation dialog; full bulk apply/cancel behavior was verified by component tests. No additional app-store browser coverage is claimed for this pass.
+
 ## Next improvement idea
 
 Cycle 113: save named comparison presets with source and coverage assumptions for recurring extract reviews.

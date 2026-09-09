@@ -1,7 +1,8 @@
+import { WorkBulkActions } from '../components/WorkBulkActions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CheckCircle2, ChevronRight, CircleAlert, ClipboardCheck, Clock3, Copy, ExternalLink,
-  FileText, Filter, Globe2, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, UserRound, X,
+  FileText, Filter, Globe2, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, UserRound,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useSearchParams } from 'react-router-dom';
@@ -87,6 +88,7 @@ export default function ActionCenterPage() {
     const haystack = `${item.title} ${item.description ?? ''} ${item.source} ${item.site_name ?? ''} ${item.site_domain ?? ''} ${item.page_url ?? ''} ${JSON.stringify(item.evidence)}`;
     return haystack.toLowerCase().includes(query.toLowerCase());
   }), [items, status, siteFilter, query]);
+  useEffect(() => { setSelected([]); }, [active?.id, status, siteFilter, query]);
   const counts = useMemo(() => ({
     critical: items.filter(i => i.severity === 'critical' && !['done', 'dismissed'].includes(i.status)).length,
     open: items.filter(i => i.status === 'open').length, progress: items.filter(i => i.status === 'in_progress').length,
@@ -115,13 +117,6 @@ export default function ActionCenterPage() {
     } catch (error) { toast('error', String(error).replace('Error: ', '')); }
     setBusy(null);
   }
-  async function bulkDone() {
-    setBusy('bulk'); try {
-      const preview = await api.bulkWorkItems(selected, { status: 'done' }, true); const affected = preview.affected ?? 0;
-      if (!confirm(`Mark ${affected} action${affected === 1 ? '' : 's'} complete? This preview has not changed anything yet.`)) { setBusy(null); return; }
-      await api.bulkWorkItems(selected, { status: 'done' }); setSelected([]); await load(); toast('success', 'Selected actions completed');
-    } catch (error) { toast('error', String(error).replace('Error: ', '')); } setBusy(null);
-  }
   async function create() {
     if (!draft.title.trim()) return; setBusy('create');
     try {
@@ -148,10 +143,11 @@ export default function ActionCenterPage() {
     <div className="ops-split action-split">
       <section className="ops-card action-board">
         <div className="ops-toolbar action-toolbar"><div className="ops-search"><Search size={15}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search issue, website, page or evidence…"/></div><select className="action-site-filter" aria-label="Filter by website" value={siteFilter} onChange={e => setSiteFilter(e.target.value)}><option value="all">All websites</option><option value="workspace">Workspace-wide</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}</select><div className="ops-segment"><Filter size={13}/>{['active', 'open', 'in_progress', 'done', 'all'].map(value => <button key={value} className={status === value ? 'active' : ''} onClick={() => setStatus(value)}>{value === 'in_progress' ? 'fixing' : value}</button>)}</div></div>
-        {selected.length > 0 && <div className="bulk-bar"><strong>{selected.length} selected</strong><button className="btn btn-secondary btn-sm" disabled={!canManage || busy === 'bulk'} onClick={bulkDone}><CheckCircle2 size={13}/> Mark resolved</button><button className="btn-icon btn-icon-ghost" aria-label="Clear selection" onClick={() => setSelected([])}><X size={14}/></button></div>}
+        <div className="work-selection-toolbar"><button className="btn btn-secondary btn-sm" disabled={!canManage||!!busy||!visible.length} onClick={()=>setSelected(visible.slice(0,200).map(item=>item.id))}>Select {Math.min(visible.length,200)} in this view</button><button className="btn btn-ghost btn-sm" disabled={!selected.length||!!busy} onClick={()=>setSelected([])}>Clear selection</button><span>{visible.length} matching work items</span></div>
+        {!!selected.length && <WorkBulkActions ids={selected} members={members} onBusy={value=>setBusy(value?'bulk':null)} disabled={!canManage||!!busy} onComplete={async()=>{setSelected([]);await load();toast('success','Selected work updated');}} onError={message=>toast('error',message)}/>}
         <div className="work-list">
           {visible.map(item => <article className={`work-item severity-${item.severity}`} key={item.id}>
-            <input type="checkbox" aria-label={`Select ${item.title}`} checked={selected.includes(item.id)} onChange={e => setSelected(current => e.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>
+            <input type="checkbox" aria-label={`Select ${item.title}`} disabled={!canManage||!!busy||(!selected.includes(item.id)&&selected.length>=200)} checked={selected.includes(item.id)} onChange={e => setSelected(current => e.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>
             <span className="severity-rail"/><div className="work-copy"><div><span className={`signal-badge ${item.severity}`}>{item.severity}</span><span className="source-badge">{item.source.replaceAll('_', ' ')}</span>{item.site_name && <span className="site-badge"><Globe2 size={11}/>{item.site_name}</span>}{item.due_at && <span className="due-badge"><CalendarClock size={11}/>{new Date(item.due_at).toLocaleDateString()}</span>}</div><h3>{item.title}</h3><p>{item.description || 'No description supplied.'}</p>{item.page_url ? <div className="work-page"><FileText size={13}/><button title="Copy page URL" onClick={() => copy(item.page_url!, 'Page URL')}>{item.page_url}</button><button className="btn-icon btn-icon-ghost" title="Copy page URL" onClick={() => copy(item.page_url!, 'Page URL')}><Copy size={13}/></button><a className="btn-icon btn-icon-ghost" href={item.page_url} target="_blank" rel="noreferrer" title="Open page"><ExternalLink size={13}/></a></div> : <div className="work-page muted"><Globe2 size={13}/>{item.site_id ? 'Site-wide action' : 'Workspace-wide action'}</div>}<footer><span>{item.assignee_name || item.assignee_email || 'Unassigned'}</span><span>{STATUS_LABEL[item.status]}</span><span>Updated {formatDistanceToNow(new Date(item.updated_at), { addSuffix: true })}</span></footer></div>
             <div className="work-controls"><button className="btn btn-secondary btn-sm" onClick={() => copy(issueBrief(item), 'Repair brief')}><Sparkles size={13}/> Copy brief</button><button className="btn btn-primary btn-sm" onClick={() => review(item)}>Review fix <ChevronRight size={14}/></button></div>
           </article>)}

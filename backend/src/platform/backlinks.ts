@@ -196,42 +196,7 @@ export async function checkBacklinks(workspaceId: string, siteId: string, dueOnl
           } catch (error) {
             evidence.error = error instanceof Error ? error.message : 'Request failed';
           }
-          const previous = JSON.parse(row.evidence) as Backlink['evidence'];
-          evidence.changes = ['anchors', 'rel', 'targets'].filter(
-            (key) =>
-              row.status === 'present' &&
-              status === 'present' &&
-              JSON.stringify(previous[key as keyof typeof previous]) !==
-                JSON.stringify(evidence[key as keyof typeof evidence]),
-          );
-          evidence.previous_status = row.status;
-          const at = new Date().toISOString();
-          getDb().transaction(() => {
-            getDb()
-              .prepare('UPDATE backlinks SET status=?,evidence=?,checked_at=? WHERE workspace_id=? AND id=?')
-              .run(status, JSON.stringify(evidence), at, workspaceId, row.id);
-            getDb()
-              .prepare('INSERT INTO backlink_checks(backlink_id,status,evidence,checked_at) VALUES(?,?,?,?)')
-              .run(row.id, status, JSON.stringify(evidence), at);
-            getDb()
-              .prepare(
-                'DELETE FROM backlink_checks WHERE backlink_id=? AND id NOT IN (SELECT id FROM backlink_checks WHERE backlink_id=? ORDER BY id DESC LIMIT 30)',
-              )
-              .run(row.id, row.id);
-          })();
-          if (row.status === 'present' && status === 'missing')
-            createWorkItem({
-              workspaceId,
-              siteId,
-              source: 'backlinks',
-              sourceRef: row.id,
-              title: 'Previously observed backlink is missing',
-              description:
-                'Review the source page and whether the link moved or now requires JavaScript. Do not assume a ranking loss.',
-              severity: 'medium',
-              deepLink: `/discovery?tab=backlinks&site=${encodeURIComponent(siteId)}`,
-              evidence: { source_url: row.source_url, url: row.target_url || undefined, ...evidence },
-            });
+          recordBacklinkCheck(workspaceId, siteId, row, status, evidence);
         }),
       );
     return { checked: rows.length, busy: false };
@@ -247,4 +212,49 @@ export function backlinkHistory(workspaceId: string, id: string) {
       )
       .all(workspaceId, id) as Array<{ id: number; status: string; evidence: string; checked_at: string }>
   ).map((row) => ({ ...row, evidence: JSON.parse(row.evidence) }));
+}
+
+export function recordBacklinkCheck(
+  workspaceId: string,
+  siteId: string,
+  row: Omit<Backlink, 'evidence'> & { evidence: string },
+  status: Backlink['status'],
+  evidence: Backlink['evidence'],
+) {
+  const previous = JSON.parse(row.evidence) as Backlink['evidence'];
+  evidence.changes = ['anchors', 'rel', 'targets'].filter(
+    (key) =>
+      row.status === 'present' &&
+      status === 'present' &&
+      JSON.stringify(previous[key as keyof typeof previous]) !==
+        JSON.stringify(evidence[key as keyof typeof evidence]),
+  );
+  evidence.previous_status = row.status;
+  const at = new Date().toISOString();
+  getDb().transaction(() => {
+    getDb()
+      .prepare('UPDATE backlinks SET status=?,evidence=?,checked_at=? WHERE workspace_id=? AND id=?')
+      .run(status, JSON.stringify(evidence), at, workspaceId, row.id);
+    getDb()
+      .prepare('INSERT INTO backlink_checks(backlink_id,status,evidence,checked_at) VALUES(?,?,?,?)')
+      .run(row.id, status, JSON.stringify(evidence), at);
+    getDb()
+      .prepare(
+        'DELETE FROM backlink_checks WHERE backlink_id=? AND id NOT IN (SELECT id FROM backlink_checks WHERE backlink_id=? ORDER BY id DESC LIMIT 30)',
+      )
+      .run(row.id, row.id);
+  })();
+  if (row.status === 'present' && status === 'missing')
+    createWorkItem({
+      workspaceId,
+      siteId,
+      source: 'backlinks',
+      sourceRef: row.id,
+      title: 'Previously observed backlink is missing',
+      description:
+        'Review the source page and whether the link moved or now requires JavaScript. Do not assume a ranking loss.',
+      severity: 'medium',
+      deepLink: `/discovery?tab=backlinks&site=${encodeURIComponent(siteId)}`,
+      evidence: { source_url: row.source_url, url: row.target_url || undefined, ...evidence },
+    });
 }

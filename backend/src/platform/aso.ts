@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/database.js';
 export interface ListingDraft {
+  source_url?: string;
+  source_id?: string;
+  fetched_at?: string;
   platform: 'apple' | 'google';
   locale: string;
   name: string;
@@ -37,7 +40,10 @@ export function validateListing(value: unknown): ListingDraft {
   const v = value as Record<string, unknown>;
   if (!['apple', 'google'].includes(String(v.platform)))
     throw Object.assign(new Error('Choose Apple App Store or Google Play.'), { statusCode: 400 });
+  const source: Partial<ListingDraft> = {};
+  for(const key of ['source_url','source_id','fetched_at'] as const){if(v[key]!==undefined){if(typeof v[key]!=='string'||v[key].length>1000)throw Object.assign(new Error('Invalid listing source'),{statusCode:400});source[key]=v[key];}}
   const draft: ListingDraft = {
+    ...source,
     platform: v.platform as ListingDraft['platform'],
     locale: '',
     name: '',

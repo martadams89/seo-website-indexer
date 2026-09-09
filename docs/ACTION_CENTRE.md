@@ -13,6 +13,12 @@ The Action Centre turns audit findings, connector failures and manual tasks into
 
 The timeline and audit log retain each deployment, Google check, resolution and reopen event. Changing the generic status alone remains available, but the guided buttons produce a more useful evidence trail.
 
+## Select and update multiple work items
+
+Use the checkboxes beside work items or **Select N in this view** to select the current filtered results (up to 200). The selection toolbar offers **Start work**, **Mark resolved**, **Dismiss**, **Reopen** and **Assign selected** (including Unassigned). Each action previews the number of matching records before confirmation. Changing the workspace, site, status or search clears the selection. Viewers cannot select or mutate work.
+
+Bulk status changes update the work queue; they do not run Google verification or establish that a fix succeeded. Use the individual repair workflow when you need deployment and verification evidence.
+
 ## What the Google button does
 
 For an ordinary web page, Google does not provide a general Search Console API that marks an issue fixed or requests immediate reindexing. The Action Centre therefore performs the supported workflow:

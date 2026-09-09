@@ -7,6 +7,17 @@ export interface Migration {
 }
 
 const migrations: Migration[] = [
+  {
+    id: '20260909_02_search_sync',
+    description: 'Opportunity sync status and source identity',
+    up(db) {
+      db.exec(`CREATE TABLE discovery_search_sync (
+        site_id TEXT PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
+        identity TEXT NOT NULL, checked_at TEXT NOT NULL, success_at TEXT,
+        error TEXT, truncated INTEGER NOT NULL DEFAULT 0
+      );`);
+    },
+  },
   { id: '20260909_01_crawl_observations', description: 'Retain bounded crawl import observations for comparison', up(db) {
     db.exec(`CREATE TABLE crawl_import_observations (
       import_id TEXT PRIMARY KEY REFERENCES crawl_imports(id) ON DELETE CASCADE,

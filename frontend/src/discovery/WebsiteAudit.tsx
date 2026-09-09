@@ -372,7 +372,21 @@ export function WebsiteAudit({
     </section>
   );
 }
-export function SearchOpportunities({ siteId }: { siteId: string }) {
+export function SearchOpportunities({ siteId, canEdit = false }: { siteId: string; canEdit?: boolean }) {
+  const [mode, setMode] = useState('all');
+  const [query, setQuery] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  async function sync() {
+    setSyncing(true);
+    setError('');
+    try {
+      setData(await discovery.post<OpportunityData>('opportunities/sync', { site_id: siteId }));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
   const [data, setData] = useState<OpportunityData | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -409,31 +423,73 @@ export function SearchOpportunities({ siteId }: { siteId: string }) {
           28 days from {data.from} to {data.to} (end exclusive), compared with the preceding 28 days.
         </p>
       )}
-      <div className="discovery-opportunities">
-        {data?.opportunities.map((o) => (
-          <article key={`${o.site_id}:${o.query}`} className="discovery-panel">
-            <div className="discovery-row">
-              <span className="discovery-badge">{o.kind}</span>
-              <small>{o.confidence}</small>
-            </div>
-            <h3>{o.query}</h3>
-            <div className="discovery-change">
-              <span>{o.clicks} clicks</span>
-              <span>{o.impressions} impressions</span>
-              <span>{(o.ctr * 100).toFixed(1)}% CTR</span>
-              <span>Position {o.position.toFixed(1)}</span>
-            </div>
-            <p>{o.reason}</p>
-            <Link to={`/insights/search/${o.site_id}`}>Investigate search performance →</Link>
-          </article>
-        ))}
-      </div>
-      {data && !data.opportunities.length && (
-        <div className="discovery-empty">
-          <h3>No qualifying opportunities yet</h3>
+      {!data && !error && <p role="status">Loading and syncing Google query history…</p>}
+      {data?.sync && (
+        <div className="discovery-panel">
           <p>
-            Connect Search Console and build query history. This view needs at least 100 recorded impressions
-            per query; it does not invent search demand.
+            Property: {data.sync.property || 'Not selected'} · Last sync:{' '}
+            {data.sync.last_success ? new Date(data.sync.last_success).toLocaleString() : 'Not yet synced'}
+          </p>
+          {data.sync.error && (
+            <p role="alert">
+              {data.sync.error} <Link to="/sites">Manage site connection</Link>
+            </p>
+          )}
+          {data.sync.truncated && (
+            <p>Query response reached the 50,000-row budget. Results represent partial coverage.</p>
+          )}
+          <button
+            className="btn btn-secondary"
+            disabled={!canEdit || syncing || !data.sync.connected}
+            onClick={sync}
+          >
+            {syncing ? 'Syncing…' : 'Refresh from Google'}
+          </button>
+        </div>
+      )}
+      <div className="discovery-filters">
+        <label>
+          Query view
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="all">All queries</option>
+            <option value="priority">Priority opportunities</option>
+          </select>
+        </label>
+        <label>
+          Find a query
+          <input value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+      </div>
+      <div className="discovery-opportunities">
+        {(mode === 'priority' ? data?.opportunities : (data?.queries ?? data?.opportunities))
+          ?.filter((o) => o.query.toLowerCase().includes(query.toLowerCase()))
+          .map((o) => (
+            <article key={`${o.site_id}:${o.query}`} className="discovery-panel">
+              <div className="discovery-row">
+                <span className="discovery-badge">{o.kind}</span>
+                <small>{o.confidence}</small>
+              </div>
+              <h3>{o.query}</h3>
+              <div className="discovery-change">
+                <span>{o.clicks} clicks</span>
+                <span>{o.impressions} impressions</span>
+                <span>{(o.ctr * 100).toFixed(1)}% CTR</span>
+                <span>Position {o.position.toFixed(1)}</span>
+              </div>
+              <p>{o.reason}</p>
+              <Link to={`/insights/search/${o.site_id}`}>Investigate search performance →</Link>
+            </article>
+          ))}
+      </div>
+      {data && !(mode === 'priority' ? data.opportunities : (data.queries ?? data.opportunities)).length && (
+        <div className="discovery-empty">
+          <h3>
+            {mode === 'priority' ? 'No queries meet the priority rules' : 'No Google query data returned'}
+          </h3>
+          <p>
+            {mode === 'priority'
+              ? 'Priority rules require 100 impressions plus a position or decline signal. Choose All queries to see lower-volume terms.'
+              : 'A successful sync can return no queries for a new or low-traffic property. Check the selected property; Google also omits anonymised queries.'}
           </p>
           <Link className="btn btn-secondary" to="/settings">
             Manage Google connection

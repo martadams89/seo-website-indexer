@@ -1,3 +1,6 @@
+import { discoverLinks } from './link-discovery.js';
+import { searchStore, fetchStoreListing } from './app-store-search.js';
+import { loadSearchOpportunities } from './search-sync.js';
 import { compareCrawlImports } from './crawl-comparison.js';
 import {
   importCrawlCandidates,
@@ -40,6 +43,23 @@ const body = (req: FastifyRequest): Record<string, unknown> =>
     ? (req.body as Record<string, unknown>)
     : {};
 export function registerDiscoveryRoutes(app: FastifyInstance) {
+  app.post('/api/platform/discovery/links/discover', async (req) => {
+    const b = body(req);
+    return discoverLinks(scope(req).workspaceId, site(req, b.site_id), b.query ?? '', b.monitor === true);
+  });
+  app.post('/api/platform/discovery/stores/search', async (req) => {
+    scope(req);
+    const b = body(req);
+    return searchStore(b.platform, b.query, b.country, b.language);
+  });
+  app.post('/api/platform/discovery/stores/lookup', async (req) => {
+    scope(req);
+    const b = body(req);
+    return fetchStoreListing(b.platform, b.id, b.country, b.language);
+  });
+  app.post('/api/platform/discovery/opportunities/sync', async (req) =>
+    loadSearchOpportunities(scope(req).workspaceId, site(req, body(req).site_id), true),
+  );
   app.get('/api/platform/discovery/candidates/compare', async (req) => {
     const q = req.query as { site_id?: string; before_id?: string; after_id?: string };
     const s = site(req, q.site_id);
@@ -210,8 +230,9 @@ export function registerDiscoveryRoutes(app: FastifyInstance) {
   );
   app.get('/api/platform/discovery/opportunities', async (req) => {
     const value = (req.query as { site_id?: string }).site_id;
-    if (value) site(req, value);
-    return searchOpportunities(scope(req).workspaceId, value);
+    return value
+      ? loadSearchOpportunities(scope(req).workspaceId, site(req, value))
+      : searchOpportunities(scope(req).workspaceId);
   });
   app.get('/api/platform/discovery/listings', async (req) => listAppListings(scope(req).workspaceId));
   app.post('/api/platform/discovery/listings', async (req) => {
