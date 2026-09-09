@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.37.0](https://github.com/martadams89/seo-website-indexer/compare/v1.36.0...v1.37.0) (2026-09-09)
+
+
+### ✨ Features
+
+* compare crawl releases without false lost-backlink claims ([#352](https://github.com/martadams89/seo-website-indexer/issues/352)) ([d240e62](https://github.com/martadams89/seo-website-indexer/commit/d240e62745194bb1329a3ffd108928a8ef9dbb12))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.43.0 ([#350](https://github.com/martadams89/seo-website-indexer/issues/350)) ([831f731](https://github.com/martadams89/seo-website-indexer/commit/831f73185f50ba4166c972570b1e28da1c24f330))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v24.21.0 ([#349](https://github.com/martadams89/seo-website-indexer/issues/349)) ([226d4a2](https://github.com/martadams89/seo-website-indexer/commit/226d4a2b40e633725cd762ac8026635f7bf01795))
+
 ## [1.36.0](https://github.com/martadams89/seo-website-indexer/compare/v1.35.15...v1.36.0) (2026-09-08)
 
 
