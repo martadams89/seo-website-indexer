@@ -1,3 +1,4 @@
+import { CrawlComparison } from './CrawlComparison';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { exportCsv } from './export';
 import { useEffect, useState } from 'react';
@@ -395,6 +396,7 @@ export function CrawlCandidates({
           ))}
       </details>
       {domain && <p>Filtering source host: {domain}</p>}
+      <CrawlComparison siteId={siteId} />
       <details className="discovery-panel">
         <summary>Import history</summary>
         <button

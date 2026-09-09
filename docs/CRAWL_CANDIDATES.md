@@ -41,3 +41,13 @@ HTTP source pages can be retained as historical candidates. Promotion follows th
 Each import allows up to 500,000 UTF-8 bytes, 500 JSON records, 500 matching candidate pairs and 20,000 examined links. Exceeding a budget rejects the entire import. Individual malformed records report physical input line numbers; valid records can still be imported. Skipped counts combine non-response/internal records and irrelevant links.
 
 Each site retains at most 5,000 candidate pairs across all review states. Dismissal preserves evidence and does not free that budget. The inbox is intended for selected extracts rather than bulk archive ingestion. All candidates, notes, receipts and mutations are workspace-scoped. Viewers can read and export; writes require the workspace's `manage_content` capability. Importing and previewing make no source-page network requests.
+
+## Comparing crawl releases (cycle 112)
+
+Open **Compare crawl extracts → Load comparison imports**, select a baseline and comparison import, then choose **Compare extracts**. An import represents one extract, not necessarily an entire crawl release; include release and coverage details in its provenance label. Refresh the import list after adding another extract.
+
+Results distinguish pairs new in the comparison extract, pairs observed in both, and pairs not observed in the comparison extract. Anchor/date evidence changes are flagged separately. Each pair retains all observations supplied in each import, including unknown dates. Duplicate multiplicity or record ordering alone does not count as changed evidence. Expand a pair to inspect its anchors and exact crawl dates.
+
+Filters and 50-row pagination keep the comparison manageable. CSV export includes all filtered pairs, both import IDs and provenance labels, and both sets of anchor/date evidence. Rejected-record counts remain visible because incomplete extracts can create apparent differences. Comparing extracts never updates monitored backlink status, launches checks or creates lost-link tasks.
+
+New imports retain snapshots alongside the last 30 receipts; pruning a receipt also removes its snapshot. Each expanded snapshot has a 1,000,000-byte limit, in addition to existing input/link budgets. Oversized snapshots roll back the entire import. Previews save no snapshot. Earlier receipts have no reconstructable snapshot and are disabled in the selectors; reimport their original extracts to compare them. The original candidate inbox continues to preserve first-import evidence.

@@ -7,6 +7,12 @@ export interface Migration {
 }
 
 const migrations: Migration[] = [
+  { id: '20260909_01_crawl_observations', description: 'Retain bounded crawl import observations for comparison', up(db) {
+    db.exec(`CREATE TABLE crawl_import_observations (
+      import_id TEXT PRIMARY KEY REFERENCES crawl_imports(id) ON DELETE CASCADE,
+      observations TEXT NOT NULL
+    );`);
+  } },
   { id: '20260908_05_crawl_candidates', description: 'Public crawl candidate inbox', up(db) { db.exec(`
     CREATE TABLE crawl_candidates (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

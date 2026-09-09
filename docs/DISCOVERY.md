@@ -87,6 +87,8 @@ Endpoints live under `/api/platform/discovery`: `coverage`, `audits`, `jobs`, `o
 
 Outbound requests use the existing HTTPS, private-address and redirect validation. Deployment-specific outbound exceptions remain controlled by the existing server configuration; the workbench does not weaken those controls.
 
-The [111-cycle implementation log](IMPROVEMENT_CYCLES.md) records the delivered enhancements. **Link candidates** now imports bounded public-crawl extracts for review, live-monitor promotion, notes, filters, exports, import history and investigation tasks. See the [candidate guide](CRAWL_CANDIDATES.md).
+The [112-cycle implementation log](IMPROVEMENT_CYCLES.md) records the delivered enhancements. **Link candidates** now imports bounded public-crawl extracts for review, live-monitor promotion, notes, filters, exports, import history and investigation tasks. See the [candidate guide](CRAWL_CANDIDATES.md).
 
-Next idea (112): compare candidate observations across crawl releases, preserving every source/date and showing newly observed and no-longer-observed pairs without treating archive absence as a lost live backlink.
+**Compare crawl extracts** retains each new import's observations (including duplicate pairs and their dates), compares two snapshots, and exports the filtered comparison without changing live backlink status. Historical receipts without snapshots remain unavailable for comparison.
+
+Next idea (113): save named comparison presets for recurring extract reviews, recording the chosen sources and coverage assumptions.

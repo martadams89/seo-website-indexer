@@ -1,3 +1,4 @@
+import { compareCrawlImports } from './crawl-comparison.js';
 import {
   importCrawlCandidates,
   listCrawlCandidates,
@@ -39,6 +40,12 @@ const body = (req: FastifyRequest): Record<string, unknown> =>
     ? (req.body as Record<string, unknown>)
     : {};
 export function registerDiscoveryRoutes(app: FastifyInstance) {
+  app.get('/api/platform/discovery/candidates/compare', async (req) => {
+    const q = req.query as { site_id?: string; before_id?: string; after_id?: string };
+    const s = site(req, q.site_id);
+    if (typeof q.before_id !== 'string' || typeof q.after_id !== 'string') throw bad('Choose two imports');
+    return compareCrawlImports(scope(req).workspaceId, s.id, q.before_id, q.after_id);
+  });
   app.post('/api/platform/discovery/candidates/:id/notes', async (req) =>
     saveCandidateNotes(scope(req).workspaceId, (req.params as { id: string }).id, body(req).notes),
   );

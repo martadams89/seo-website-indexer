@@ -85,6 +85,7 @@ describe('cross-tenant HTTP authorization', () => {
 
     // The regular user must NOT be able to touch the admin's site via any route.
     for (const route of [
+      { method: 'GET', path: `/api/platform/discovery/candidates/compare?site_id=${siteId}&before_id=a&after_id=b` },
       { method: 'GET', path: `/api/platform/discovery/candidates?site_id=${siteId}` },
       { method: 'GET', path: `/api/platform/discovery/candidates/imports?site_id=${siteId}` },
       { method: 'POST', path: '/api/platform/discovery/candidates/import', body: { site_id: siteId, text: '{}', provenance: 'test' } },

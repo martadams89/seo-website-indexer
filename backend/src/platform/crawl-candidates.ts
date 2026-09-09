@@ -124,10 +124,16 @@ export function importCrawlCandidates(
   if (!provenance.trim() || provenance.length > 200)
     throw bad('Give the extract a source label up to 200 characters.');
   const parsed = parseCrawlCandidates(text, site);
+  let snapshotBytes = 2;
+  for (const observation of parsed.candidates) {
+    snapshotBytes += Buffer.byteLength(JSON.stringify(observation)) + 1;
+    if (snapshotBytes > 1_000_000) throw bad('Observation snapshot budget exceeded: use a smaller extract.');
+  }
   let added = 0;
   let duplicates = 0;
   const at = new Date().toISOString();
   const rollback = new Error('Preview rollback');
+  const importId = randomUUID();
   try {
     getDb().transaction(() => {
       for (const row of parsed.candidates) {
@@ -157,7 +163,7 @@ export function importCrawlCandidates(
       getDb()
         .prepare('INSERT INTO crawl_imports VALUES(?,?,?,?,?,?)')
         .run(
-          randomUUID(),
+          importId,
           workspaceId,
           site.id,
           provenance.trim(),
@@ -170,6 +176,9 @@ export function importCrawlCandidates(
             records: parsed.records,
           }),
         );
+      getDb()
+        .prepare('INSERT INTO crawl_import_observations(import_id,observations) VALUES(?,?)')
+        .run(importId, JSON.stringify(parsed.candidates));
       getDb()
         .prepare(
           'DELETE FROM crawl_imports WHERE workspace_id=? AND site_id=? AND id NOT IN (SELECT id FROM crawl_imports WHERE workspace_id=? AND site_id=? ORDER BY imported_at DESC,rowid DESC LIMIT 30)',
@@ -254,13 +263,14 @@ export function crawlImportHistory(workspaceId: string, siteId: string) {
   return (
     getDb()
       .prepare(
-        'SELECT id,provenance,imported_at,summary FROM crawl_imports WHERE workspace_id=? AND site_id=? ORDER BY imported_at DESC,rowid DESC LIMIT 30',
+        'SELECT id,provenance,imported_at,summary,EXISTS(SELECT 1 FROM crawl_import_observations o WHERE o.import_id=crawl_imports.id) AS comparable FROM crawl_imports WHERE workspace_id=? AND site_id=? ORDER BY imported_at DESC,rowid DESC LIMIT 30',
       )
       .all(workspaceId, siteId) as Array<{
       id: string;
       provenance: string;
       imported_at: string;
       summary: string;
+      comparable: number;
     }>
   ).map((row) => ({ ...row, summary: JSON.parse(row.summary) }));
 }
