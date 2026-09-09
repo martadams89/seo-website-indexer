@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.0](https://github.com/martadams89/seo-website-indexer/compare/v1.37.0...v1.38.0) (2026-09-09)
+
+
+### ✨ Features
+
+* automatic discovery, search sync and bulk Work actions ([#353](https://github.com/martadams89/seo-website-indexer/issues/353)) ([0de6284](https://github.com/martadams89/seo-website-indexer/commit/0de62842bc2be3bdbd3c9718bfd86ab451b87dc1))
+
 ## [1.37.0](https://github.com/martadams89/seo-website-indexer/compare/v1.36.0...v1.37.0) (2026-09-09)
 
 
