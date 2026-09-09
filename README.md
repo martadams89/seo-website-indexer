@@ -78,7 +78,7 @@ The [Discovery workbench guide](docs/DISCOVERY.md) covers website audits, online
 ### Automatic discovery
 
 - **Search opportunities:** select a site to fetch its Search Console query history automatically. Google must be linked to that website with an accessible property; sync failures appear in the report. **All queries** includes observations below the priority threshold.
-- **App store studio:** search Apple App Store or Google Play by app or publisher, preview public metadata and use it as a new editable draft. Private store fields remain blank.
+- **App store studio:** search Apple App Store or Google Play by app or publisher, preview public metadata and use it as a new editable draft. Delete saved ASO drafts, content briefs and measurement plans with confirmation. Private store fields remain blank.
 - **Backlinks / Link candidates:** choose **Discover** to search online and inspect source pages. Uses configured Brave Search or public Bing search, connected Bing Webmaster link reports and saved AI citation sources. No upload is required; coverage depends on the sources available.
 
 See the [Discovery guide](docs/DISCOVERY.md) for setup, source limits and verification semantics.

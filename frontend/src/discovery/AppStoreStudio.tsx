@@ -1,3 +1,4 @@
+import { DeleteDraft } from './DeleteDraft';
 import { StoreSearch } from './StoreSearch';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { useEffect, useState } from 'react';
@@ -36,6 +37,7 @@ export function AppStoreStudio({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [message, setMessage] = useState('');
   const [history, setHistory] = useState<Array<{ id: number; draft: ListingDraft; observed_at: string }>>([]);
   useEffect(() => {
     const c = new AbortController();
@@ -49,6 +51,7 @@ export function AppStoreStudio({
   }, []);
   function open(row?: AppListing) {
     if (!confirmDiscard()) return;
+    setMessage('');
     setDirty(false);
     setId(row?.id ?? '');
     setDraft(row?.draft ?? blank());
@@ -58,12 +61,14 @@ export function AppStoreStudio({
     setSaved(false);
   }
   function change(field: keyof ListingDraft, value: string) {
+    setMessage('');
     setDirty(true);
     setDraft((d) => ({ ...d, [field]: value }));
     setAnalysis(null);
     setSaved(false);
   }
   async function save() {
+    setMessage('');
     setSaving(true);
     setBusy(true);
     setError('');
@@ -124,6 +129,32 @@ export function AppStoreStudio({
           New draft
         </button>
       </header>
+      {id && (
+        <DeleteDraft
+          path={`listings/${encodeURIComponent(id)}`}
+          title={listings.find((row) => row.id === id)?.draft.name || draft.name}
+          label="Delete draft"
+          disabled={!canEdit || saving}
+          onBusy={(value) => {
+            setSaving(value);
+            setBusy(value);
+          }}
+          onDeleted={() => {
+            setListings((rows) => rows.filter((row) => row.id !== id));
+            setId('');
+            setDraft(blank());
+            setTerms('');
+            setDirty(false);
+            setAnalysis(null);
+            setHistory([]);
+            setSaved(false);
+            setError('');
+            setMessage('Draft deleted');
+          }}
+        />
+      )}
+
+      {message && <p role="status">{message}</p>}
       <StoreSearch
         canEdit={canEdit && !saving}
         onBusy={setBusy}

@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import Database from 'better-sqlite3';
 
 // The real security boundary is the wired-up authorization pre-handler, not just
 // the helper functions. This spins up the actual server and proves, over HTTP,
@@ -153,6 +154,31 @@ describe('cross-tenant HTTP authorization', () => {
     for (const ids of [Array.from({ length: 201 }, (_, i) => String(i)), [123]]) {
       expect((await req('POST', '/api/platform/work-items/bulk', { sid: adminSid, ws: adminWs, body: { ids, changes: { status: 'done' }, preview: true } })).status).toBe(400);
     }
+
+    // Draft deletion is owner/editor-only, tenant-scoped, and cascades revisions.
+    const listing = await json<{ id: string }>(await req('POST', '/api/platform/discovery/listings', { sid: adminSid, ws: adminWs, body: {
+      site_id: siteId, draft: { platform: 'apple', locale: 'en-GB', name: 'Delete listing', subtitle: '', description: '', keywords: '', promotional_text: '', target_terms: [] },
+    } }));
+    const plan = await json<{ id: string }>(await req('POST', '/api/platform/discovery/documents', { sid: adminSid, ws: adminWs, body: {
+      site_id: siteId, kind: 'experiment', body: { title: 'Delete plan', start_date: '2026-01-01', window_days: '28', metric: 'clicks' },
+    } }));
+    const inspectionDb = new Database(path.join(TMP, 'indexer.db'), { readonly: true });
+    try {
+      for (const [resource, id, revisions, fk] of [
+        ['listings', listing.id, 'app_listing_revisions', 'listing_id'],
+        ['documents', brief.id, 'discovery_document_revisions', 'document_id'],
+        ['documents', plan.id, 'discovery_document_revisions', 'document_id'],
+      ]) {
+        expect(id).toBeTruthy();
+        const route = `/api/platform/discovery/${resource}/${id}`;
+        expect((await req('DELETE', route, { sid: userSid, ws: userWs })).status).toBe(404);
+        expect((await req('DELETE', route, { sid: userSid, ws: adminWs })).status).toBe(403);
+        expect((inspectionDb.prepare(`SELECT COUNT(*) n FROM ${revisions} WHERE ${fk}=?`).get(id) as { n: number }).n).toBeGreaterThan(0);
+        expect((await req('DELETE', route, { sid: adminSid, ws: adminWs })).status).toBe(200);
+        expect((inspectionDb.prepare(`SELECT COUNT(*) n FROM ${revisions} WHERE ${fk}=?`).get(id) as { n: number }).n).toBe(0);
+        expect((await req('DELETE', route, { sid: adminSid, ws: adminWs })).status).toBe(404);
+      }
+    } finally { inspectionDb.close(); }
 
     // Super-admin can attach an existing user to another workspace and inspect
     // their complete tenant/security profile.

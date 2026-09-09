@@ -1,3 +1,4 @@
+import { DeleteDraft } from './DeleteDraft';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { useEffect, useState } from 'react';
 import { exportCsv } from './export';
@@ -98,6 +99,34 @@ export function Experiments({
           New measurement plan
         </button>
       </header>
+      {id && (
+        <DeleteDraft
+          path={`documents/${encodeURIComponent(id)}`}
+          title={docs.find((row) => row.id === id)?.body.title || draft.title}
+          label="Delete measurement plan"
+          disabled={!canEdit || busy}
+          onBusy={(value) => {
+            working(value);
+            setBusy(value);
+          }}
+          onDeleted={() => {
+            setDocs((rows) => rows.filter((row) => row.id !== id));
+            setId('');
+            setDraft({
+              title: '',
+              hypothesis: '',
+              start_date: new Date().toISOString().slice(0, 10),
+              window_days: '28',
+              metric: 'clicks',
+            });
+            setDirty(false);
+            setResult(null);
+            setError('');
+            setMessage('Measurement plan deleted');
+          }}
+        />
+      )}
+
       {error && (
         <p role="alert" className="discovery-error">
           {error}
