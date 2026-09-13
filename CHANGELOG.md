@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.38.4](https://github.com/martadams89/seo-website-indexer/compare/v1.38.3...v1.38.4) (2026-09-12)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency fastify to ^5.12.4 ([#365](https://github.com/martadams89/seo-website-indexer/issues/365)) ([414741c](https://github.com/martadams89/seo-website-indexer/commit/414741cb4e2d92af605bd67853e8a3a60070f814))
+* **deps:** update dependency nodemailer to ^10.0.8 ([#366](https://github.com/martadams89/seo-website-indexer/issues/366)) ([d64ac7d](https://github.com/martadams89/seo-website-indexer/commit/d64ac7d698b2a5a7b390de2a3178fa212ba89da3))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.0 ([#367](https://github.com/martadams89/seo-website-indexer/issues/367)) ([82c1e01](https://github.com/martadams89/seo-website-indexer/commit/82c1e01f18f1f121c803a23af60c99c4edd6ecb7))
+
 ## [1.38.3](https://github.com/martadams89/seo-website-indexer/compare/v1.38.2...v1.38.3) (2026-09-11)
 
 
