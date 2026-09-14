@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.38.5](https://github.com/martadams89/seo-website-indexer/compare/v1.38.4...v1.38.5) (2026-09-13)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @simplewebauthn/server to ^14.0.2 ([#369](https://github.com/martadams89/seo-website-indexer/issues/369)) ([212179b](https://github.com/martadams89/seo-website-indexer/commit/212179bd55496c728bf0d849c301e3e1f3c39971))
+* **deps:** update dependency lucide-react to ^1.45.0 ([#371](https://github.com/martadams89/seo-website-indexer/issues/371)) ([59d3204](https://github.com/martadams89/seo-website-indexer/commit/59d320482ffd9cc02da6fd1006e569c4aae526c5))
+* **deps:** update dependency nodemailer to ^10.0.9 ([#370](https://github.com/martadams89/seo-website-indexer/issues/370)) ([4225ea1](https://github.com/martadams89/seo-website-indexer/commit/4225ea1c58a20036155545dcb2cf480170ec71dc))
+
 ## [1.38.4](https://github.com/martadams89/seo-website-indexer/compare/v1.38.3...v1.38.4) (2026-09-12)
 
 
