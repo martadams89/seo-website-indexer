@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.6](https://github.com/martadams89/seo-website-indexer/compare/v1.38.5...v1.38.6) (2026-09-14)
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.1 ([#373](https://github.com/martadams89/seo-website-indexer/issues/373)) ([efb9ba1](https://github.com/martadams89/seo-website-indexer/commit/efb9ba13d833fda19a6671281a8d2b8dcd084c39))
+
 ## [1.38.5](https://github.com/martadams89/seo-website-indexer/compare/v1.38.4...v1.38.5) (2026-09-13)
 
 
