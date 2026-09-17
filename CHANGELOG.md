@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.38.8](https://github.com/martadams89/seo-website-indexer/compare/v1.38.7...v1.38.8) (2026-09-16)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency react-router-dom to ^7.18.4 ([#381](https://github.com/martadams89/seo-website-indexer/issues/381)) ([40a38f8](https://github.com/martadams89/seo-website-indexer/commit/40a38f8e2f1aa7b086c0c24e02ac39da598de41d))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/nodemailer to ^8.0.2 ([#379](https://github.com/martadams89/seo-website-indexer/issues/379)) ([6277b83](https://github.com/martadams89/seo-website-indexer/commit/6277b83a573a31f4cedce651812360583aa9d9aa))
+* **deps:** update dependency vitest to ^5.0.1 ([#380](https://github.com/martadams89/seo-website-indexer/issues/380)) ([5e70578](https://github.com/martadams89/seo-website-indexer/commit/5e705781a53c62ee227babcd2d7630156db439c9))
+
 ## [1.38.7](https://github.com/martadams89/seo-website-indexer/compare/v1.38.6...v1.38.7) (2026-09-15)
 
 
