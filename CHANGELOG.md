@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.38.9](https://github.com/martadams89/seo-website-indexer/compare/v1.38.8...v1.38.9) (2026-09-17)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.4 ([#383](https://github.com/martadams89/seo-website-indexer/issues/383)) ([32eece0](https://github.com/martadams89/seo-website-indexer/commit/32eece00fcc6f602c43fed3673fcd5d8c19d6008))
+* **deps:** update dependency fastify to ^5.12.5 ([#384](https://github.com/martadams89/seo-website-indexer/issues/384)) ([15732e2](https://github.com/martadams89/seo-website-indexer/commit/15732e2c9dc4b88f9797ca565dffec1446be5c10))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency jsdom to ^30.1.0 ([#385](https://github.com/martadams89/seo-website-indexer/issues/385)) ([daf3fcf](https://github.com/martadams89/seo-website-indexer/commit/daf3fcf04de90cb906ed18999bb17c5c0a2052db))
+
 ## [1.38.8](https://github.com/martadams89/seo-website-indexer/compare/v1.38.7...v1.38.8) (2026-09-16)
 
 
