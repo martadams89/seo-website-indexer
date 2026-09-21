@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.11](https://github.com/martadams89/seo-website-indexer/compare/v1.38.10...v1.38.11) (2026-09-20)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency tsx to ^4.23.14 ([#391](https://github.com/martadams89/seo-website-indexer/issues/391)) ([62711ee](https://github.com/martadams89/seo-website-indexer/commit/62711ee0d12126b402d4d70a8702662bb495b2f7))
+
 ## [1.38.10](https://github.com/martadams89/seo-website-indexer/compare/v1.38.9...v1.38.10) (2026-09-19)
 
 
