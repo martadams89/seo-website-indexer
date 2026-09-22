@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.38.12](https://github.com/martadams89/seo-website-indexer/compare/v1.38.11...v1.38.12) (2026-09-21)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency tsx to ^4.23.15 ([#393](https://github.com/martadams89/seo-website-indexer/issues/393)) ([708835c](https://github.com/martadams89/seo-website-indexer/commit/708835cb3d9cca82594b5294b21154722d416cf0))
+* **deps:** update renovatebot/github-action action to v46.3.2 ([#394](https://github.com/martadams89/seo-website-indexer/issues/394)) ([c27c6f6](https://github.com/martadams89/seo-website-indexer/commit/c27c6f6ed9396887140c28e9654149f65a1bfeab))
+
 ## [1.38.11](https://github.com/martadams89/seo-website-indexer/compare/v1.38.10...v1.38.11) (2026-09-20)
 
 
