@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.38.13](https://github.com/martadams89/seo-website-indexer/compare/v1.38.12...v1.38.13) (2026-09-22)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency jsdom to ^30.1.1 ([#396](https://github.com/martadams89/seo-website-indexer/issues/396)) ([787fdbd](https://github.com/martadams89/seo-website-indexer/commit/787fdbdfd2c07d34c51ac5cef3a7b432ccf472a2))
+* **deps:** update dependency typescript-eslint to ^8.70.1 ([#397](https://github.com/martadams89/seo-website-indexer/issues/397)) ([3d640bc](https://github.com/martadams89/seo-website-indexer/commit/3d640bc6a14d4b13fb692d45a9d8e1bb8f520e5c))
+* **deps:** update renovatebot/github-action action to v46.3.3 ([#398](https://github.com/martadams89/seo-website-indexer/issues/398)) ([25111ab](https://github.com/martadams89/seo-website-indexer/commit/25111ab4d2128799d94a528d51f597a01ebff1c1))
+
 ## [1.38.12](https://github.com/martadams89/seo-website-indexer/compare/v1.38.11...v1.38.12) (2026-09-21)
 
 
