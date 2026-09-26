@@ -23,11 +23,11 @@ export const NOTIFY_KEYS = [
   'notify_slack_webhook', 'notify_discord_webhook',
   'notify_ntfy_server', 'notify_ntfy_topic', 'notify_ntfy_token',
   'notify_telegram_token', 'notify_telegram_chat', 'notify_webhook_url', 'notify_email_to',
-  'notify_run_complete', 'notify_run_failed', 'notify_citation_changes',
+  'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready',
 ] as const;
 
 export interface ChannelResult { channel: Channel; configured: boolean; ok: boolean; error?: string }
-export type NotificationEvent = 'run_complete' | 'run_failed' | 'citation_changes';
+export type NotificationEvent = 'run_complete' | 'run_failed' | 'citation_changes' | 'playbook_ready';
 export interface NotificationDelivery {
   id: number; workspace_id: string; event_type: string; channel: Channel;
   status: 'sent' | 'failed'; title: string; error: string | null; created_at: string;
