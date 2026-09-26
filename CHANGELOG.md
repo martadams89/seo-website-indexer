@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.40.0](https://github.com/martadams89/seo-website-indexer/compare/v1.39.0...v1.40.0) (2026-09-26)
+
+
+### ✨ Features
+
+* ranking playbook with estimated click upside, AI-drafted fixes and measured results ([#409](https://github.com/martadams89/seo-website-indexer/issues/409)) ([04fe06e](https://github.com/martadams89/seo-website-indexer/commit/04fe06e0b7a3f5547068252d534f93b9075381fc))
+
 ## [1.39.0](https://github.com/martadams89/seo-website-indexer/compare/v1.38.15...v1.39.0) (2026-09-26)
 
 
