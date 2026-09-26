@@ -4,6 +4,7 @@ import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadC
 import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport, type AgentReadiness, type ApiError } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
+import { PagePriorities } from '../components/PagePriorities';
 import { useSort, SortTh } from '../components/SortableTable';
 import { useApp } from '../AppContext';
 import { useInsights } from '../insights/InsightsContext';
@@ -39,6 +40,7 @@ export default function SiteAnalyticsPage() {
   }, [siteId, toast, navigate]);
 
   useEffect(() => { load(); }, [load]);
+  const reportError = useCallback((message: string) => toast('error', message), [toast]);
   useEffect(() => { setSiteScope(siteId); }, [siteId, setSiteScope]);
 
   async function loadLlms() {
@@ -433,6 +435,8 @@ export default function SiteAnalyticsPage() {
           </div>
         )}
       </div>
+
+      <PagePriorities siteId={siteId} onError={reportError} />
 
       {/* Hygiene */}
       <div className="panel">

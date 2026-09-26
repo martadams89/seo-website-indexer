@@ -62,7 +62,18 @@ import {
   contentFingerprint,
   lastmodQuality,
 } from './indexer/google-feedback.js';
-import { createWorkItem, resolveWorkItemsBySourceRef, countOpenWorkItems } from './platform/store.js';
+import { createWorkItem, resolveWorkItemsBySourceRef, countOpenWorkItems, getOpenWorkItemRefs, addAnnotation } from './platform/store.js';
+import { parsePage, host as pageHost } from './platform/page-evidence.js';
+import {
+  analyseInternalLinks,
+  listInventory,
+  inventoryFetchTimes,
+  getInventoryPage,
+  upsertInventoryPage,
+  type InternalLinkReport,
+} from './analytics/internal-links.js';
+import { pagePerformance, recordSnippetChange } from './analytics/page-performance.js';
+import { refreshPageVitals } from './analytics/page-vitals.js';
 import {
   sitemapGroups,
   prioritiseInspections,
@@ -70,6 +81,7 @@ import {
   indexingQuotaBucket,
   hasIndexingScope,
   publishUrlUpdated,
+  publishUrlDeleted,
   type SitemapGroup,
 } from './indexer/google-indexing.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
@@ -279,7 +291,92 @@ interface RunSiteData {
   sitemapGroups: SitemapGroup[];
   /** Current sitemap lastmod for every live HTML page. */
   lastmodByUrl: Map<string, string | undefined>;
+  /** URLs that left the sitemap this run, with what they now return. */
+  removed: RemovedUrl[];
   error?: string;
+}
+
+// ── Page fetch, removals and internal-link helpers ───────────────────────────
+
+const PAGE_FETCH_CONCURRENCY = 4;
+// Page inventory for the internal link map: refresh the stalest slice each run
+// so a site is fully re-mapped about weekly without a crawl spike.
+const INVENTORY_REFRESH_PER_RUN = 150;
+const INVENTORY_MAX_AGE_DAYS = 7;
+const MAX_REMOVAL_PROBES = 200;
+const MAX_OPEN_INTERNAL_LINK_ITEMS_PER_SITE = 30;
+
+async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+interface RemovedUrl {
+  url: string;
+  /** gone = 404/410, moved = redirect, live = still 200, unknown = could not tell. */
+  state: 'gone' | 'moved' | 'live' | 'unknown';
+  status: number;
+}
+
+/** What URLs that just left the sitemap now return (no redirects followed). */
+async function probeRemovedUrls(urls: string[]): Promise<RemovedUrl[]> {
+  const out: RemovedUrl[] = [];
+  await mapWithConcurrency(urls, PAGE_FETCH_CONCURRENCY, async (url) => {
+    try {
+      let res = await safeFetch(url, {
+        method: 'HEAD', headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (removal-check)' }, signal: AbortSignal.timeout(10_000),
+      }, { label: 'Removed URL', maxRedirects: 0 });
+      if (res.status === 405 || res.status === 501) {
+        res = await safeFetch(url, {
+          headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (removal-check)' }, signal: AbortSignal.timeout(10_000),
+        }, { label: 'Removed URL', maxRedirects: 0 });
+      }
+      await res.body?.cancel().catch(() => undefined);
+      const state = res.status === 404 || res.status === 410 ? 'gone'
+        : res.status >= 300 && res.status < 400 ? 'moved'
+        : res.status >= 200 && res.status < 300 ? 'live' : 'unknown';
+      out.push({ url, state, status: res.status });
+    } catch {
+      out.push({ url, state: 'unknown', status: 0 });
+    }
+  });
+  return out;
+}
+
+/** Action Centre items for confirmed orphans and weakly linked page-two pages. */
+function syncInternalLinkItems(site: Site, report: InternalLinkReport): void {
+  if (!site.workspace_id || !report.orphansConfirmed) return;
+  const ref = (url: string) => `${site.id}:${url}`;
+  try {
+    const flagged = new Set(report.weakOrOrphanUrls);
+    for (const target of report.targets) {
+      if (target.kind !== 'orphan' && !target.pageTwo) continue;
+      if (countOpenWorkItems(site.workspace_id, site.id, 'internal_links') >= MAX_OPEN_INTERNAL_LINK_ITEMS_PER_SITE) break;
+      const suggestions = target.suggestions.slice(0, 3)
+        .map(sg => `• ${sg.source}${sg.sharedTerms.length ? ` (shared topic: ${sg.sharedTerms.slice(0, 3).join(', ')})` : ''}`).join('\n');
+      const ranking = target.pageTwo ? ` It already ranks around position ${target.position} with ${target.impressions} impressions in 28 days, so stronger internal links have real upside.` : '';
+      createWorkItem({
+        workspaceId: site.workspace_id, siteId: site.id, source: 'internal_links', sourceRef: ref(target.url),
+        title: target.kind === 'orphan' ? 'Page has no internal links pointing to it' : `Page-two page has only ${target.inbound} internal link${target.inbound === 1 ? '' : 's'}`,
+        description: `${target.kind === 'orphan' ? 'No other page on the site links here, so Google can only find it through the sitemap and treats it as unimportant.' : 'Few pages link here, which limits how much importance Google assigns to it.'}${ranking}` +
+          (suggestions ? `\n\nAdd a contextual link${target.anchorHint ? ` (e.g. anchor text "${target.anchorHint}")` : ''} from:\n${suggestions}` : ''),
+        severity: target.kind === 'orphan' || target.pageTwo ? 'high' : 'medium',
+        evidence: { url: target.url, inbound: target.inbound, kind: target.kind, page_two: target.pageTwo, position: target.position, impressions: target.impressions, suggestions: target.suggestions },
+        deepLink: `/insights/search/${encodeURIComponent(site.id)}#internal-links`,
+      });
+    }
+    const open = getOpenWorkItemRefs(site.workspace_id, site.id, 'internal_links');
+    resolveWorkItemsBySourceRef(site.workspace_id, 'internal_links',
+      open.filter(r => !flagged.has(r.slice(site.id.length + 1))));
+  } catch (e) {
+    console.error(`[scheduler] Internal link item sync failed for ${site.domain}:`, e instanceof Error ? e.message : e);
+  }
 }
 
 async function _doRun(
@@ -327,6 +424,16 @@ async function _doRun(
       // history. Remove retired HTML URLs and their failures after a successful
       // fetch so coverage percentages and failure badges use the live sitemap.
       const pruned = pruneHtmlUrlStateForSite(site.id, htmlEntries.map(e => e.url));
+      // Check what each URL that left the sitemap now returns, so search
+      // engines can be told it is gone or moved (Step 3b).
+      const removed = await probeRemovedUrls(pruned.retired.slice(0, MAX_REMOVAL_PROBES));
+      const stillLive = removed.filter(r => r.state === 'live');
+      if (stillLive.length > 0) {
+        log(runId, 'warn',
+          `${site.domain} — ${stillLive.length} URL(s) left the sitemap but still return 200 (e.g. ${stillLive[0].url}). If they should be gone, return 404/410 or redirect them; otherwise add them back to the sitemap.`,
+          site.id
+        );
+      }
       if (pruned.states > 0 || pruned.failures > 0) {
         log(runId, 'info',
           `${site.domain} — pruned ${pruned.states} retired URL state(s) and ${pruned.failures} stale failure record(s)`,
@@ -390,50 +497,93 @@ async function _doRun(
         log(runId, 'warn', `${site.domain} — GEO audit failed: ${String(e)}`, site.id);
       }
 
-      // Audit JSON-LD schemas for new, modified, or never-audited pages
+      // One pass over new, changed and never-audited pages plus the stalest
+      // slice of the page inventory: JSON-LD audit, content fingerprint,
+      // title/description change tracking and the internal link map.
       const allUrlStates = getUrlsBySite(site.id);
-      const neverAudited = htmlEntries.filter(e => {
-        const state = allUrlStates.find(s => s.url === e.url);
-        return state && state.has_schema === null;
-      });
-      const targets = [...newUrls, ...changed, ...neverAudited];
+      const stateByUrl = new Map(allUrlStates.map(s => [s.url, s]));
+      const neverAudited = htmlEntries.filter(e => stateByUrl.has(e.url) && stateByUrl.get(e.url)!.has_schema === null);
+      const priority = [...newUrls, ...changed, ...neverAudited];
+      const prioritySet = new Set(priority.map(e => e.url));
+      const inventoryTimes = inventoryFetchTimes(site.id);
+      const staleBefore = new Date(Date.now() - INVENTORY_MAX_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const stale = htmlEntries
+        .filter(e => !prioritySet.has(e.url) && (inventoryTimes.get(e.url) ?? '') < staleBefore)
+        .sort((a, b) => (inventoryTimes.get(a.url) ?? '').localeCompare(inventoryTimes.get(b.url) ?? ''))
+        .slice(0, INVENTORY_REFRESH_PER_RUN);
+      const targets = [...new Map([...priority, ...stale].map(e => [e.url, e])).values()];
       const previousHash = new Map(allUrlStates.map(s => [s.url, s.content_hash ?? null]));
       const lastmodChanged = new Set(changed.filter(e => e.lastmod).map(e => e.url));
       let checkedChanged = 0;
       let bumpedWithoutChange = 0;
+      let snippetChanges = 0;
       if (targets.length > 0) {
-        log(runId, 'info', `${site.domain} — auditing JSON-LD schemas for ${targets.length} pages`, site.id);
-        for (const entry of targets) {
-          if (activeRun.stopRequested) break;
+        log(runId, 'info', `${site.domain} — fetching ${targets.length} pages (${prioritySet.size} new/changed, ${stale.length} inventory refresh)`, site.id);
+        await mapWithConcurrency(targets, PAGE_FETCH_CONCURRENCY, async (entry) => {
+          if (activeRun.stopRequested) return;
           try {
             const res = await safeFetch(entry.url, {
-              headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (schema-crawler)' },
-              signal: AbortSignal.timeout(5000)
-            }, { label: 'Schema audit URL' });
-            if (res.ok) {
-              const html = await readResponseText(res, 2_000_000, 'Schema audit page');
-              const audit = parseSemanticSchema(html);
-              // Fingerprint the visible text so a lastmod change can be checked
-              // against a real content change (see Step 6 and lastmodQuality).
-              const hash = contentFingerprint(html);
-              const before = previousHash.get(entry.url) ?? null;
-              if (before && lastmodChanged.has(entry.url)) {
-                checkedChanged++;
-                if (before === hash) bumpedWithoutChange++;
-              }
-              upsertUrlState({
-                url: entry.url,
-                site_id: site.id,
-                has_schema: audit.hasSchema,
-                schema_types: audit.schemaTypes,
-                content_hash: hash,
-                ...(before && before !== hash ? { content_changed_at: new Date().toISOString() } : {}),
+              headers: { 'User-Agent': 'SEOWebsiteIndexer/1.0 (page-audit)' },
+              signal: AbortSignal.timeout(10_000)
+            }, { label: 'Page audit URL' });
+            if (!res.ok) {
+              await res.body?.cancel().catch(() => undefined);
+              upsertInventoryPage(site.id, { url: entry.url, status: res.status, title: null, meta_description: null, h1: null, robots: null, words: 0, links: [] });
+              return;
+            }
+            const html = await readResponseText(res, 2_000_000, 'Page audit page');
+            const audit = parseSemanticSchema(html);
+            // Fingerprint the visible text so a lastmod change can be checked
+            // against a real content change (see Step 6 and lastmodQuality).
+            const hash = contentFingerprint(html);
+            const before = previousHash.get(entry.url) ?? null;
+            if (before && lastmodChanged.has(entry.url)) {
+              checkedChanged++;
+              if (before === hash) bumpedWithoutChange++;
+            }
+            upsertUrlState({
+              url: entry.url,
+              site_id: site.id,
+              has_schema: audit.hasSchema,
+              schema_types: audit.schemaTypes,
+              content_hash: hash,
+              ...(before && before !== hash ? { content_changed_at: new Date().toISOString() } : {}),
+            });
+            if (audit.hasSchema && prioritySet.has(entry.url)) {
+              log(runId, 'dim', `Schema detected: [${audit.schemaTypes}] on ${entry.url}`, site.id, entry.url);
+            }
+
+            const page = parsePage({ url: entry.url, finalUrl: res.url || entry.url, status: res.status, html, robots: res.headers.get('x-robots-tag') ?? '', maxLinks: 1000 });
+            const title = page.title || null;
+            const description = page.description || null;
+            const previous = getInventoryPage(site.id, entry.url);
+            if (previous && previous.status === 200 && ((previous.title ?? '') !== (title ?? '') || (previous.meta_description ?? '') !== (description ?? ''))) {
+              snippetChanges++;
+              const changedAt = new Date().toISOString();
+              recordSnippetChange({
+                site_id: site.id, url: entry.url, changed_at: changedAt,
+                old_title: previous.title, new_title: title,
+                old_description: previous.meta_description, new_description: description,
               });
-              if (audit.hasSchema) {
-                log(runId, 'dim', `Schema detected: [${audit.schemaTypes}] on ${entry.url}`, site.id, entry.url);
+              if (site.workspace_id) {
+                addAnnotation({
+                  workspaceId: site.workspace_id, siteId: site.id, kind: 'snippet_change',
+                  title: `Search snippet changed: ${new URL(entry.url).pathname}`,
+                  note: previous.title !== title ? `Title: "${previous.title ?? ''}" → "${title ?? ''}"` : 'Meta description changed',
+                  eventAt: changedAt, metadata: { url: entry.url },
+                });
               }
             }
-          } catch { /* ignore parsing errors */ }
+            upsertInventoryPage(site.id, {
+              url: entry.url, status: 200, title, meta_description: description, h1: page.h1[0] ?? null,
+              robots: page.robots || null, words: page.words,
+              links: page.links.filter(l => pageHost(l.url) === pageHost(page.finalUrl))
+                .map(l => ({ url: l.url, anchor: l.anchor.slice(0, 120), rel: l.rel })),
+            });
+          } catch { /* unreachable page: retried on a later run */ }
+        });
+        if (snippetChanges > 0) {
+          log(runId, 'info', `${site.domain} — ${snippetChanges} title/meta description change(s) recorded; click-through is compared before and after once 14 days of data exist.`, site.id);
         }
       }
 
@@ -452,18 +602,41 @@ async function _doRun(
         deepLink: gscSitemapsLink(site),
       })));
 
+      // Internal links: orphaned and weakly linked pages, prioritising pages
+      // already ranking on page one/two, with suggested linking pages.
+      try {
+        const report = analyseInternalLinks({
+          sitemapUrls: htmlEntries.map(e => e.url),
+          pages: listInventory(site.id),
+          perf: pagePerformance(site.id),
+          indexed: new Set(getUrlsBySite(site.id).filter(s => s.gsc_verdict === 'PASS').map(s => s.url)),
+        });
+        const orphans = report.targets.filter(t => t.kind === 'orphan').length;
+        log(runId, 'info',
+          `${site.domain} — internal links: ${report.inventoried}/${report.sitemapPages} pages mapped` +
+          (report.orphansConfirmed
+            ? `; ${report.weakOrOrphanUrls.length} orphaned or weakly linked (${orphans} orphan(s) in the top ${report.targets.length})`
+            : ' — orphan detection starts once 90% of pages are mapped'),
+          site.id
+        );
+        syncInternalLinkItems(site, report);
+      } catch (e) {
+        log(runId, 'warn', `${site.domain} — internal link analysis failed: ${e instanceof Error ? e.message : e}`, site.id);
+      }
+
       siteDataMap.set(site.id, {
         site, changed, newUrls, noLastmod, extraChanged, extraNewUrls, extraNoLastmod,
         // Only sitemaps that list HTML pages are re-submitted to Search Console;
         // llms-sitemap.xml and similar stay IndexNow-only.
         sitemapGroups: sitemapGroups(htmlEntries, site.sitemap_url),
         lastmodByUrl: new Map(htmlEntries.map(e => [e.url, e.lastmod])),
+        removed,
       });
     } catch (e) {
       log(runId, 'error', `${site.domain} — failed to fetch sitemap: ${String(e)}`, site.id);
       siteDataMap.set(site.id, {
         site, changed: [], newUrls: [], noLastmod: [], extraChanged: [], extraNewUrls: [], extraNoLastmod: [],
-        sitemapGroups: [], lastmodByUrl: new Map(), error: String(e),
+        sitemapGroups: [], lastmodByUrl: new Map(), removed: [], error: String(e),
       });
     }
   }));
@@ -705,6 +878,36 @@ async function _doRun(
           }
         }
       }
+    }
+  }
+
+  // ── Step 3b: Removal notices (IndexNow) ──────────────────────────────────
+  //
+  // A URL that left the sitemap and now returns 404/410 or redirects is sent
+  // to IndexNow so Bing, Yandex and the other engines recrawl it and drop it
+  // (or transfer it to the redirect target) instead of showing a dead result.
+
+  if (!options.skipIndexNow) {
+    for (const site of allSites) {
+      if (activeRun.stopRequested) break;
+      const data = siteDataMap.get(site.id);
+      if (!data || data.error) continue;
+      const notify = data.removed.filter(r => r.state === 'gone' || r.state === 'moved').map(r => r.url);
+      if (notify.length === 0) continue;
+      const usedToday = getQuotaUsage('indexnow', `site:${site.id}`);
+      const batch = notify.slice(0, Math.max(0, INDEXNOW_DAILY_LIMIT_PER_SITE - usedToday));
+      if (batch.length === 0) continue;
+      const results = await submitToIndexNowInBatches(site.id, site.domain, batch);
+      const accepted = results.filter(r => r.success).reduce((n, r) => n + r.urlCount, 0);
+      if (accepted > 0) {
+        incrementQuota('indexnow', `site:${site.id}`, accepted);
+        run.total_submitted += accepted;
+      }
+      const gone = data.removed.filter(r => r.state === 'gone').length;
+      log(runId, accepted > 0 ? 'ok' : 'warn',
+        `${site.domain} — removal notices: ${accepted}/${batch.length} removed URL(s) sent to IndexNow (${gone} now 404/410, ${batch.length - gone} redirected)`,
+        site.id
+      );
     }
   }
 
@@ -960,6 +1163,20 @@ async function _doRun(
   } catch (e) {
     log(runId, 'warn', `Perf snapshot failed: ${e instanceof Error ? e.message : e}`);
   }
+  // Page-level Core Web Vitals for the most-clicked pages (weekly, needs a
+  // CrUX key). Raises Action Centre items ordered by the traffic at stake.
+  for (const site of allSites) {
+    if (activeRun.stopRequested) break;
+    try {
+      const vitals = await refreshPageVitals(site);
+      if (vitals && vitals.checked > 0) {
+        log(runId, vitals.failing > 0 ? 'warn' : 'dim',
+          `${site.domain} — page Core Web Vitals checked for ${vitals.checked} top page(s); ${vitals.failing} failing`, site.id);
+      }
+    } catch (e) {
+      log(runId, 'warn', `${site.domain} — page Core Web Vitals check failed: ${e instanceof Error ? e.message : e}`, site.id);
+    }
+  }
   // Agent-readiness re-score (isitagentready-style): discovery/protocol/identity
   // surfaces per site. Network-bound, best-effort, never fails the run.
   try {
@@ -1061,6 +1278,31 @@ async function runIndexingApiStep(
       log(runId, 'info', `${site.domain} — Indexing API skipped: quota for this Cloud project is exhausted.`, site.id);
       continue;
     }
+
+    // Pages that left the sitemap and now return 404/410: URL_DELETED first,
+    // so Google drops dead results promptly. Shares the same daily quota.
+    const deletions = data.removed.filter(r => r.state === 'gone').map(r => r.url);
+    let deleted = 0;
+    for (const url of deletions) {
+      if (activeRun.stopRequested) break;
+      if (getQuotaUsage('google_indexing', bucket) >= GOOGLE_INDEXING_DAILY_LIMIT) break;
+      const result = await publishUrlDeleted(accountId, url);
+      if (result.success) {
+        deleted++;
+        run.total_submitted++;
+        incrementQuota('google_indexing', bucket);
+      } else if (result.statusCode === 429) {
+        exhausted.add(bucket);
+        break;
+      } else {
+        run.total_failed++;
+        log(runId, 'warn', `Indexing API URL_DELETED ✗ ${url}: ${result.message}`, site.id, url);
+        if (result.statusCode === 403) break;
+      }
+      await sleep(GOOGLE_INDEXING_DELAY_MS);
+    }
+    if (deleted > 0) log(runId, 'ok', `${site.domain} — Indexing API: URL_DELETED sent for ${deleted} removed page(s) now returning 404/410.`, site.id);
+    if (exhausted.has(bucket)) continue;
 
     const candidates = selectIndexingCandidates(getUrlsBySite(site.id), data.lastmodByUrl);
     if (candidates.length === 0) {

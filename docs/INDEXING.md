@@ -57,6 +57,41 @@ At most 50 inspection items are open per site at a time. Further findings are lo
 
 When the scheduler fetches a new or re-dated page, it also records a fingerprint of the page's visible text. The Indexing API step uses it to skip pages whose `lastmod` changed but whose content did not.
 
+### Removed pages
+
+When a URL leaves the sitemap, the next run checks what it now returns, without following redirects:
+
+- **404 or 410**: it is sent to IndexNow so Bing, Yandex and the other engines drop it. Sites opted in to the Indexing API also send Google a `URL_DELETED` notification, before any recrawl requests and within the same daily quota.
+- **Redirect**: it is sent to IndexNow so the engines follow the redirect and move the listing to the new URL.
+- **Still 200**: it is only logged. Either remove the page properly (404/410 or a redirect) or put it back in the sitemap.
+
+Up to 200 removed URLs are checked per site per run.
+
+## Page priorities
+
+The site's **Search insights** page has three panels based on page-level data. The scheduler collects that data during normal runs.
+
+### Internal links
+
+Each run fetches new and changed pages plus the 150 least recently mapped sitemap pages, and records each page's title, H1, meta description and outgoing links. A site is fully re-mapped about once a week without a crawl spike. From this map the app finds:
+
+- **orphans**: sitemap pages that no other page links to (`nofollow` links don't count);
+- **weakly linked pages**: pages with two or fewer internal links.
+
+Pages already ranking at positions 4–20 with real impressions ("page two") are listed first, because a stronger internal link has the most upside there. For each page, up to five linking pages are suggested. Suggested pages share distinctive title/H1 terms with the target, don't already link to it, and preferably are indexed and get traffic. An anchor-text idea is taken from the target's H1.
+
+Orphans are only confirmed once 90% of sitemap pages are mapped. After that, Action Centre items (`internal links`) are raised for orphans and weakly linked page-two pages, at most 30 open per site. They close automatically once the page has three or more internal links.
+
+### Title and description changes
+
+The app compares each fetched page's `<title>` and meta description with the previous fetch and records any change, with a timeline annotation. Once 14 days of post-change Search Console data exist, the panel compares the page's click-through rate and average position for up to 28 days either side. A relative CTR change of 10% or more counts as a real change; both windows need at least 100 impressions. Position is shown so a ranking move is not mistaken for a better snippet.
+
+This needs page-level Search Console data. The app now syncs daily clicks, impressions and position per page, backfilling 90 days on the first sync and keeping 16 months.
+
+### Core Web Vitals on top pages
+
+With a Chrome UX Report API key configured, the app checks real-user mobile Core Web Vitals (LCP, INP, CLS at p75) weekly for the 25 pages with the most Google clicks. Each failing page becomes an Action Centre item (`page vitals`): high severity if any metric is poor, otherwise medium. The item states the clicks at stake and links to PageSpeed Insights. Pages with too little traffic for CrUX are shown as having no field data.
+
 ### Optional: Indexing API recrawl requests
 
 Under **Sites → Config**, a site can opt in to **Use the Google Indexing API for pages that need a recrawl**. After URL Inspection, the run sends `URL_UPDATED` notifications only for pages that meet one of these conditions:

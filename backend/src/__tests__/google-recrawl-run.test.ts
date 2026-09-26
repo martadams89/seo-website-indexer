@@ -49,9 +49,11 @@ const INSPECTION: Record<string, Record<string, string>> = {
   },
 };
 let sitemapErrors = 2;
+const TITLES: Record<string, string> = {};
+const GONE = new Set<string>();
 
 function mockNetwork(pages: Array<[string, string]>) {
-  const calls = { sitemapSubmits: [] as string[], published: [] as string[], inspected: [] as string[] };
+  const calls = { sitemapSubmits: [] as string[], published: [] as string[], inspected: [] as string[], deleted: [] as string[], indexNow: [] as string[] };
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url === SITEMAP) return new Response(sitemapXml(pages), { status: 200 });
@@ -69,11 +71,19 @@ function mockNetwork(pages: Array<[string, string]>) {
       return Response.json({ inspectionResult: { indexStatusResult: { indexingState: 'INDEXING_ALLOWED', pageFetchState: 'SUCCESSFUL', ...r } } });
     }
     if (url.startsWith('https://indexing.googleapis.com/')) {
-      calls.published.push(JSON.parse(String(init?.body)).url);
+      const body = JSON.parse(String(init?.body)) as { url: string; type: string };
+      (body.type === 'URL_DELETED' ? calls.deleted : calls.published).push(body.url);
       return Response.json({ urlNotificationMetadata: {} });
     }
-    if (url.startsWith('https://api.indexnow.org/')) return new Response(null, { status: 200 });
-    if (url.startsWith(ORIGIN) && !url.endsWith('.txt')) return new Response('<html><body>page</body></html>', { status: 200 });
+    if (url.startsWith('https://api.indexnow.org/')) {
+      calls.indexNow.push(...(JSON.parse(String(init?.body)).urlList as string[]));
+      return new Response(null, { status: 200 });
+    }
+    if (url.startsWith(ORIGIN) && GONE.has(new URL(url).pathname)) return new Response(null, { status: 410 });
+    if (url.startsWith(ORIGIN) && !url.endsWith('.txt')) {
+      const p = new URL(url).pathname;
+      return new Response(`<html><head><title>${TITLES[p] ?? p}</title></head><body><h1>${p}</h1><p>page</p></body></html>`, { status: 200 });
+    }
     return new Response('not found', { status: 404 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -123,13 +133,15 @@ describe('Google recrawl signals in a scheduler run', () => {
     expect(db.getQuotaUsage('google_indexing', 'project:123456789')).toBe(2);
 
     // Inspection and sitemap problems land in the Action Centre.
-    const raised = openItems().map(i => `${i.source}:${i.evidence.code ?? ''}:${i.page_url ?? ''}`).sort();
+    const raised = openItems().filter(i => i.source.startsWith('gsc_')).map(i => `${i.source}:${i.evidence.code ?? ''}:${i.page_url ?? ''}`).sort();
     expect(raised).toEqual([
       'gsc_inspection:blocked:https://recrawl.example/noindex',
       'gsc_inspection:canonical_mismatch:https://recrawl.example/dupe',
       'gsc_sitemap::',
     ]);
     expect(db.getSitemapStatesForSite(siteId)[0]).toMatchObject({ gsc_errors: 2, gsc_last_downloaded: '2026-09-25T00:00:00Z' });
+    // No page links to any other, and every page is mapped: all are orphans.
+    expect(openItems().filter(i => i.source === 'internal_links')).toHaveLength(5);
 
     // Run 2: nothing changed — no sitemap resubmission, no repeat notifications.
     // Google now accepts the canonical and the sitemap errors are fixed, so
@@ -140,13 +152,23 @@ describe('Google recrawl signals in a scheduler run', () => {
     await runAndWait(ws.id, siteId);
     expect(calls.sitemapSubmits).toEqual([]);
     expect(calls.published).toEqual([]);
-    expect(openItems().map(i => i.evidence.code)).toEqual(['blocked']);
+    expect(openItems().filter(i => i.source.startsWith('gsc_')).map(i => i.evidence.code)).toEqual(['blocked']);
 
-    // Run 3: a lastmod changes, so the sitemap is re-submitted.
+    // Run 3: a lastmod and its title change, and /dupe is retired (410), so
+    // the sitemap is re-submitted, the title change is recorded, and removal
+    // notices go to IndexNow and the Indexing API.
     pages[2] = ['/fresh', '2026-09-26T00:00:00Z'];
+    TITLES['/fresh'] = 'Fresh: a better title';
+    pages.splice(4, 1);
+    GONE.add('/dupe');
     calls = mockNetwork(pages);
     await runAndWait(ws.id, siteId);
     expect(calls.sitemapSubmits).toEqual([SITEMAP]);
+    expect(calls.indexNow).toContain(`${ORIGIN}/dupe`);
+    expect(calls.deleted).toEqual([`${ORIGIN}/dupe`]);
+    const snippet = db.getDb().prepare('SELECT * FROM page_snippet_changes WHERE site_id = ?').all(siteId) as Array<{ url: string; old_title: string; new_title: string }>;
+    expect(snippet).toEqual([expect.objectContaining({ url: `${ORIGIN}/fresh`, old_title: '/fresh', new_title: 'Fresh: a better title' })]);
+    expect(db.getDb().prepare('SELECT COUNT(*) n FROM page_inventory WHERE site_id = ?').get(siteId)).toEqual({ n: 4 });
 
     // A plain edit that omits the opt-in keeps it.
     const site = db.getSiteById(siteId)!;

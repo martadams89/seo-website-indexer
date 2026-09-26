@@ -19,8 +19,8 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 
 | Area | What you can do |
 | --- | --- |
-| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
+| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
 | Discovery workbench | Inspect page evidence and audit changes, discover and verify backlinks online, search Apple and Google Play for listing drafts and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |

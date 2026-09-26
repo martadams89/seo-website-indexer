@@ -1318,7 +1318,7 @@ export function getUrlsBySite(siteId: string): UrlState[] {
 export function pruneHtmlUrlStateForSite(
   siteId: string,
   liveUrls: readonly string[]
-): { states: number; failures: number } {
+): { states: number; failures: number; retired: string[] } {
   const db = getDb();
   const live = new Set(liveUrls);
   const stored = db.prepare(`
@@ -1326,21 +1326,23 @@ export function pruneHtmlUrlStateForSite(
     WHERE site_id = ? AND COALESCE(indexnow_only, 0) = 0
   `).all(siteId) as Array<{ url: string }>;
   const retired = stored.filter(({ url }) => !live.has(url));
-  if (retired.length === 0) return { states: 0, failures: 0 };
+  if (retired.length === 0) return { states: 0, failures: 0, retired: [] };
 
   const remove = db.transaction(() => {
     let failures = 0;
     let states = 0;
     const deleteFailures = db.prepare('DELETE FROM url_failures WHERE site_id = ? AND url = ?');
     const deleteState = db.prepare('DELETE FROM url_state WHERE site_id = ? AND url = ?');
+    const deleteInventory = db.prepare('DELETE FROM page_inventory WHERE site_id = ? AND url = ?');
     for (const { url } of retired) {
       failures += deleteFailures.run(siteId, url).changes;
       states += deleteState.run(siteId, url).changes;
+      deleteInventory.run(siteId, url);
     }
     return { states, failures };
   });
 
-  return remove();
+  return { ...remove(), retired: retired.map(r => r.url) };
 }
 
 // ── Log helpers ───────────────────────────────────────────────────────────────

@@ -38,7 +38,7 @@ describe('live sitemap inventory reconciliation', () => {
 
     const result = db.pruneHtmlUrlStateForSite(siteId, ['https://inventory.test/live/']);
 
-    expect(result).toEqual({ states: 1, failures: 1 });
+    expect(result).toEqual({ states: 1, failures: 1, retired: ['https://inventory.test/retired/'] });
     expect(db.getUrlState('https://inventory.test/live/', siteId)).not.toBeNull();
     expect(db.getUrlState('https://inventory.test/retired/', siteId)).toBeNull();
     expect(db.getUrlState('https://inventory.test/llms.txt', siteId)).not.toBeNull();

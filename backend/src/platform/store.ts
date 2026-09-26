@@ -271,6 +271,11 @@ export function resolveWorkItemsBySourceRef(workspaceId: string, source: string,
   return rows.length;
 }
 
+export function getOpenWorkItemRefs(workspaceId: string, siteId: string, source: string): string[] {
+  return (getDb().prepare(`SELECT source_ref FROM work_items WHERE workspace_id=? AND site_id=? AND source=?
+    AND status='open' AND source_ref IS NOT NULL`).all(workspaceId, siteId, source) as Array<{ source_ref: string }>).map(r => r.source_ref);
+}
+
 export function countOpenWorkItems(workspaceId: string, siteId: string, source: string): number {
   return (getDb().prepare(`SELECT COUNT(*) n FROM work_items WHERE workspace_id=? AND site_id=? AND source=?
     AND status NOT IN ('done','dismissed')`).get(workspaceId, siteId, source) as { n: number }).n;

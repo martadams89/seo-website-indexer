@@ -239,7 +239,16 @@ function parseRetryAfter(headerValue: string | null): number | undefined {
 }
 
 /** Sends a URL_UPDATED notification. The account must be a verified owner of the property. */
-export async function publishUrlUpdated(accountId: string, url: string): Promise<IndexingPublishResult> {
+export function publishUrlUpdated(accountId: string, url: string): Promise<IndexingPublishResult> {
+  return publishUrlNotification(accountId, url, 'URL_UPDATED');
+}
+
+/** Sends a URL_DELETED notification for a page that now returns 404/410. */
+export function publishUrlDeleted(accountId: string, url: string): Promise<IndexingPublishResult> {
+  return publishUrlNotification(accountId, url, 'URL_DELETED');
+}
+
+async function publishUrlNotification(accountId: string, url: string, type: 'URL_UPDATED' | 'URL_DELETED'): Promise<IndexingPublishResult> {
   let token: string;
   try {
     token = await getAccessTokenForAccount(accountId);
@@ -253,7 +262,7 @@ export async function publishUrlUpdated(accountId: string, url: string): Promise
       signal: AbortSignal.timeout(30_000),
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, type: 'URL_UPDATED' }),
+      body: JSON.stringify({ url, type }),
     });
   } catch (e) {
     return { url, success: false, statusCode: 0, message: `Network error: ${String(e)}` };
