@@ -114,9 +114,10 @@ async function fetchWindow(site: Site, identity: string, now: number): Promise<Q
       if (pageNo === MAX_PAGES - 1) truncated = true;
     }
     getDb().transaction(() => {
-      // Replace the window only with a complete response; a truncated one is
-      // merged so the busiest rows (Google sorts by clicks) are still fresh.
-      if (!truncated) getDb().prepare('DELETE FROM perf_query_page WHERE site_id = ?').run(site.id);
+      // Always replace the window. A truncated response still holds the busiest
+      // rows (Google sorts by clicks); keeping an older tail alongside them
+      // would feed stale positions into the detectors.
+      getDb().prepare('DELETE FROM perf_query_page WHERE site_id = ?').run(site.id);
       const insert = getDb().prepare(`
         INSERT INTO perf_query_page(site_id, query, page, clicks, impressions, position) VALUES(?,?,?,?,?,?)
         ON CONFLICT(site_id, query, page) DO UPDATE SET clicks=excluded.clicks, impressions=excluded.impressions, position=excluded.position

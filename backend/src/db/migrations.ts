@@ -34,6 +34,45 @@ const migrations: Migration[] = [
           period_end TEXT,
           row_count INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE playbook_opportunities (
+          id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          subtype TEXT,
+          page TEXT NOT NULL,
+          secondary_page TEXT,
+          headline TEXT NOT NULL,
+          steps TEXT NOT NULL DEFAULT '[]',
+          evidence TEXT NOT NULL DEFAULT '{}',
+          low REAL NOT NULL DEFAULT 0,
+          high REAL NOT NULL DEFAULT 0,
+          point REAL NOT NULL DEFAULT 0,
+          effort TEXT NOT NULL DEFAULT 'M',
+          confidence TEXT NOT NULL DEFAULT 'medium',
+          counted INTEGER NOT NULL DEFAULT 1,
+          hidden INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'open',
+          changed INTEGER NOT NULL DEFAULT 0,
+          dismissed_high REAL,
+          first_seen TEXT NOT NULL,
+          last_seen TEXT NOT NULL,
+          computed_at TEXT NOT NULL,
+          work_item_id TEXT,
+          draft TEXT,
+          draft_at TEXT,
+          done_at TEXT,
+          baseline_clicks REAL,
+          baseline_site_clicks REAL
+        );
+        CREATE INDEX idx_playbook_site ON playbook_opportunities(site_id, status, point DESC);
+
+        CREATE TABLE playbook_runs (
+          site_id TEXT PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
+          computed_at TEXT NOT NULL,
+          summary TEXT NOT NULL DEFAULT '{}',
+          notified_at TEXT
+        );
       `);
     },
   },
