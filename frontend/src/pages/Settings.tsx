@@ -1451,8 +1451,9 @@ export default function SettingsPage() {
           </div>
           <div className="alert alert-info mb-3">
             <div className="alert-content" style={{ fontSize: 12 }}>
-              <strong>Google delivery:</strong> the scheduler re-submits changed sitemaps and rotates Search Console URL Inspection across current sitemap URLs.
-              Google's separate URL-level Indexing API is not used because Google restricts it to job-posting and livestream pages.
+              <strong>Google delivery:</strong> the scheduler re-submits each sitemap whose URLs or <code>lastmod</code> values changed through the Search Console Sitemaps API,
+              then runs URL Inspection with unknown and not-indexed pages first. Sites can opt in to the Indexing API (Sites → Config), which spends its daily quota
+              only on pages inspection shows are not indexed or changed after Google's last crawl. Google documents that API for job-posting and livestream pages only, so its effect on other pages is not guaranteed.
               IndexNow key setup lives on the <strong>Sites</strong> page (per-site verify), with full options in the
               {' '}<a href="https://github.com/martadams89/seo-website-indexer#indexnow--setting-up-the-key-file" target="_blank" rel="noopener noreferrer">README ↗</a>.
             </div>

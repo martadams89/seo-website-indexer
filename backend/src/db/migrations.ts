@@ -8,6 +8,102 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20260926_03_page_signals',
+    description: 'Per-page search performance, page inventory for internal links, snippet changes and page-level Core Web Vitals',
+    up(db) {
+      db.exec(`
+        CREATE TABLE perf_page_daily (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          day TEXT NOT NULL,
+          page TEXT NOT NULL,
+          clicks INTEGER NOT NULL DEFAULT 0,
+          impressions INTEGER NOT NULL DEFAULT 0,
+          position REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY (site_id, day, page)
+        );
+        CREATE INDEX idx_perf_page_lookup ON perf_page_daily(site_id, page, day);
+
+        CREATE TABLE page_inventory (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          url TEXT NOT NULL,
+          status INTEGER NOT NULL,
+          title TEXT,
+          meta_description TEXT,
+          h1 TEXT,
+          robots TEXT,
+          words INTEGER NOT NULL DEFAULT 0,
+          links TEXT NOT NULL DEFAULT '[]',
+          fetched_at TEXT NOT NULL,
+          PRIMARY KEY (site_id, url)
+        );
+
+        CREATE TABLE page_snippet_changes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          url TEXT NOT NULL,
+          changed_at TEXT NOT NULL,
+          old_title TEXT,
+          new_title TEXT,
+          old_description TEXT,
+          new_description TEXT
+        );
+        CREATE INDEX idx_snippet_changes_site ON page_snippet_changes(site_id, changed_at DESC);
+
+        CREATE TABLE page_vitals (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          url TEXT NOT NULL,
+          day TEXT NOT NULL,
+          has_data INTEGER NOT NULL DEFAULT 0,
+          lcp_ms INTEGER,
+          inp_ms INTEGER,
+          cls REAL,
+          PRIMARY KEY (site_id, url, day)
+        );
+      `);
+    },
+  },
+  {
+    id: '20260926_02_google_feedback',
+    description: 'Canonical selection, content fingerprints and Search Console sitemap processing feedback',
+    up(db) {
+      db.exec(`
+        ALTER TABLE url_state ADD COLUMN gsc_google_canonical TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_user_canonical TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_robots_state TEXT;
+        ALTER TABLE url_state ADD COLUMN content_hash TEXT;
+        ALTER TABLE url_state ADD COLUMN content_changed_at TEXT;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_errors INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_warnings INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_last_downloaded TEXT;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_is_pending INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_checked_at TEXT;
+      `);
+    },
+  },
+  {
+    id: '20260926_01_google_recrawl_signals',
+    description: 'Per-sitemap resubmission signatures, URL Inspection crawl detail and opt-in Indexing API tracking',
+    up(db) {
+      db.exec(`
+        CREATE TABLE sitemap_state (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          sitemap_url TEXT NOT NULL,
+          signature TEXT NOT NULL,
+          url_count INTEGER NOT NULL DEFAULT 0,
+          last_submitted TEXT,
+          PRIMARY KEY (site_id, sitemap_url)
+        );
+        ALTER TABLE sites ADD COLUMN google_indexing_api INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE url_state ADD COLUMN gsc_verdict TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_coverage_state TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_page_fetch_state TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_last_crawl_time TEXT;
+        ALTER TABLE url_state ADD COLUMN google_indexing_notified_at TEXT;
+        ALTER TABLE url_state ADD COLUMN google_indexing_lastmod TEXT;
+      `);
+    },
+  },
+  {
     id: '20260909_02_search_sync',
     description: 'Opportunity sync status and source identity',
     up(db) {

@@ -46,6 +46,8 @@ import { encrypt, decrypt } from '../utils/crypto.js';
 
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/webmasters',
+  // Opt-in per site: Indexing API recrawl notifications for inspected pages.
+  'https://www.googleapis.com/auth/indexing',
   'https://www.googleapis.com/auth/analytics.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
@@ -305,7 +307,7 @@ function projectFromClientId(clientId: string): string | null {
   return m ? m[1] : null;
 }
 
-const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'analyticsdata.googleapis.com'];
+const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'indexing.googleapis.com', 'analyticsdata.googleapis.com'];
 
 /**
  * Enable the APIs the tool depends on, on the project owning the OAuth client.

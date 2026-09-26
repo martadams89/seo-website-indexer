@@ -19,8 +19,8 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 
 | Area | What you can do |
 | --- | --- |
-| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Inspect and clear failed submissions from the dashboard. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
+| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
 | Discovery workbench | Inspect page evidence and audit changes, discover and verify backlinks online, search Apple and Google Play for listing drafts and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |
@@ -137,7 +137,13 @@ Each scheduled run reads a site's configured sitemap and any additional `Sitemap
 | HTML pages | Yes | Yes | Yes |
 | `llms.txt`, `llms-full.txt` and other non-HTML files | No | No | Yes |
 
-Google's URL-level Indexing API is not used for ordinary pages because Google limits it to specific content types. This project uses sitemaps for normal pages and the URL Inspection API to record coverage information.
+For Google, each run:
+
+1. **Re-submits changed sitemaps.** Every sitemap (the configured one and any `robots.txt` declarations that list HTML pages) is fingerprinted by its URLs and `lastmod` values. When a fingerprint changes, that sitemap is re-submitted through the Search Console Sitemaps API (`sitemaps.submit`). Google has retired its anonymous sitemap ping endpoint, so this is the supported "look again" signal.
+2. **Inspects the pages that matter first.** URL Inspection checks never-inspected pages first, then pages that were not indexed or changed after Google's last crawl, then the oldest checks. It records each page's verdict, coverage state and last crawl time.
+3. **Optionally spends Indexing API quota on the pages that need it.** When a site opts in (**Sites → Config**), the Indexing API's daily quota (200 per Google Cloud project by default) goes only to pages URL Inspection reports as not indexed, or whose `lastmod` is newer than Google's last crawl. It does not rotate through every URL. Pages excluded for structural reasons, such as `noindex`, a canonical elsewhere or a 404, are skipped. A page is not notified again for the same `lastmod` within 14 days. Google documents the Indexing API for job-posting and livestream pages only, so its effect on other pages is not guaranteed. The option is off by default.
+
+IndexNow covers Bing, Yandex, Seznam, Naver and the other participating engines, including non-HTML files such as `llms.txt`.
 
 If a submission keeps failing, open the **Submission failures** panel on the Command Centre. You can check whether the URL is currently reachable without spending submission quota, clear one repaired record or clear all backoff records, then let the next run retry them.
 

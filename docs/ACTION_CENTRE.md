@@ -30,7 +30,7 @@ For an ordinary web page, Google does not provide a general Search Console API t
 
 It does not automatically resolve the action or promise that Google will crawl the page on a particular schedule. A passing verdict means Google currently reports the inspected page as indexed; other results remain visible for diagnosis.
 
-Google's separate Indexing API is not used for ordinary pages because it only supports pages containing `JobPosting` or a livestream `BroadcastEvent` in a `VideoObject`. See the official [Indexing API rules](https://developers.google.com/search/apis/indexing-api/v3/quickstart), [URL Inspection reference](https://developers.google.com/webmaster-tools/v1/urlInspection.index/UrlInspectionResult) and [sitemap submission reference](https://developers.google.com/webmaster-tools/v1/sitemaps/submit).
+The Action Centre button does not call Google's separate Indexing API, which Google documents only for pages containing `JobPosting` or a livestream `BroadcastEvent` in a `VideoObject`. Sites can opt in to targeted Indexing API requests during scheduled runs instead; see [the indexing guide](INDEXING.md#optional-indexing-api-recrawl-requests). See the official [Indexing API rules](https://developers.google.com/search/apis/indexing-api/v3/quickstart), [URL Inspection reference](https://developers.google.com/webmaster-tools/v1/urlInspection.index/UrlInspectionResult) and [sitemap submission reference](https://developers.google.com/webmaster-tools/v1/sitemaps/submit).
 
 ## Google access required
 

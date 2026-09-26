@@ -467,6 +467,7 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
   const [gscUrl, setGscUrl] = useState(site.gsc_url);
   const [googleAccountId, setGoogleAccountId] = useState(site.google_account_id || '');
   const [bingAccountId, setBingAccountId] = useState(site.bing_account_id || '');
+  const [indexingApi, setIndexingApi] = useState(site.google_indexing_api === 1);
   const [bingAccounts, setBingAccounts] = useState<BingAccount[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -484,6 +485,7 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
         gsc_url: gscUrl,
         googleAccountId: googleAccountId || null,
         bing_account_id: bingAccountId || null,
+        google_indexing_api: indexingApi ? 1 : 0,
       });
       // Round-trip check: the backend echoes the persisted row.
       const persisted = result.site?.google_account_id ?? null;
@@ -529,6 +531,18 @@ function ConfigTab({ site, accounts, onSaved }: { site: Site; accounts: GoogleAc
             <option key={acc.id} value={acc.id}>{acc.email || `Account (${acc.id.slice(0, 8)})`}</option>
           ))}
         </select>
+      </div>
+      <div className="input-group">
+        <label className="flex items-center gap-2" style={{ fontSize: 13 }}>
+          <input type="checkbox" checked={indexingApi} disabled={!googleAccountId} onChange={e => setIndexingApi(e.target.checked)} />
+          <span>Use the Google Indexing API for pages that need a recrawl</span>
+        </label>
+        <span className="input-hint">
+          After URL Inspection, each run sends the daily Indexing API quota (200 per Google Cloud project by default) only to pages that
+          are not indexed or changed after Google's last crawl. Google documents this API for job-posting and livestream pages only,
+          so the effect on other pages is not guaranteed. The Google account must own the Search Console property; accounts connected
+          before this option existed must be reconnected to grant the Indexing API permission.
+        </span>
       </div>
       <div className="input-group">
         <label className="input-label">Bing Account</label>

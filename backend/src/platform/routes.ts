@@ -216,7 +216,11 @@ export function registerPlatformRoutes(app: FastifyInstance): void {
       unit: 'request', estimated_cost: 0, metadata: { work_item_id: id, site_id: site.id, page_url: pageUrl, success: inspection.success, status_code: inspection.statusCode } });
     if (inspection.success) {
       incrementQuota('gsc_inspection', quotaBucket);
-      upsertUrlState({ url: pageUrl, site_id: site.id, gsc_indexing_state: inspection.indexingState, gsc_last_inspected: now });
+      upsertUrlState({
+        url: pageUrl, site_id: site.id, gsc_indexing_state: inspection.indexingState, gsc_verdict: inspection.verdict,
+        gsc_coverage_state: inspection.coverageState ?? null, gsc_page_fetch_state: inspection.pageFetchState ?? null,
+        gsc_last_crawl_time: inspection.lastCrawlTime ?? null, gsc_last_inspected: now,
+      });
     }
     const verified = inspection.success && inspection.verdict === 'PASS';
     const google = { checked_at: now, page_url: pageUrl, sitemap, inspection, verified };

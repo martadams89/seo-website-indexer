@@ -54,6 +54,7 @@ export interface Site {
   deploy_webhook_url?: string | null;
   ftp_host?: string | null;
   geo_manage?: number | null;
+  google_indexing_api?: number | null;
   ftp_port?: number | null;
   ftp_user?: string | null;
   ftp_pass?: string | null;
@@ -101,6 +102,7 @@ export interface QuotaSummary {
   day: string;
   gsc_inspection:  { used: number; perPropertyLimit: number; properties: Array<{ bucket: string; count: number }> };
   indexnow:        { used: number; perSiteLimit: number; sites: Array<{ bucket: string; count: number }> };
+  google_indexing?: { used: number; perProjectLimit: number; enabledSites: number; projects: Array<{ bucket: string; count: number }> };
 }
 
 export interface UrlFailureRecord {
@@ -301,7 +303,7 @@ export const api = {
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
-  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; gscLimit?: number }) =>
+  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; skipIndexingApi?: boolean; gscLimit?: number }) =>
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),
@@ -463,6 +465,13 @@ export const api = {
   // ── Hygiene / CrUX ──
   runHygiene: (siteId: string) => apiFetch<HygieneReport>(`/api/sites/${siteId}/hygiene`),
   refreshCrux: (siteId: string) => apiFetch<CruxResult | { error: string }>(`/api/crux/${siteId}/refresh`, { method: 'POST' }),
+
+  // ── Page priorities ──
+  getInternalLinks: (siteId: string) => apiFetch<InternalLinkReport>(`/api/sites/${siteId}/internal-links`),
+  getSnippetChanges: (siteId: string) => apiFetch<SnippetChange[]>(`/api/sites/${siteId}/snippet-changes`),
+  getPageVitals: (siteId: string) => apiFetch<PageVitalsReport>(`/api/sites/${siteId}/page-vitals`),
+  refreshPageVitals: (siteId: string) =>
+    apiFetch<PageVitalsReport & { checked: number; failing: number }>(`/api/sites/${siteId}/page-vitals/refresh`, { method: 'POST' }),
 
   // ── AI citations ──
   getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
@@ -727,6 +736,28 @@ export interface HygieneReport {
   issues: Array<{ url: string; kind: string; detail: string }>;
 }
 export interface CruxResult { lcp_ms: number | null; inp_ms: number | null; cls: number | null }
+
+export interface LinkSuggestion { source: string; sourceTitle: string | null; sharedTerms: string[]; sourceClicks: number }
+export interface LinkTarget {
+  url: string; title: string | null; inbound: number; kind: 'orphan' | 'weak'; pageTwo: boolean;
+  clicks: number; impressions: number; position: number | null; anchorHint: string | null; suggestions: LinkSuggestion[];
+}
+export interface InternalLinkReport {
+  sitemapPages: number; inventoried: number; coverage: number; orphansConfirmed: boolean;
+  targets: LinkTarget[]; weakOrOrphanUrls: string[];
+}
+export interface PageTotals { clicks: number; impressions: number; ctr: number; position: number; days: number }
+export interface SnippetChange {
+  id: number; url: string; changed_at: string;
+  old_title: string | null; new_title: string | null; old_description: string | null; new_description: string | null;
+  before: PageTotals; after: PageTotals; ctrChangePct: number | null; positionChange: number | null;
+  verdict: 'improved' | 'worse' | 'no_change' | 'collecting' | 'insufficient_data'; readyOn: string;
+}
+export interface PageVitalsRow {
+  url: string; day: string; has_data: number; lcp_ms: number | null; inp_ms: number | null; cls: number | null;
+  rating: 'good' | 'needs_improvement' | 'poor' | null; clicks: number; impressions: number; position: number | null;
+}
+export interface PageVitalsReport { configured: boolean; pages: PageVitalsRow[] }
 
 export type AgentCheckStatus = 'pass' | 'fail' | 'neutral';
 export interface AgentCheck {

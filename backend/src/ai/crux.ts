@@ -14,20 +14,21 @@ export interface CruxResult {
   cls: number | null;
 }
 
-export async function fetchCrux(site: Site): Promise<CruxResult | null> {
-  const key = effectiveSetting(site.workspace_id ?? null, 'crux_api_key');
-  if (!key) return null;
-  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
-  const res = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${key}`, {
+/**
+ * One CrUX record query (`origin` or `url`), p75 per metric. Returns null when
+ * the origin/page is not in the dataset (too little real-user traffic).
+ */
+export async function queryCruxRecord(key: string, target: { origin: string } | { url: string; formFactor?: 'PHONE' | 'DESKTOP' }): Promise<CruxResult | null> {
+  const res = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      origin: origin.replace(/\/$/, ''),
+      ...target,
       metrics: ['largest_contentful_paint', 'interaction_to_next_paint', 'cumulative_layout_shift'],
     }),
     signal: AbortSignal.timeout(20_000),
   });
-  if (res.status === 404) return null; // origin not in the CrUX dataset (low traffic)
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`CrUX HTTP ${res.status}`);
   const data = await res.json() as { record?: { metrics?: Record<string, { percentiles?: { p75?: number | string } }> } };
   const m = data.record?.metrics ?? {};
@@ -35,11 +36,19 @@ export async function fetchCrux(site: Site): Promise<CruxResult | null> {
     const v = m[k]?.percentiles?.p75;
     return v === undefined ? null : Number(v);
   };
-  const result: CruxResult = {
+  return {
     lcp_ms: p75('largest_contentful_paint'),
     inp_ms: p75('interaction_to_next_paint'),
     cls: p75('cumulative_layout_shift'),
   };
+}
+
+export async function fetchCrux(site: Site): Promise<CruxResult | null> {
+  const key = effectiveSetting(site.workspace_id ?? null, 'crux_api_key');
+  if (!key) return null;
+  const origin = site.domain.startsWith('http') ? site.domain : `https://${site.domain}`;
+  const result = await queryCruxRecord(key, { origin: origin.replace(/\/$/, '') });
+  if (!result) return null; // origin not in the CrUX dataset (low traffic)
   getDb().prepare(`
     INSERT INTO crux_snapshots(site_id, day, lcp_ms, inp_ms, cls)
     VALUES(?, date('now'), ?, ?, ?)

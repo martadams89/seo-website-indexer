@@ -145,6 +145,37 @@ export async function getGoogleDailyQueries(site: Site, days: number): Promise<D
   }
 }
 
+export interface DailyPageRow { date: string; page: string; clicks: number; impressions: number; position: number }
+
+// Per-day, per-page GSC rows for an explicit date range, paginated (the API
+// returns at most 25,000 rows per request). Drives page-level CTR tracking,
+// internal-link priorities and Core Web Vitals prioritisation.
+export async function getGoogleDailyPages(site: Site, startDate: string, endDate: string, maxRows = 100_000): Promise<DailyPageRow[]> {
+  if (!site.google_account_id) return [];
+  let token: string;
+  try {
+    token = await getAccessTokenForAccount(site.google_account_id);
+  } catch {
+    return [];
+  }
+  const out: DailyPageRow[] = [];
+  const pageSize = 25_000;
+  for (let startRow = 0; startRow < maxRows; startRow += pageSize) {
+    let rows: Awaited<ReturnType<typeof gscQuery>>;
+    try {
+      rows = await gscQuery(token, site.gsc_url, { startDate, endDate, dimensions: ['date', 'page'], rowLimit: pageSize, startRow });
+    } catch {
+      break;
+    }
+    for (const r of rows) {
+      const date = r.keys?.[0] ?? ''; const page = r.keys?.[1] ?? '';
+      if (date && page) out.push({ date, page, clicks: r.clicks, impressions: r.impressions, position: r.position });
+    }
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
 // ── Bing Webmaster — rank/traffic + query/page stats ─────────────────────────
 
 async function bingCall<T>(method: string, credential: BingCredential, siteUrl: string): Promise<T> {
