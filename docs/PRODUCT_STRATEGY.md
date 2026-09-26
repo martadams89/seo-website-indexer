@@ -44,6 +44,10 @@ they are safe and useful in a single-container architecture:
   hashed scoped service tokens and stable metric/event/log ingestion APIs.
 - Workspace MFA and retention policies, an append-only usage ledger,
   per-user/per-workspace provider budgets and billback exports.
+- A ranking playbook (v1.40) that ranks snippet, striking-distance,
+  cannibalisation and decay opportunities by an estimated monthly click
+  range, drafts fixes for review under budget, and measures realised
+  clicks 31 days after an item is done.
 
 The remaining items are scale or commercialisation gates, not missing daily
 workflow: SCIM, PostgreSQL/job-queue multi-replica operation, high availability,

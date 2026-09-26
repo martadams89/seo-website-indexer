@@ -66,6 +66,7 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `AUTH_RATE_LIMIT_MAX` | `10` | Authentication requests allowed per IP during `AUTH_RATE_LIMIT_WINDOW`. |
 | `AUTH_RATE_LIMIT_WINDOW` | `1 minute` | Authentication rate-limit window. |
 | `AI_CITATION_DAILY_LIMIT` | `25` | Citation checks allowed each day for non-owner members. |
+| `AI_DRAFT_DAILY_LIMIT` | `25` | Ranking-playbook AI drafts allowed each day for non-owner members. |
 | `GSC_INSPECTION_DAILY_LIMIT` | `2000` | Daily Google URL Inspection allowance per Search Console property. |
 | `GOOGLE_INDEXING_DAILY_LIMIT` | `200` | Daily Google Indexing API notifications per Cloud project, shared by sites that opt in. Set `0` to disable. Raise it only if Google has granted a higher quota. |
 

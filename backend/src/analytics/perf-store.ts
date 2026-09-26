@@ -10,6 +10,7 @@ import { getDb, getAllSites, getEnabledSitesForWorkspace, type Site } from '../d
 import { getGooglePerformance, getBingPerformance, getGoogleDailyQueries } from '../indexer/performance.js';
 import { recordAlert } from './stats.js';
 import { syncPagePerformance } from './page-performance.js';
+import { syncQueryPagePerformance } from './query-page-performance.js';
 import { logSystem } from '../utils/logger.js';
 
 const TRAILING_DAYS = 5; // re-fetch this many recent days each snapshot (GSC lag)
@@ -54,6 +55,8 @@ export async function snapshotSitePerformance(site: Site): Promise<void> {
   if (dailyQ.length) upsertQueryDaily(site.id, dailyQ);
   // Page-level rows are best-effort: a failure must not block the site rollups.
   await syncPagePerformance(site).catch(() => 0);
+  // Query×page window for the Ranking Playbook (daily gate inside; never throws).
+  await syncQueryPagePerformance(site);
   checkQueryAlerts(site);
 }
 

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
   ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut,
   BarChart3, Search, Command, ArrowRight,
-  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness,
+  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness, Rocket,
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
@@ -31,6 +31,7 @@ const ADVANCED_NAV: NavItem[] = [
   { to: '/logs', icon: ScrollText, label: 'Full activity log', detail: 'Detailed system diagnostics' },
   { to: '/publishing', icon: Send, label: 'Publishing', detail: 'Reviewed CMS changes', minimum: 'growth' },
   { to: '/insights/entities', icon: MapPin, label: 'Markets & entities', detail: 'Identity evidence', minimum: 'growth' },
+  { to: '/insights/playbook', icon: Rocket, label: 'Ranking playbook', detail: 'Opportunities ranked by clicks gained', minimum: 'growth' },
   { to: '/executive-view', icon: Eye, label: 'Executive view', detail: 'Read-only workspace summary', minimum: 'agency' },
   { to: '/governance', icon: ShieldCheck, label: 'Governance & usage', detail: 'Budgets, policies and automation', minimum: 'agency' },
 ];

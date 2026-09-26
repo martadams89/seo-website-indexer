@@ -28,6 +28,7 @@ const EntitiesPage = lazy(() => import('./pages/Entities'))
 const ClientPortalPage = lazy(() => import('./pages/ClientPortal'))
 const InsightsLayout = lazy(() => import('./pages/InsightsLayout'))
 const SiteWorkspacePage = lazy(() => import('./pages/SiteWorkspace'))
+const PlaybookPage = lazy(() => import('./pages/Playbook'))
 
 const loading = <div className="page-loading">Opening workspace…</div>
 
@@ -81,6 +82,7 @@ function InnerRoutes() {
               <Route path="ai" element={<CitationsPage />} />
               <Route path="evidence" element={<IntelligencePage />} />
               <Route path="entities" element={<EntitiesPage />} />
+              <Route path="playbook" element={<PlaybookPage />} />
             </Route>
             <Route path="/analytics" element={<Navigate to="/insights/search" replace />} />
             <Route path="/analytics/:siteId" element={<LegacySiteInsightRedirect />} />

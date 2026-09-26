@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, Bot, CheckCircle2,
   CircleAlert, Cloud, Globe2, MousePointerClick, Play, PlugZap, RefreshCw,
-  Search, ShieldCheck, Sparkles, Trash2, Unlock, XCircle, Zap,
+  Rocket, Search, ShieldCheck, Sparkles, Trash2, Unlock, XCircle, Zap,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Link, useLocation } from 'react-router-dom';
-import { api, type CommandCenter, type PlatformOverview, type UrlFailureCheck, type UrlFailureRecord, type WorkItem } from '../api';
+import { api, type CommandCenter, type PlatformOverview, type PlaybookSummarySite, type UrlFailureCheck, type UrlFailureRecord, type WorkItem } from '../api';
 import { useApp, useToast } from '../AppContext';
 import { useAuth } from '../auth/AuthGate';
 import { QuotaWidget } from '../components/QuotaWidget';
@@ -72,6 +72,7 @@ export default function Dashboard() {
   const [failures, setFailures] = useState<UrlFailureRecord[]>([]);
   const [failureChecks, setFailureChecks] = useState<Record<string, UrlFailureCheck>>({});
   const [failureBusy, setFailureBusy] = useState<string | null>(null);
+  const [playbookSites, setPlaybookSites] = useState<PlaybookSummarySite[]>([]);
 
   const loadCenter = useCallback(async () => {
     const [nextCenter, nextFailures, nextPlatform, nextWork, prompts, reports] = await Promise.all([api.getCommandCenter(), api.getUrlFailures(), api.getPlatformOverview(), api.getWorkItems({ limit: 20 }), api.getAiPrompts(), api.getReportTemplates()]);
@@ -80,6 +81,12 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => { loadCenter().catch(() => null); }, [loadCenter, active?.id]);
+  // The playbook summary loads separately so a missing playbook never blocks the command centre.
+  useEffect(() => {
+    let cancelled = false;
+    api.getPlaybookSummary().then(result => { if (!cancelled) setPlaybookSites(result.sites); }).catch(() => null);
+    return () => { cancelled = true; };
+  }, [active?.id]);
   useEffect(() => {
     if (new URLSearchParams(location.search).get('focus') === 'failures') {
       setTimeout(() => document.getElementById('submission-failures')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -140,6 +147,12 @@ export default function Dashboard() {
   const priorityAction = center?.actions[0];
   const activeWork = workItems.filter(item => !['done', 'dismissed'].includes(item.status));
   const freshSources = platform?.freshness.filter(row => renderedAt - new Date(row.observed_at).getTime() < 2 * 86_400_000).length ?? 0;
+  const playbookTop = playbookSites
+    .filter(site => site.computedAt && site.summary)
+    .flatMap(site => site.top.map(item => ({ ...item, siteId: site.id, siteName: site.name })))
+    .sort((a, b) => b.high - a.high || b.low - a.low)
+    .slice(0, 3);
+  const playbookUpside = playbookSites.reduce((sum, site) => ({ low: sum.low + (site.summary?.low ?? 0), high: sum.high + (site.summary?.high ?? 0) }), { low: 0, high: 0 });
   const activationSteps = [
     { done: !!status?.auth.authenticated, label: 'Connect a Google account', to: '/settings?tab=accounts' },
     { done: sites.length > 0, label: 'Add your first site', to: '/sites' },
@@ -217,6 +230,23 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      {playbookSites.some(site => site.computedAt && site.summary) && (
+        <section className="command-panel playbook-panel" aria-label="Ranking playbook">
+          <div className="command-panel-head"><div><span className="eyebrow">Opportunities</span><h2>Ranking playbook</h2><p>Estimated +{Math.round(playbookUpside.low).toLocaleString()}–{Math.round(playbookUpside.high).toLocaleString()} clicks/month across {playbookSites.filter(site => site.summary).length} site{playbookSites.filter(site => site.summary).length === 1 ? '' : 's'}.</p></div><Link to="/insights/playbook">Open playbook <ArrowRight size={13} /></Link></div>
+          {playbookTop.length ? (
+            <div className="playbook-dashboard-list">
+              {playbookTop.map((item, index) => (
+                <Link key={item.id} to={`/insights/playbook?site=${encodeURIComponent(item.siteId)}&opportunity=${encodeURIComponent(item.id)}`} className="playbook-dashboard-row">
+                  <i>{String(index + 1).padStart(2, '0')}</i>
+                  <span><strong>{item.headline}</strong><small>{item.siteName} · {item.page.replace(/^https?:\/\/[^/]+/, '') || '/'}</small></span>
+                  <b>+{Math.round(item.low).toLocaleString()}–{Math.round(item.high).toLocaleString()}/mo</b>
+                </Link>
+              ))}
+            </div>
+          ) : <div className="command-empty compact"><Rocket size={22} /><strong>No priced opportunities yet</strong><span>Blockers may need fixing first — open the playbook to see them.</span></div>}
+        </section>
+      )}
 
       <section className="command-grid command-secondary-grid">
         <div className="command-panel">

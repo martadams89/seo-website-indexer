@@ -92,6 +92,10 @@ This needs page-level Search Console data. The app now syncs daily clicks, impre
 
 With a Chrome UX Report API key configured, the app checks real-user mobile Core Web Vitals (LCP, INP, CLS at p75) weekly for the 25 pages with the most Google clicks. Each failing page becomes an Action Centre item (`page vitals`): high severity if any metric is poor, otherwise medium. The item states the clicks at stake and links to PageSpeed Insights. Pages with too little traffic for CrUX are shown as having no field data.
 
+### Ranking playbook
+
+The same page-level data feeds the [ranking playbook](RANKING_PLAYBOOK.md) under **Insights → Playbook**: a ranked list of snippet rewrites, striking-distance pages, cannibalising pairs and decaying content, each with an estimated monthly click range, steps and an AI-drafted fix for review.
+
 ### Optional: Indexing API recrawl requests
 
 Under **Sites → Config**, a site can opt in to **Use the Google Indexing API for pages that need a recrawl**. After URL Inspection, the run sends `URL_UPDATED` notifications only for pages that meet one of these conditions:

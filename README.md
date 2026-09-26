@@ -20,7 +20,8 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Area | What you can do |
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
+| Ranking playbook | A ranked list of what to change to earn more Google clicks: snippet rewrites, striking-distance pages, cannibalising pairs and decaying content, each with evidence, steps, an estimated monthly click range and an AI-drafted fix for review. Done items are measured after 31 days. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
 | Discovery workbench | Inspect page evidence and audit changes, discover and verify backlinks online, search Apple and Google Play for listing drafts and content briefs, measure changes and use ten local technical tools. See portfolio evidence coverage without a paid SEO subscription. |
@@ -67,7 +68,7 @@ After signing in:
 
 The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
 
-The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair flow, copyable issue briefs and the supported Search Console sitemap plus URL Inspection check.
+The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair flow, copyable issue briefs and the supported Search Console sitemap plus URL Inspection check. The [ranking playbook guide](docs/RANKING_PLAYBOOK.md) explains how opportunities are found, estimated and measured.
 
 For brand and local knowledge, **Markets & Entities** can read public JSON-LD and page metadata from a configured site, turn the result into editable fields and keep the approved record as a workspace source of truth. See the [markets and entities guide](docs/MARKETS_AND_ENTITIES.md) for setup, examples and score semantics.
 
@@ -166,6 +167,7 @@ Most settings live in the dashboard. These environment variables control the con
 | `RATE_LIMIT_MAX` | `300` | General requests allowed per `RATE_LIMIT_WINDOW`. |
 | `AUTH_RATE_LIMIT_MAX` | `10` | Sign-in requests allowed per `AUTH_RATE_LIMIT_WINDOW`. |
 | `AI_CITATION_DAILY_LIMIT` | `25` | Daily citation checks for non-owner members. Owners and super-admins are exempt. |
+| `AI_DRAFT_DAILY_LIMIT` | `25` | Daily ranking-playbook AI drafts for non-owner members. Owners and super-admins are exempt. |
 | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Optional deployment-level Google connection credentials. They can also be entered during setup. |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*` | unset | Optional Google or generic OpenID Connect sign-in. |
 | `SMTP_*` | unset | Optional email delivery and password-reset links. |
@@ -246,6 +248,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Integration permissions and setup](docs/INTEGRATIONS.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
 - [Page-level Action Centre and Google verification](docs/ACTION_CENTRE.md)
+- [Ranking playbook: opportunities ranked by clicks gained](docs/RANKING_PLAYBOOK.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)
 - [Automation API and signed webhooks](docs/AUTOMATION_API.md)
 - [Product roadmap](docs/PRODUCT_STRATEGY.md)
