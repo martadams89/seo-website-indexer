@@ -1299,6 +1299,11 @@ kbd {
 .playbook-toggle input { width: 15px; height: 15px; margin: 0; }
 
 .playbook-table-panel { margin-bottom: 18px; }
+.playbook-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: var(--radius-md); background: var(--accent-dim); font-size: 12px; }
+.playbook-bulk strong { margin-right: 4px; color: var(--text-primary); }
+.playbook-check { width: 28px; text-align: center; }
+.playbook-check input { cursor: pointer; }
+.playbook-row-checked td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .playbook-table th { white-space: nowrap; }
 .playbook-table td { vertical-align: top; }
 .playbook-row-dismissed td { opacity: .7; }

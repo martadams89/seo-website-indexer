@@ -208,6 +208,8 @@ function SitePlaybook({ siteId }: { siteId: string }) {
   const [showHidden, setShowHidden] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Table selection for bulk actions; ids that leave the visible list are dropped.
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError('');
@@ -236,6 +238,26 @@ function SitePlaybook({ siteId }: { siteId: string }) {
 
   function patchOpportunity(next: PlaybookOpportunity) {
     setView(current => current ? { ...current, opportunities: current.opportunities.map(o => o.id === next.id ? next : o) } : current);
+  }
+
+  async function bulk(action: PlaybookStatus | 'send-to-work') {
+    const ids = [...checked];
+    if (ids.length === 0) return;
+    setBusy(`bulk:${action}`);
+    try {
+      const result = await api.bulkPlaybook(siteId, ids, action);
+      setView(current => {
+        if (!current) return current;
+        const byId = new Map(result.opportunities.map(o => [o.id, o]));
+        return { ...current, opportunities: current.opportunities.map(o => byId.get(o.id) ?? o) };
+      });
+      setChecked(new Set());
+      const label = action === 'send-to-work' ? 'sent to Work' : action === 'dismissed' ? 'dismissed' : action === 'done' ? 'marked done' : 'reopened';
+      toast(result.failed.length ? 'error' : 'success', `${result.opportunities.length} ${label}${result.failed.length ? `, ${result.failed.length} failed: ${result.failed[0].error}` : ''}`);
+    } catch (error) {
+      toast('error', errorMessage(error, 'Bulk action failed'));
+    }
+    setBusy(null);
   }
 
   async function refresh() {
@@ -324,6 +346,15 @@ function SitePlaybook({ siteId }: { siteId: string }) {
     })), [base, kindFilter, openByPage]);
   const { sorted, sort, requestSort } = useSort(rows);
   const selected = selectedId ? opportunities.find(o => o.id === selectedId) ?? null : null;
+  const visibleIds = useMemo(() => new Set(rows.map(r => r.id)), [rows]);
+  const checkedVisible = [...checked].filter(id => visibleIds.has(id));
+  const allChecked = rows.length > 0 && checkedVisible.length === rows.length;
+  function toggleAll() {
+    setChecked(allChecked ? new Set() : new Set(rows.map(r => r.id)));
+  }
+  function toggleOne(id: string) {
+    setChecked(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
 
   if (loading && !view) return <div className="page-loading">Loading ranking playbook…</div>;
   if (!view) return <div className="alert alert-error"><div className="alert-content">{loadError || 'This website has no playbook yet.'}</div></div>;
@@ -406,6 +437,16 @@ function SitePlaybook({ siteId }: { siteId: string }) {
           </div>
 
           <div className="panel playbook-table-panel">
+            {canManage && checkedVisible.length > 0 && (
+              <div className="playbook-bulk" role="group" aria-label="Bulk actions">
+                <strong>{checkedVisible.length} selected</strong>
+                <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => bulk('send-to-work')}><BriefcaseBusiness size={12} /> Send to Work</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!!busy} onClick={() => bulk('done')}>Mark done</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!!busy} onClick={() => bulk('dismissed')}>Dismiss</button>
+                {showHidden && <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => bulk('open')}>Reopen</button>}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setChecked(new Set())}>Clear</button>
+              </div>
+            )}
             {sorted.length === 0 ? (
               <div className="empty-note"><CheckCircle2 size={12} /> {base.length === 0 ? 'No open opportunities right now. New ones appear after each nightly run.' : 'Nothing matches this filter.'}</div>
             ) : (
@@ -413,6 +454,11 @@ function SitePlaybook({ siteId }: { siteId: string }) {
                 <table className="mini-table playbook-table">
                   <thead>
                     <tr>
+                      {canManage && (
+                        <th className="playbook-check">
+                          <input type="checkbox" aria-label="Select all visible opportunities" checked={allChecked} onChange={toggleAll} />
+                        </th>
+                      )}
                       <th>#</th>
                       <SortTh label="Kind" sortKey="kind" sort={sort} onSort={requestSort} />
                       <SortTh label="Page" sortKey="page" sort={sort} onSort={requestSort} />
@@ -425,7 +471,12 @@ function SitePlaybook({ siteId }: { siteId: string }) {
                   </thead>
                   <tbody>
                     {sorted.map(row => (
-                      <tr key={row.id} className={row.opp.status === 'dismissed' ? 'playbook-row-dismissed' : ''}>
+                      <tr key={row.id} className={`${row.opp.status === 'dismissed' ? 'playbook-row-dismissed' : ''}${checked.has(row.id) ? ' playbook-row-checked' : ''}`.trim()}>
+                        {canManage && (
+                          <td className="playbook-check">
+                            <input type="checkbox" aria-label={`Select ${row.page}`} checked={checked.has(row.id)} onChange={() => toggleOne(row.id)} />
+                          </td>
+                        )}
                         <td className="text-dim">{row.rank}</td>
                         <td>
                           <KindChip kind={row.opp.kind} />

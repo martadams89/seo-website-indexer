@@ -16,6 +16,7 @@ vi.mock('../api', async (original) => ({
     setPlaybookStatus: vi.fn(),
     draftPlaybookFix: vi.fn(),
     sendPlaybookToWork: vi.fn(),
+    bulkPlaybook: vi.fn(),
     getPlaybookSummary: vi.fn(async () => ({ sites: [] })),
   },
 }));
@@ -119,4 +120,16 @@ it('shows per-site cards when the scope is all sites', async () => {
   await screen.findByText('Rewrite /boots');
   fireEvent.click(screen.getByRole('button', { name: 'Open playbook' }));
   expect(setSiteScope).toHaveBeenCalledWith('s1');
+});
+
+it('selects all visible rows and applies a bulk action', async () => {
+  vi.mocked(api.bulkPlaybook).mockResolvedValue({ opportunities: [{ ...opportunity, status: 'dismissed' }], failed: [] });
+  renderPage();
+  await screen.findByText('Rewrite the title and description of /boots');
+  fireEvent.click(screen.getByLabelText('Select all visible opportunities'));
+  const bar = screen.getByRole('group', { name: 'Bulk actions' });
+  expect(bar.textContent).toContain('selected');
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+  await waitFor(() => expect(api.bulkPlaybook).toHaveBeenCalledWith('s1', expect.arrayContaining(['o1']), 'dismissed'));
+  await waitFor(() => expect(screen.queryByRole('group', { name: 'Bulk actions' })).toBeNull());
 });

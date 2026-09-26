@@ -10,7 +10,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { getSiteById, getSitesForWorkspace, getQuotaUsage, incrementQuota, type Site } from '../db/database.js';
 import type { User } from '../auth/users.js';
 import { canUseAiCitations, workspaceRole } from '../auth/workspaces.js';
-import { getPlaybook, getPlaybookRun, listOpportunities, getOpportunity, refreshPlaybook, setOpportunityStatus, sendToWork, saveDraft } from '../analytics/playbook.js';
+import { getPlaybook, getPlaybookRun, listOpportunities, getOpportunity, refreshPlaybook, setOpportunityStatus, sendToWork, saveDraft, type StoredOpportunity } from '../analytics/playbook.js';
 import { draftPlaybookFix } from '../ai/playbook-draft.js';
 import { generationProvider } from '../ai/complete.js';
 import { getQueryPageSync } from '../analytics/query-page-performance.js';
@@ -72,6 +72,29 @@ export function registerPlaybookRoutes(app: FastifyInstance): void {
     if (status !== 'open' && status !== 'dismissed' && status !== 'done') return reply.code(400).send({ error: 'Choose open, dismissed or done.' });
     const opportunity = setOpportunityStatus(site, (req.params as { oppId: string }).oppId, status);
     return opportunity ? { opportunity } : reply.code(404).send({ error: 'Opportunity not found' });
+  });
+
+  // Bulk actions from the table's selection: each item is handled on its own so one failure never blocks the rest.
+  app.post('/api/sites/:id/playbook/bulk', async (req, reply) => {
+    const site = siteFor(req);
+    const body = (req.body ?? {}) as { ids?: unknown; action?: string };
+    const ids = Array.isArray(body.ids) ? body.ids.filter((v): v is string => typeof v === 'string').slice(0, 200) : [];
+    const action = body.action;
+    if (!ids.length || !['open', 'dismissed', 'done', 'send-to-work'].includes(action ?? '')) {
+      return reply.code(400).send({ error: 'Choose at least one opportunity and an action: open, dismissed, done or send-to-work.' });
+    }
+    if (action === 'send-to-work' && !site.workspace_id) return reply.code(400).send({ error: 'This website is not in a workspace.' });
+    const opportunities: StoredOpportunity[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    for (const id of ids) {
+      try {
+        const o = action === 'send-to-work' ? sendToWork(site, id) : setOpportunityStatus(site, id, action as 'open' | 'dismissed' | 'done');
+        if (o) opportunities.push(o); else failed.push({ id, error: 'Opportunity not found' });
+      } catch (e) {
+        failed.push({ id, error: e instanceof Error ? e.message : 'Failed' });
+      }
+    }
+    return { opportunities, failed };
   });
 
   app.post('/api/sites/:id/playbook/:oppId/send-to-work', async (req, reply) => {

@@ -482,6 +482,8 @@ export const api = {
     apiFetch<{ opportunity: PlaybookOpportunity }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/${encodeURIComponent(oppId)}/draft`, { method: 'POST' }),
   sendPlaybookToWork: (siteId: string, oppId: string) =>
     apiFetch<{ opportunity: PlaybookOpportunity }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/${encodeURIComponent(oppId)}/send-to-work`, { method: 'POST' }),
+  bulkPlaybook: (siteId: string, ids: string[], action: PlaybookStatus | 'send-to-work') =>
+    apiFetch<{ opportunities: PlaybookOpportunity[]; failed: Array<{ id: string; error: string }> }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/bulk`, { method: 'POST', body: JSON.stringify({ ids, action }) }),
   getPlaybookSummary: () => apiFetch<{ sites: PlaybookSummarySite[] }>('/api/playbook/summary'),
 
   // ── AI citations ──
