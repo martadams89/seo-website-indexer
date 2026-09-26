@@ -96,8 +96,14 @@ describe('computePlaybook', () => {
     expect(done.status).toBe('done');
     expect(done.baseline_clicks).toBe(27); // the window has moved two days past the seeded rows
     expect(playbook.playbookResults(site, NOW + 3 * DAY)[0]).toMatchObject({ id: snippet.id, status: 'measuring' });
-    // Clicks double after the rewrite: realised gain lands inside the estimated range.
-    seedDaily(site.id, '/boots', { w28: 2, p28: 1, b28: 1 }, 150, 4.5);
+    // Clicks double after the change while the rest of the site holds: the realised gain is site-adjusted.
+    const future = db.getDb().prepare('INSERT OR REPLACE INTO perf_page_daily(site_id, day, page, clicks, impressions, position) VALUES(?,?,?,?,?,?)');
+    for (let d = 9; d <= 37; d++) {
+      const day = new Date(NOW + d * DAY).toISOString().slice(0, 10);
+      future.run(site.id, day, `${O}/boots`, 2, 150, 3.5);
+      future.run(site.id, day, `${O}/socks`, 3, 100, 8);
+      future.run(site.id, day, `${O}/repair`, 2, 90, 9);
+    }
     const measured = playbook.playbookResults(site, NOW + 40 * DAY);
     expect(measured[0].status).toBe('measured');
     expect(measured[0].realised).toBeGreaterThan(0);
@@ -111,7 +117,7 @@ describe('computePlaybook', () => {
     expect(closed?.evidence.auto_resolved_at).toBeTruthy();
 
     const view = playbook.getPlaybook(site.id, NOW + 41 * DAY)!;
-    expect(view.data.searchConsoleDays).toBe(84);
+    expect(view.data.searchConsoleDays).toBe(84 + 29);
     expect(view.summary?.brandTerms).toContain('playbook');
     expect(view.opportunities.every(o => o.status !== 'resolved')).toBe(true);
   });
