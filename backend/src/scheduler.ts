@@ -49,12 +49,20 @@ import {
   getSitemapState,
   recordSitemapSubmitted,
   getGoogleAccountById,
+  recordSitemapFeedback,
   type Site,
   type LogEntry,
 } from './db/database.js';
 import { emitLog, subscribeToLogs } from './utils/logger.js';
 import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry } from './indexer/sitemap.js';
-import { submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
+import { submitSitemapToGSC, inspectGoogleUrl, listGSCSitemaps } from './indexer/google.js';
+import {
+  inspectionFinding,
+  INSPECTION_FINDING_CODES,
+  contentFingerprint,
+  lastmodQuality,
+} from './indexer/google-feedback.js';
+import { createWorkItem, resolveWorkItemsBySourceRef, countOpenWorkItems } from './platform/store.js';
 import {
   sitemapGroups,
   prioritiseInspections,
@@ -213,6 +221,50 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
   return runId;
 }
 
+// ── Action Centre findings ───────────────────────────────────────────────────
+
+const LASTMOD_ISSUE_CODES = ['future_lastmod', 'uniform_lastmod', 'lastmod_without_change'] as const;
+// Cap open per-page inspection items per site so a large backlog fills the
+// Action Centre as earlier items are fixed rather than all at once.
+const MAX_OPEN_INSPECTION_ITEMS_PER_SITE = 50;
+
+interface SiteFinding {
+  code: string;
+  title: string;
+  description: string;
+  severity: string;
+  evidence: Record<string, unknown>;
+  deepLink?: string;
+}
+
+const GSC_UI = 'https://search.google.com/search-console';
+const gscInspectLink = (site: Site, url: string) =>
+  `${GSC_UI}/inspect?resource_id=${encodeURIComponent(site.gsc_url)}&id=${encodeURIComponent(url)}`;
+const gscSitemapsLink = (site: Site) => `${GSC_UI}/sitemaps?resource_id=${encodeURIComponent(site.gsc_url)}`;
+
+/**
+ * Raise an Action Centre item per current finding and close open items for
+ * codes that no longer apply. `url` scopes findings to one page. Never throws —
+ * work-item bookkeeping must not fail an indexing run.
+ */
+function syncSiteFindings(site: Site, source: string, codes: readonly string[], findings: SiteFinding[], url?: string): void {
+  if (!site.workspace_id) return;
+  const ref = (code: string) => (url ? `${site.id}:${code}:${url}` : `${site.id}:${code}`);
+  try {
+    for (const f of findings) {
+      createWorkItem({
+        workspaceId: site.workspace_id, siteId: site.id, source, sourceRef: ref(f.code),
+        title: f.title, description: f.description, severity: f.severity, evidence: f.evidence,
+        deepLink: f.deepLink ?? '/sites',
+      });
+    }
+    const current = new Set(findings.map(f => f.code));
+    resolveWorkItemsBySourceRef(site.workspace_id, source, codes.filter(c => !current.has(c)).map(ref));
+  } catch (e) {
+    console.error(`[scheduler] Work item sync failed for ${site.domain}:`, e instanceof Error ? e.message : e);
+  }
+}
+
 /** Per-site result of Step 1, shared by the later submission steps. */
 interface RunSiteData {
   site: Site;
@@ -345,6 +397,10 @@ async function _doRun(
         return state && state.has_schema === null;
       });
       const targets = [...newUrls, ...changed, ...neverAudited];
+      const previousHash = new Map(allUrlStates.map(s => [s.url, s.content_hash ?? null]));
+      const lastmodChanged = new Set(changed.filter(e => e.lastmod).map(e => e.url));
+      let checkedChanged = 0;
+      let bumpedWithoutChange = 0;
       if (targets.length > 0) {
         log(runId, 'info', `${site.domain} — auditing JSON-LD schemas for ${targets.length} pages`, site.id);
         for (const entry of targets) {
@@ -357,11 +413,21 @@ async function _doRun(
             if (res.ok) {
               const html = await readResponseText(res, 2_000_000, 'Schema audit page');
               const audit = parseSemanticSchema(html);
+              // Fingerprint the visible text so a lastmod change can be checked
+              // against a real content change (see Step 6 and lastmodQuality).
+              const hash = contentFingerprint(html);
+              const before = previousHash.get(entry.url) ?? null;
+              if (before && lastmodChanged.has(entry.url)) {
+                checkedChanged++;
+                if (before === hash) bumpedWithoutChange++;
+              }
               upsertUrlState({
                 url: entry.url,
                 site_id: site.id,
                 has_schema: audit.hasSchema,
-                schema_types: audit.schemaTypes
+                schema_types: audit.schemaTypes,
+                content_hash: hash,
+                ...(before && before !== hash ? { content_changed_at: new Date().toISOString() } : {}),
               });
               if (audit.hasSchema) {
                 log(runId, 'dim', `Schema detected: [${audit.schemaTypes}] on ${entry.url}`, site.id, entry.url);
@@ -370,6 +436,21 @@ async function _doRun(
           } catch { /* ignore parsing errors */ }
         }
       }
+
+      // Google only uses lastmod when it is consistently accurate; flag the
+      // patterns that make it ignore the sitemap's dates.
+      const lastmodIssues = lastmodQuality(htmlEntries, { bumpedWithoutChange, checkedChanged });
+      for (const issue of lastmodIssues) {
+        log(runId, 'warn', `${site.domain} — ${issue.title}: ${issue.detail}`, site.id);
+      }
+      syncSiteFindings(site, 'sitemap_quality', LASTMOD_ISSUE_CODES, lastmodIssues.map(issue => ({
+        code: issue.code,
+        title: issue.title,
+        description: issue.detail,
+        severity: 'high',
+        evidence: { code: issue.code, sitemap_url: site.sitemap_url },
+        deepLink: gscSitemapsLink(site),
+      })));
 
       siteDataMap.set(site.id, {
         site, changed, newUrls, noLastmod, extraChanged, extraNewUrls, extraNoLastmod,
@@ -435,6 +516,51 @@ async function _doRun(
         } catch (e) {
           log(runId, 'warn', `${site.domain} — GSC sitemap error for ${group.sitemapUrl}: ${String(e)}`, site.id);
         }
+      }
+    }
+  }
+
+  // ── Step 2b: Read back Search Console's sitemap processing report ─────────
+  //
+  // A submitted sitemap that Google cannot parse, or has not downloaded,
+  // silently loses every page's recrawl signal. Record Google's errors,
+  // warnings and last download, and raise an Action Centre item on errors.
+
+  if (!options.skipSitemaps) {
+    for (const site of allSites) {
+      if (activeRun.stopRequested) break;
+      const data = siteDataMap.get(site.id);
+      const accountId = site.google_account_id || allAccounts[0]?.id;
+      if (!data || data.error || !accountId || data.sitemapGroups.length === 0) continue;
+      let reports: Awaited<ReturnType<typeof listGSCSitemaps>>;
+      try {
+        reports = await listGSCSitemaps(accountId, site.gsc_url);
+      } catch (e) {
+        log(runId, 'dim', `${site.domain} — could not read Search Console sitemap report: ${e instanceof Error ? e.message : e}`, site.id);
+        continue;
+      }
+      for (const group of data.sitemapGroups) {
+        const report = reports.find(r => r.path === group.sitemapUrl);
+        if (!report) continue;
+        recordSitemapFeedback(site.id, group.sitemapUrl, {
+          errors: report.errors, warnings: report.warnings,
+          lastDownloaded: report.lastDownloaded ?? null, isPending: !!report.isPending,
+        });
+        const downloaded = report.lastDownloaded ? `last downloaded ${report.lastDownloaded.slice(0, 10)}` : 'not downloaded yet';
+        const level = report.errors > 0 ? 'warn' : 'dim';
+        log(runId, level,
+          `${site.domain} — Google sitemap report for ${group.sitemapUrl}: ${downloaded}, ${report.errors} error(s), ${report.warnings} warning(s)${report.isPending ? ', processing pending' : ''}`,
+          site.id
+        );
+        const findings: SiteFinding[] = report.errors > 0 ? [{
+          code: `sitemap_errors:${group.sitemapUrl}`,
+          title: `Google reports ${report.errors} error(s) in a submitted sitemap`,
+          description: `Open Search Console → Sitemaps → ${group.sitemapUrl} to see the errors. Common causes: invalid XML, URLs on a different host or protocol than the property, or a sitemap Google cannot fetch. Until fixed, Google may ignore the sitemap's URLs and lastmod values.`,
+          severity: 'high',
+          evidence: { sitemap_url: group.sitemapUrl, errors: report.errors, warnings: report.warnings, last_downloaded: report.lastDownloaded ?? null },
+          deepLink: gscSitemapsLink(site),
+        }] : [];
+        syncSiteFindings(site, 'gsc_sitemap', [`sitemap_errors:${group.sitemapUrl}`], findings);
       }
     }
   }
@@ -700,6 +826,7 @@ async function _doRun(
       log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (today ${usedToday}/${GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY})`, site.id);
 
       let propertyConsecutive429 = 0;
+      let findingsDeferred = 0;
 
       for (const state of oldestInspected) {
         if (activeRun.stopRequested) break;
@@ -719,8 +846,31 @@ async function _doRun(
               gsc_coverage_state: result.coverageState ?? null,
               gsc_page_fetch_state: result.pageFetchState ?? null,
               gsc_last_crawl_time: result.lastCrawlTime ?? null,
+              gsc_google_canonical: result.googleCanonical ?? null,
+              gsc_user_canonical: result.userCanonical ?? null,
+              gsc_robots_state: result.robotsTxtState ?? null,
               gsc_last_inspected: new Date().toISOString()
             });
+            const finding = inspectionFinding(state.url, result);
+            if (finding) log(runId, 'warn', `${finding.title}: ${state.url}`, site.id, state.url);
+            const atCap = !!finding && !!site.workspace_id
+              && countOpenWorkItems(site.workspace_id, site.id, 'gsc_inspection') >= MAX_OPEN_INSPECTION_ITEMS_PER_SITE;
+            if (atCap) {
+              findingsDeferred++;
+            } else {
+              syncSiteFindings(site, 'gsc_inspection', INSPECTION_FINDING_CODES, finding ? [{
+                code: finding.code,
+                title: finding.title,
+                description: finding.fix,
+                severity: finding.severity,
+                evidence: {
+                  url: state.url, code: finding.code, verdict: result.verdict, coverage_state: result.coverageState ?? null,
+                  page_fetch_state: result.pageFetchState ?? null, google_canonical: result.googleCanonical ?? null,
+                  user_canonical: result.userCanonical ?? null, last_crawl_time: result.lastCrawlTime ?? null,
+                },
+                deepLink: gscInspectLink(site, state.url),
+              }] : [], state.url);
+            }
           } else if (result.statusCode === 429) {
             propertyConsecutive429++;
             const wait = result.retryAfterMs && result.retryAfterMs > 0 && result.retryAfterMs < 30_000
@@ -746,6 +896,12 @@ async function _doRun(
           log(runId, 'warn', `GSC Inspection error for ${state.url}: ${String(e)}`, site.id, state.url);
         }
         await sleep(GSC_INSPECTION_DELAY_MS);
+      }
+      if (findingsDeferred > 0) {
+        log(runId, 'info',
+          `${site.domain} — ${findingsDeferred} inspection finding(s) logged but not added to the Action Centre (${MAX_OPEN_INSPECTION_ITEMS_PER_SITE} open already); they are raised as earlier items are fixed.`,
+          site.id
+        );
       }
     }
   }

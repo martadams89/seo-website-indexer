@@ -39,6 +39,24 @@ Google has retired its anonymous sitemap ping endpoint. The supported signal is 
 
 URL Inspection then checks pages in this order: never inspected, then previously not indexed or changed after Google's last crawl (at most once a day each), then the oldest checks. Each result stores the verdict, coverage state, fetch state and Google's last crawl time.
 
+### What Google reports back
+
+Each run turns Google's feedback into Action Centre items. Items close automatically once a later check shows the problem is gone. Each item links to the matching Search Console report.
+
+| Source | Raised when | Why it matters |
+| --- | --- | --- |
+| `gsc inspection` | Google chose a different canonical than the page declares | Ranking signals for the page are credited to the other URL. |
+| `gsc inspection` | Google gets a 404, soft 404, 5xx or other fetch error for a sitemap URL | Sitemaps that list broken URLs lose Google's trust. |
+| `gsc inspection` | A sitemap URL is blocked by `noindex` or `robots.txt` | The sitemap and the page contradict each other; unblock it or remove it from the sitemap. |
+| `gsc inspection` | A sitemap URL redirects, or Google sees a duplicate without a canonical | Wasted crawls and split signals. |
+| `gsc inspection` | *Crawled – currently not indexed* | Google's quality decision; improve the page rather than resubmitting it. |
+| `gsc sitemap` | Search Console reports errors in a submitted sitemap | Google may ignore the sitemap's URLs and `lastmod` values. |
+| `sitemap quality` | `lastmod` dates are in the future, almost every URL shares one `lastmod`, or at least half of the re-dated pages have unchanged visible text | Google ignores `lastmod` on sites where it is not accurate, so every page loses its recrawl signal. |
+
+At most 50 inspection items are open per site at a time. Further findings are logged and raised as earlier ones are fixed.
+
+When the scheduler fetches a new or re-dated page, it also records a fingerprint of the page's visible text. The Indexing API step uses it to skip pages whose `lastmod` changed but whose content did not.
+
 ### Optional: Indexing API recrawl requests
 
 Under **Sites → Config**, a site can opt in to **Use the Google Indexing API for pages that need a recrawl**. After URL Inspection, the run sends `URL_UPDATED` notifications only for pages that meet one of these conditions:
@@ -46,7 +64,7 @@ Under **Sites → Config**, a site can opt in to **Use the Google Indexing API f
 - inspection reports them as not indexed, for example *Discovered – currently not indexed* or *URL is unknown to Google*; or
 - their sitemap `lastmod` is newer than Google's last crawl.
 
-Pages excluded for structural reasons are skipped because a recrawl will not change the outcome. These include `noindex`, a canonical pointing elsewhere, redirects, 404 or soft 404 responses and `robots.txt` blocks. Pages whose inspection is older than seven days are also skipped. A page is not notified again for the same `lastmod` within 14 days. Never-crawled pages go first, then changed pages, then crawled-but-not-indexed pages.
+Pages excluded for structural reasons are skipped because a recrawl will not change the outcome. These include `noindex`, a canonical pointing elsewhere, redirects, 404 or soft 404 responses and `robots.txt` blocks. Pages whose inspection is older than seven days are also skipped. A page is not notified again for the same `lastmod` within 14 days. A page with a newer `lastmod` is also skipped if its visible text last changed before Google's crawl. *Crawled – currently not indexed* pages are only sent once they have changed since that crawl. Never-crawled pages go first, then changed pages, then updated crawled-but-not-indexed pages.
 
 The default quota is 200 notifications a day per Google Cloud project, i.e. the project that owns the OAuth client. Opted-in sites that share a project split the remaining quota evenly. Use `GOOGLE_INDEXING_DAILY_LIMIT` to match a quota Google has granted, or set it to `0` to turn the step off. Today's usage appears in the quota widget.
 

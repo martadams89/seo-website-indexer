@@ -8,6 +8,24 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20260926_02_google_feedback',
+    description: 'Canonical selection, content fingerprints and Search Console sitemap processing feedback',
+    up(db) {
+      db.exec(`
+        ALTER TABLE url_state ADD COLUMN gsc_google_canonical TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_user_canonical TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_robots_state TEXT;
+        ALTER TABLE url_state ADD COLUMN content_hash TEXT;
+        ALTER TABLE url_state ADD COLUMN content_changed_at TEXT;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_errors INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_warnings INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_last_downloaded TEXT;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_is_pending INTEGER;
+        ALTER TABLE sitemap_state ADD COLUMN gsc_checked_at TEXT;
+      `);
+    },
+  },
+  {
     id: '20260926_01_google_recrawl_signals',
     description: 'Per-sitemap resubmission signatures, URL Inspection crawl detail and opt-in Indexing API tracking',
     up(db) {

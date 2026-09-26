@@ -1269,6 +1269,12 @@ export interface UrlState {
   /** Last Indexing API URL_UPDATED notification and the sitemap lastmod it was sent for. */
   google_indexing_notified_at?: string | null;
   google_indexing_lastmod?: string | null;
+  gsc_google_canonical?: string | null;
+  gsc_user_canonical?: string | null;
+  gsc_robots_state?: string | null;
+  /** Fingerprint of the page's visible text, and when that fingerprint last changed. */
+  content_hash?: string | null;
+  content_changed_at?: string | null;
 }
 
 export function getUrlState(url: string, siteId: string): UrlState | null {
@@ -1454,6 +1460,11 @@ export interface SitemapState {
   signature: string;
   url_count: number;
   last_submitted: string | null;
+  gsc_errors?: number | null;
+  gsc_warnings?: number | null;
+  gsc_last_downloaded?: string | null;
+  gsc_is_pending?: number | null;
+  gsc_checked_at?: string | null;
 }
 
 export function getSitemapState(siteId: string, sitemapUrl: string): SitemapState | null {
@@ -1471,6 +1482,20 @@ export function recordSitemapSubmitted(siteId: string, sitemapUrl: string, signa
       url_count = excluded.url_count,
       last_submitted = excluded.last_submitted
   `).run(siteId, sitemapUrl, signature, urlCount, new Date().toISOString());
+}
+
+/** Store Search Console's processing report for a sitemap (errors, warnings, last download). */
+export function recordSitemapFeedback(siteId: string, sitemapUrl: string, feedback: {
+  errors: number; warnings: number; lastDownloaded: string | null; isPending: boolean;
+}): void {
+  getDb().prepare(`
+    UPDATE sitemap_state SET gsc_errors = ?, gsc_warnings = ?, gsc_last_downloaded = ?, gsc_is_pending = ?, gsc_checked_at = ?
+    WHERE site_id = ? AND sitemap_url = ?
+  `).run(feedback.errors, feedback.warnings, feedback.lastDownloaded, feedback.isPending ? 1 : 0, new Date().toISOString(), siteId, sitemapUrl);
+}
+
+export function getSitemapStatesForSite(siteId: string): SitemapState[] {
+  return getDb().prepare('SELECT * FROM sitemap_state WHERE site_id = ? ORDER BY sitemap_url').all(siteId) as SitemapState[];
 }
 
 // ── Google Accounts Helpers ───────────────────────────────────────────────────

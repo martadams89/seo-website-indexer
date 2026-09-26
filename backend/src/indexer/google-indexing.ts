@@ -144,8 +144,9 @@ export interface CandidateOptions {
 
 /**
  * Picks the URLs worth spending Indexing API quota on, most valuable first:
- * pages Google has never crawled, then pages changed since Google's last crawl,
- * then crawled-but-not-indexed pages. URLs already notified for the same
+ * pages Google has never crawled, then pages changed since Google's last crawl
+ * (unless their visible text last changed before that crawl), then
+ * crawled-but-not-indexed pages that have been updated since that crawl. URLs already notified for the same
  * lastmod within the re-notify window, URLs whose inspection is stale, and
  * pages excluded for structural reasons (noindex, canonical, 404…) are skipped.
  */
@@ -173,9 +174,19 @@ export function selectIndexingCandidates(
     let rank = 0;
     if (isNotIndexed(state)) {
       if (!isRecrawlable(state)) continue;
+      if (state.gsc_last_crawl_time) {
+        // Crawled but not indexed is Google's quality decision; asking again
+        // only helps once the page has changed since that crawl.
+        const improved = changedSinceCrawl(lastmod, state.gsc_last_crawl_time)
+          || changedSinceCrawl(state.content_changed_at, state.gsc_last_crawl_time);
+        if (!improved) continue;
+      }
       reason = 'not_indexed';
       rank = state.gsc_last_crawl_time ? 2 : 0;
     } else if (changedSinceCrawl(lastmod, state.gsc_last_crawl_time)) {
+      // lastmod says changed, but the last observed change in visible text
+      // predates Google's crawl: a lastmod bump, not new content.
+      if (state.content_changed_at && !changedSinceCrawl(state.content_changed_at, state.gsc_last_crawl_time)) continue;
       // Already notified after this change? Wait for Google to act on it.
       if (notified !== null && notified >= (toMs(lastmod) ?? 0) && now - notified < renotify) continue;
       reason = 'changed_since_crawl';

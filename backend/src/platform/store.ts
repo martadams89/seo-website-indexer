@@ -259,6 +259,23 @@ export function createWorkItem(input: {
   return getWorkItem(input.workspaceId, id)!;
 }
 
+/**
+ * Close open items raised automatically for a condition that no longer holds
+ * (e.g. a later URL Inspection passed). Items people have moved on are left alone.
+ */
+export function resolveWorkItemsBySourceRef(workspaceId: string, source: string, sourceRefs: string[]): number {
+  if (sourceRefs.length === 0) return 0;
+  const rows = getDb().prepare(`SELECT id FROM work_items WHERE workspace_id=? AND source=? AND status='open'
+    AND source_ref IN (${sourceRefs.map(() => '?').join(',')})`).all(workspaceId, source, ...sourceRefs) as Array<{ id: string }>;
+  for (const row of rows) updateWorkItem(workspaceId, row.id, { status: 'done', evidence: { auto_resolved_at: new Date().toISOString() } });
+  return rows.length;
+}
+
+export function countOpenWorkItems(workspaceId: string, siteId: string, source: string): number {
+  return (getDb().prepare(`SELECT COUNT(*) n FROM work_items WHERE workspace_id=? AND site_id=? AND source=?
+    AND status NOT IN ('done','dismissed')`).get(workspaceId, siteId, source) as { n: number }).n;
+}
+
 export function getWorkItem(workspaceId: string, id: string): WorkItem | null {
   const row = getDb().prepare(`SELECT wi.*,u.name assignee_name,u.email assignee_email,
       s.name site_name,s.domain site_domain,CASE WHEN s.google_account_id IS NULL THEN 0 ELSE 1 END google_connected

@@ -98,6 +98,8 @@ describe('selectIndexingCandidates', () => {
   const lastmods = new Map<string, string | undefined>([
     ['https://a.com/unknown', '2026-09-20T00:00:00Z'],
     ['https://a.com/crawled-not-indexed', '2026-09-01T00:00:00Z'],
+    ['https://a.com/improved', '2026-09-20T00:00:00Z'],
+    ['https://a.com/bumped', '2026-09-24T00:00:00Z'],
     ['https://a.com/changed', '2026-09-24T00:00:00Z'],
     ['https://a.com/fresh', '2026-09-01T00:00:00Z'],
     ['https://a.com/noindex', '2026-09-01T00:00:00Z'],
@@ -106,6 +108,8 @@ describe('selectIndexingCandidates', () => {
   ]);
   const states = [
     state('https://a.com/crawled-not-indexed', { gsc_last_inspected: ago(1), gsc_verdict: 'NEUTRAL', gsc_coverage_state: 'Crawled - currently not indexed', gsc_last_crawl_time: ago(10) }),
+    state('https://a.com/improved', { gsc_last_inspected: ago(1), gsc_verdict: 'NEUTRAL', gsc_coverage_state: 'Crawled - currently not indexed', gsc_last_crawl_time: ago(10) }),
+    state('https://a.com/bumped', { gsc_last_inspected: ago(1), gsc_verdict: 'PASS', gsc_last_crawl_time: '2026-09-10T00:00:00Z', content_changed_at: '2026-09-05T00:00:00Z' }),
     state('https://a.com/unknown', { gsc_last_inspected: ago(1), gsc_verdict: 'NEUTRAL', gsc_coverage_state: 'URL is unknown to Google' }),
     state('https://a.com/changed', { gsc_last_inspected: ago(1), gsc_verdict: 'PASS', gsc_last_crawl_time: '2026-09-10T00:00:00Z' }),
     state('https://a.com/fresh', { gsc_last_inspected: ago(1), gsc_verdict: 'PASS', gsc_last_crawl_time: '2026-09-10T00:00:00Z' }),
@@ -117,10 +121,12 @@ describe('selectIndexingCandidates', () => {
 
   it('targets only not-indexed and changed-after-crawl pages, most valuable first', () => {
     const picked = selectIndexingCandidates(states, lastmods, { now: NOW });
+    // crawled-not-indexed is skipped until the page changes after Google's
+    // crawl; bumped has a newer lastmod but its text last changed before it.
     expect(picked.map(c => [c.url.slice('https://a.com/'.length), c.reason])).toEqual([
       ['unknown', 'not_indexed'],
       ['changed', 'changed_since_crawl'],
-      ['crawled-not-indexed', 'not_indexed'],
+      ['improved', 'not_indexed'],
     ]);
   });
 

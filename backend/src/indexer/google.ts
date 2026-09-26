@@ -77,11 +77,21 @@ export async function submitSitemapToGSC(accountId: string, gscUrl: string, site
   return { sitemapUrl, success: false, statusCode: res.status, message };
 }
 
+export interface GscSitemapReport {
+  path: string;
+  lastSubmitted?: string;
+  lastDownloaded?: string;
+  isPending?: boolean;
+  isSitemapsIndex?: boolean;
+  errors: number;
+  warnings: number;
+}
+
 /**
- * Lists all sitemaps registered in GSC for the given site.
- * Returns an array of sitemap objects or throws on error.
+ * Lists all sitemaps registered in GSC for the given site, with Google's
+ * processing report (errors, warnings, last download). Throws on error.
  */
-export async function listGSCSitemaps(accountId: string, gscUrl: string): Promise<Array<{ path: string; lastSubmitted?: string; isPending?: boolean }>> {
+export async function listGSCSitemaps(accountId: string, gscUrl: string): Promise<GscSitemapReport[]> {
   const token = await getAccessTokenForAccount(accountId);
   const siteEnc = encodeURIComponent(gscUrl);
 
@@ -94,8 +104,20 @@ export async function listGSCSitemaps(accountId: string, gscUrl: string): Promis
     throw new Error(`GSC sitemaps list failed: HTTP ${res.status}`);
   }
 
-  const body = await res.json() as { sitemap?: Array<{ path: string; lastSubmitted?: string; isPending?: boolean }> };
-  return body.sitemap ?? [];
+  // errors/warnings are int64 values, which the API serialises as strings.
+  const body = await res.json() as { sitemap?: Array<{
+    path: string; lastSubmitted?: string; lastDownloaded?: string; isPending?: boolean;
+    isSitemapsIndex?: boolean; errors?: string | number; warnings?: string | number;
+  }> };
+  return (body.sitemap ?? []).map(s => ({
+    path: s.path,
+    lastSubmitted: s.lastSubmitted,
+    lastDownloaded: s.lastDownloaded,
+    isPending: s.isPending,
+    isSitemapsIndex: s.isSitemapsIndex,
+    errors: Number(s.errors ?? 0) || 0,
+    warnings: Number(s.warnings ?? 0) || 0,
+  }));
 }
 
 /**
