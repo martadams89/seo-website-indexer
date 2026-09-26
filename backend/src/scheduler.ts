@@ -6,13 +6,18 @@
  * Strategy:
  *  1. Fetch all enabled sites' live sitemaps in parallel.
  *  2. Diff against stored lastmod values → identify new/changed URLs per site.
- *  3. Re-submit changed sitemaps through Search Console and inspect coverage.
+ *  3. Re-submit each sitemap whose URLs or lastmod values changed through the
+ *     Search Console Sitemaps API (the supported replacement for the retired
+ *     sitemap ping endpoint).
  *  4. Send new/changed URLs to IndexNow and Bing Webmaster.
- *  5. Progress and logs stream via SSE to the frontend.
+ *  5. Inspect URLs, unknown and needs-attention pages first.
+ *  6. For sites that opt in, spend the Indexing API's daily quota only on pages
+ *     inspection shows are not indexed or changed after Google's last crawl.
+ *  7. Progress and logs stream via SSE to the frontend.
  *
- * Google's URL-level Indexing API is deliberately not used here. Google
- * restricts it to JobPosting and livestream BroadcastEvent pages; ordinary
- * marketing pages must use sitemaps and crawlable links.
+ * Google documents the Indexing API for JobPosting and livestream
+ * BroadcastEvent pages only; its effect on other pages is not guaranteed, so
+ * step 6 is off unless a site enables it. Sitemaps remain the primary signal.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -41,13 +46,24 @@ import {
   acquireRunLock,
   releaseRunLock,
   pruneOldQuotaUsage,
+  getSitemapState,
+  recordSitemapSubmitted,
+  getGoogleAccountById,
   type Site,
   type LogEntry,
-  type UrlState,
 } from './db/database.js';
 import { emitLog, subscribeToLogs } from './utils/logger.js';
 import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry } from './indexer/sitemap.js';
 import { submitSitemapToGSC, inspectGoogleUrl } from './indexer/google.js';
+import {
+  sitemapGroups,
+  prioritiseInspections,
+  selectIndexingCandidates,
+  indexingQuotaBucket,
+  hasIndexingScope,
+  publishUrlUpdated,
+  type SitemapGroup,
+} from './indexer/google-indexing.js';
 import { submitToIndexNowInBatches, getOrCreateIndexNowKey } from './indexer/indexnow.js';
 import { submitToBingInBatches, getBingQuota, deriveBingSiteUrl } from './indexer/bing.js';
 import { bingCredentialForSite } from './auth/workspaces.js';
@@ -74,8 +90,16 @@ const GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY = Number.isFinite(parsedGscInspect
 const INDEXNOW_DAILY_LIMIT_PER_SITE = 10_000;
 const INDEXNOW_NO_LASTMOD_BATCH = 500;
 
+// Google Indexing API: default publish quota is 200 URL notifications/day per
+// Cloud project. Override when Google has granted a higher quota.
+const parsedIndexingLimit = parseInt(process.env.GOOGLE_INDEXING_DAILY_LIMIT ?? '', 10);
+export const GOOGLE_INDEXING_DAILY_LIMIT = Number.isFinite(parsedIndexingLimit)
+  ? Math.max(0, parsedIndexingLimit)
+  : 200;
+
 // Polite pacing
 const GSC_INSPECTION_DELAY_MS = 350;
+const GOOGLE_INDEXING_DELAY_MS = 250;
 
 export { subscribeToLogs };
 
@@ -145,6 +169,8 @@ export interface RunOptions {
   skipBing?: boolean;
   /** Skip GSC sitemap submission */
   skipSitemaps?: boolean;
+  /** Skip Google Indexing API notifications (only runs for opted-in sites anyway) */
+  skipIndexingApi?: boolean;
   /** Override per-property URL Inspection daily limit for this run */
   gscLimit?: number;
 }
@@ -187,6 +213,23 @@ export async function runIndexing(options: RunOptions = {}): Promise<string> {
   return runId;
 }
 
+/** Per-site result of Step 1, shared by the later submission steps. */
+interface RunSiteData {
+  site: Site;
+  changed: SitemapEntry[];
+  newUrls: SitemapEntry[];
+  noLastmod: SitemapEntry[];
+  /** Non-HTML URLs (e.g. llms.txt) from robots.txt secondary sitemaps — IndexNow only. */
+  extraChanged: SitemapEntry[];
+  extraNewUrls: SitemapEntry[];
+  extraNoLastmod: SitemapEntry[];
+  /** Per-sitemap signatures of indexable HTML pages, for Sitemaps API resubmission. */
+  sitemapGroups: SitemapGroup[];
+  /** Current sitemap lastmod for every live HTML page. */
+  lastmodByUrl: Map<string, string | undefined>;
+  error?: string;
+}
+
 async function _doRun(
   runId: string,
   run: { total_submitted: number; total_skipped: number; total_failed: number },
@@ -212,19 +255,7 @@ async function _doRun(
 
   log(runId, 'info', '── Step 1: Fetching live sitemaps and detecting changes ──');
 
-  type SiteData = {
-    site: Site;
-    changed: SitemapEntry[];
-    newUrls: SitemapEntry[];
-    noLastmod: SitemapEntry[];
-    /** Non-HTML URLs (e.g. llms.txt) from robots.txt secondary sitemaps — IndexNow only. */
-    extraChanged: SitemapEntry[];
-    extraNewUrls: SitemapEntry[];
-    extraNoLastmod: SitemapEntry[];
-    error?: string;
-  };
-
-  const siteDataMap = new Map<string, SiteData>();
+  const siteDataMap = new Map<string, RunSiteData>();
 
   await Promise.all(allSites.map(async (site) => {
     if (activeRun.stopRequested) return;
@@ -340,45 +371,70 @@ async function _doRun(
         }
       }
 
-      siteDataMap.set(site.id, { site, changed, newUrls, noLastmod, extraChanged, extraNewUrls, extraNoLastmod });
+      siteDataMap.set(site.id, {
+        site, changed, newUrls, noLastmod, extraChanged, extraNewUrls, extraNoLastmod,
+        // Only sitemaps that list HTML pages are re-submitted to Search Console;
+        // llms-sitemap.xml and similar stay IndexNow-only.
+        sitemapGroups: sitemapGroups(htmlEntries, site.sitemap_url),
+        lastmodByUrl: new Map(htmlEntries.map(e => [e.url, e.lastmod])),
+      });
     } catch (e) {
       log(runId, 'error', `${site.domain} — failed to fetch sitemap: ${String(e)}`, site.id);
-      siteDataMap.set(site.id, { site, changed: [], newUrls: [], noLastmod: [], extraChanged: [], extraNewUrls: [], extraNoLastmod: [], error: String(e) });
+      siteDataMap.set(site.id, {
+        site, changed: [], newUrls: [], noLastmod: [], extraChanged: [], extraNewUrls: [], extraNoLastmod: [],
+        sitemapGroups: [], lastmodByUrl: new Map(), error: String(e),
+      });
     }
   }));
 
-  // ── Step 2: GSC Sitemap Re-submission (Delta-Triggered) ───────────────────
+  // ── Step 2: GSC Sitemap Re-submission (per-sitemap signature) ─────────────
+  //
+  // Google retired the anonymous sitemap ping endpoint; the Search Console
+  // Sitemaps API (`sitemaps.submit`) is the supported "fetch this again"
+  // signal. Each sitemap is fingerprinted by its URL + lastmod set and
+  // re-submitted only when that fingerprint differs from the last accepted
+  // submission, so a lastmod change in any sitemap (primary or robots.txt
+  // declared) prompts Google to re-read exactly that sitemap.
 
   if (!options.skipSitemaps) {
-    log(runId, 'info', '── Step 2: Re-submitting sitemaps to Google Search Console (delta-triggered) ──');
+    log(runId, 'info', '── Step 2: Re-submitting changed sitemaps to Google Search Console ──');
     for (const site of allSites) {
       if (activeRun.stopRequested) break;
       const data = siteDataMap.get(site.id);
       if (!data || data.error) continue;
 
-      const hasDelta = data.newUrls.length > 0 || data.changed.length > 0;
-      if (!hasDelta) {
-        log(runId, 'info', `${site.domain} — sitemap re-submission skipped: No new or changed pages detected`, site.id);
+      const pending = data.sitemapGroups
+        .map(group => ({ group, previous: getSitemapState(site.id, group.sitemapUrl) }))
+        .filter(({ group, previous }) => previous?.signature !== group.signature);
+      if (pending.length === 0) {
+        log(runId, 'info', `${site.domain} — sitemap re-submission skipped: no URL or lastmod changes in ${data.sitemapGroups.length} sitemap(s)`, site.id);
         continue;
       }
 
-      try {
-        const accountId = site.google_account_id || getAllGoogleAccounts()[0]?.id;
-        if (!accountId) {
-          log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
-          continue;
+      const accountId = site.google_account_id || allAccounts[0]?.id;
+      if (!accountId) {
+        log(runId, 'error', `${site.domain} — GSC submission skipped: No Google Account linked to this site.`, site.id);
+        continue;
+      }
+      if (!site.google_account_id) {
+        log(runId, 'warn', `${site.domain} — No Google Account explicitly linked; falling back to first available account. Edit the site to set this.`, site.id);
+      }
+
+      for (const { group, previous } of pending) {
+        if (activeRun.stopRequested) break;
+        const why = previous ? 'URLs or lastmod changed' : 'first submission from this tool';
+        try {
+          const result = await submitSitemapToGSC(accountId, site.gsc_url, group.sitemapUrl);
+          if (result.success) {
+            recordSitemapSubmitted(site.id, group.sitemapUrl, group.signature, group.urlCount);
+            log(runId, 'ok', `${site.domain} — sitemap re-submitted to GSC (${why}, ${group.urlCount} pages): ${group.sitemapUrl}`, site.id);
+          } else {
+            // Signature is not recorded, so the next run retries.
+            log(runId, 'warn', `${site.domain} — GSC sitemap submission for ${group.sitemapUrl}: HTTP ${result.statusCode} (${result.message ?? 'unknown error'})`, site.id);
+          }
+        } catch (e) {
+          log(runId, 'warn', `${site.domain} — GSC sitemap error for ${group.sitemapUrl}: ${String(e)}`, site.id);
         }
-        if (!site.google_account_id) {
-          log(runId, 'warn', `${site.domain} — No Google Account explicitly linked; falling back to first available account. Edit the site to set this.`, site.id);
-        }
-        const result = await submitSitemapToGSC(accountId, site.gsc_url, site.sitemap_url);
-        if (result.success) {
-          log(runId, 'ok', `${site.domain} — sitemap re-submitted to GSC due to detected content changes`, site.id);
-        } else {
-          log(runId, 'warn', `${site.domain} — GSC sitemap submission: HTTP ${result.statusCode} (${result.message ?? 'may already be registered'})`, site.id);
-        }
-      } catch (e) {
-        log(runId, 'warn', `${site.domain} — GSC sitemap error: ${String(e)}`, site.id);
       }
     }
   }
@@ -636,14 +692,10 @@ async function _doRun(
         continue;
       }
 
-      // Sort by gsc_last_inspected (null first, then oldest) and take per-property budget
-      const oldestInspected = [...urlStates]
-        .sort((a: UrlState, b: UrlState) => {
-          const timeA = a.gsc_last_inspected ? new Date(a.gsc_last_inspected).getTime() : 0;
-          const timeB = b.gsc_last_inspected ? new Date(b.gsc_last_inspected).getTime() : 0;
-          return timeA - timeB;
-        })
-        .slice(0, thisRunLimit);
+      // Never-inspected URLs first, then not-indexed / changed-since-crawl pages
+      // due a re-check, then the oldest inspections — within the property budget.
+      const lastmodByUrl = siteDataMap.get(site.id)?.lastmodByUrl ?? new Map<string, string | undefined>();
+      const oldestInspected = prioritiseInspections(urlStates, lastmodByUrl).slice(0, thisRunLimit);
 
       log(runId, 'info', `${site.domain} — checking real-time index status for ${oldestInspected.length} URLs (today ${usedToday}/${GSC_INSPECTION_DAILY_LIMIT_PER_PROPERTY})`, site.id);
 
@@ -658,11 +710,15 @@ async function _doRun(
           if (result.success) {
             propertyConsecutive429 = 0;
             incrementQuota('gsc_inspection', propertyBucket);
-            log(runId, 'ok', `GSC Inspection verdict: [${result.indexingState}] for ${state.url}`, site.id, state.url);
+            log(runId, 'ok', `GSC Inspection verdict: [${result.verdict}${result.coverageState ? ` · ${result.coverageState}` : ''}] for ${state.url}`, site.id, state.url);
             upsertUrlState({
               url: state.url,
               site_id: site.id,
               gsc_indexing_state: result.indexingState,
+              gsc_verdict: result.verdict,
+              gsc_coverage_state: result.coverageState ?? null,
+              gsc_page_fetch_state: result.pageFetchState ?? null,
+              gsc_last_crawl_time: result.lastCrawlTime ?? null,
               gsc_last_inspected: new Date().toISOString()
             });
           } else if (result.statusCode === 429) {
@@ -694,7 +750,16 @@ async function _doRun(
     }
   }
 
-  // ── Step 6: GEO file deployment (robots.txt + llms.txt) ───────────────────
+  // ── Step 6: Google Indexing API (opt-in, inspection-targeted) ────────────
+
+  if (!options.skipIndexingApi) {
+    const optedIn = allSites.filter(s => s.google_indexing_api === 1);
+    if (optedIn.length > 0) {
+      await runIndexingApiStep(runId, run, optedIn, siteDataMap, allAccounts, activeRun);
+    }
+  }
+
+  // ── Step 7: GEO file deployment (robots.txt + llms.txt) ───────────────────
 
   for (const site of allSites) {
     if (activeRun.stopRequested) break;
@@ -779,6 +844,122 @@ async function _doRun(
     total_skipped: run.total_skipped,
     total_failed: run.total_failed,
   });
+}
+
+// ── Google Indexing API step ─────────────────────────────────────────────────
+
+/**
+ * Spends the Indexing API's daily publish quota only on pages that URL
+ * Inspection shows need a recrawl: not indexed (and not excluded for a
+ * structural reason such as noindex or a canonical), or modified after
+ * Google's last crawl. Quota is per Google Cloud project, so opted-in sites
+ * sharing a project split what is left today evenly.
+ */
+async function runIndexingApiStep(
+  runId: string,
+  run: { total_submitted: number; total_failed: number },
+  sites: Site[],
+  siteDataMap: Map<string, RunSiteData>,
+  allAccounts: Array<{ id: string }>,
+  activeRun: ActiveRun,
+): Promise<void> {
+  log(runId, 'info', `── Step 6: Google Indexing API (opt-in, ${sites.length} site(s), ${GOOGLE_INDEXING_DAILY_LIMIT}/day per Cloud project) ──`);
+  log(runId, 'dim', 'Google documents the Indexing API for job-posting and livestream pages only; its effect on other pages is not guaranteed. Sitemaps remain the primary signal.');
+  if (GOOGLE_INDEXING_DAILY_LIMIT === 0) {
+    log(runId, 'info', 'Indexing API skipped: GOOGLE_INDEXING_DAILY_LIMIT is 0.');
+    return;
+  }
+
+  const plans: Array<{ site: Site; data: RunSiteData; accountId: string; bucket: string }> = [];
+  for (const site of sites) {
+    const data = siteDataMap.get(site.id);
+    if (!data || data.error) {
+      log(runId, 'info', `${site.domain} — Indexing API skipped: sitemap unavailable this run.`, site.id);
+      continue;
+    }
+    const accountId = site.google_account_id || allAccounts[0]?.id;
+    const account = accountId ? getGoogleAccountById(accountId) : null;
+    if (!accountId || !account) {
+      log(runId, 'warn', `${site.domain} — Indexing API skipped: no Google Account linked to this site.`, site.id);
+      continue;
+    }
+    if (hasIndexingScope(account) === false) {
+      log(runId, 'warn',
+        `${site.domain} — Indexing API skipped: ${account.email ?? 'the linked Google account'} has not granted Indexing API access. Reconnect it under Accounts to grant the new permission.`,
+        site.id
+      );
+      continue;
+    }
+    plans.push({ site, data, accountId, bucket: indexingQuotaBucket(account) });
+  }
+
+  const sitesLeft = new Map<string, number>();
+  for (const p of plans) sitesLeft.set(p.bucket, (sitesLeft.get(p.bucket) ?? 0) + 1);
+  const exhausted = new Set<string>();
+
+  for (const { site, data, accountId, bucket } of plans) {
+    if (activeRun.stopRequested) break;
+    const sharers = sitesLeft.get(bucket) ?? 1;
+    sitesLeft.set(bucket, sharers - 1);
+    if (exhausted.has(bucket)) {
+      log(runId, 'info', `${site.domain} — Indexing API skipped: quota for this Cloud project is exhausted.`, site.id);
+      continue;
+    }
+
+    const candidates = selectIndexingCandidates(getUrlsBySite(site.id), data.lastmodByUrl);
+    if (candidates.length === 0) {
+      log(runId, 'info', `${site.domain} — Indexing API: no inspected pages are unindexed or changed since Google's last crawl.`, site.id);
+      continue;
+    }
+
+    const usedToday = getQuotaUsage('google_indexing', bucket);
+    const remaining = Math.max(0, GOOGLE_INDEXING_DAILY_LIMIT - usedToday);
+    if (remaining <= 0) {
+      log(runId, 'warn', `${site.domain} — Indexing API daily quota reached (${usedToday}/${GOOGLE_INDEXING_DAILY_LIMIT}); ${candidates.length} page(s) wait for tomorrow.`, site.id);
+      continue;
+    }
+    const batch = candidates.slice(0, Math.ceil(remaining / Math.max(1, sharers)));
+    const notIndexed = candidates.filter(c => c.reason === 'not_indexed').length;
+    log(runId, 'info',
+      `${site.domain} — Indexing API: ${notIndexed} not indexed, ${candidates.length - notIndexed} changed since last crawl; notifying ${batch.length} (today ${usedToday}/${GOOGLE_INDEXING_DAILY_LIMIT})`,
+      site.id
+    );
+
+    for (const candidate of batch) {
+      if (activeRun.stopRequested) break;
+      const result = await publishUrlUpdated(accountId, candidate.url);
+      if (result.success) {
+        run.total_submitted++;
+        incrementQuota('google_indexing', bucket);
+        upsertUrlState({
+          url: candidate.url,
+          site_id: site.id,
+          google_submitted: 1,
+          google_indexing_notified_at: new Date().toISOString(),
+          google_indexing_lastmod: candidate.lastmod,
+        });
+        const why = candidate.reason === 'not_indexed'
+          ? `not indexed${candidate.coverageState ? `: ${candidate.coverageState}` : ''}`
+          : 'changed since last crawl';
+        log(runId, 'ok', `Indexing API ✓ URL_UPDATED (${why}) ${candidate.url}`, site.id, candidate.url);
+      } else if (result.statusCode === 429) {
+        exhausted.add(bucket);
+        log(runId, 'warn', `Indexing API 429 for ${site.domain} — quota exhausted for this Cloud project; stopping until tomorrow.`, site.id, candidate.url);
+        break;
+      } else if (result.statusCode === 403) {
+        run.total_failed++;
+        log(runId, 'warn',
+          `Indexing API 403 for ${site.domain}: ${result.message}. The Google account must be a verified owner of ${site.gsc_url} and the Indexing API must be enabled on the OAuth client's Cloud project.`,
+          site.id, candidate.url
+        );
+        break;
+      } else {
+        run.total_failed++;
+        log(runId, 'warn', `Indexing API ✗ ${candidate.url}: ${result.message}`, site.id, candidate.url);
+      }
+      await sleep(GOOGLE_INDEXING_DELAY_MS);
+    }
+  }
 }
 
 // ── Cron Scheduler ────────────────────────────────────────────────────────────

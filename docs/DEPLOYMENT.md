@@ -67,6 +67,7 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `AUTH_RATE_LIMIT_WINDOW` | `1 minute` | Authentication rate-limit window. |
 | `AI_CITATION_DAILY_LIMIT` | `25` | Citation checks allowed each day for non-owner members. |
 | `GSC_INSPECTION_DAILY_LIMIT` | `2000` | Daily Google URL Inspection allowance per Search Console property. |
+| `GOOGLE_INDEXING_DAILY_LIMIT` | `200` | Daily Google Indexing API notifications per Cloud project, shared by sites that opt in. Set `0` to disable. Raise it only if Google has granted a higher quota. |
 
 The liveness endpoint is `GET /api/livez`. The readiness endpoint is `GET /api/healthz` and also checks the database and scheduler.
 

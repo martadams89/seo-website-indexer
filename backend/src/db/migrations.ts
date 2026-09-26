@@ -8,6 +8,29 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20260926_01_google_recrawl_signals',
+    description: 'Per-sitemap resubmission signatures, URL Inspection crawl detail and opt-in Indexing API tracking',
+    up(db) {
+      db.exec(`
+        CREATE TABLE sitemap_state (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          sitemap_url TEXT NOT NULL,
+          signature TEXT NOT NULL,
+          url_count INTEGER NOT NULL DEFAULT 0,
+          last_submitted TEXT,
+          PRIMARY KEY (site_id, sitemap_url)
+        );
+        ALTER TABLE sites ADD COLUMN google_indexing_api INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE url_state ADD COLUMN gsc_verdict TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_coverage_state TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_page_fetch_state TEXT;
+        ALTER TABLE url_state ADD COLUMN gsc_last_crawl_time TEXT;
+        ALTER TABLE url_state ADD COLUMN google_indexing_notified_at TEXT;
+        ALTER TABLE url_state ADD COLUMN google_indexing_lastmod TEXT;
+      `);
+    },
+  },
+  {
     id: '20260909_02_search_sync',
     description: 'Opportunity sync status and source identity',
     up(db) {

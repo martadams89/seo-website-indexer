@@ -74,17 +74,19 @@ One connected Google account can be used by Search Console and GA4. This is sepa
 Enable these APIs in the Google Cloud project that owns the OAuth client:
 
 - **Google Search Console API**: `searchconsole.googleapis.com`
+- **Web Search Indexing API**: `indexing.googleapis.com` (only used by sites that opt in to Indexing API recrawl requests)
 - **Google Analytics Data API**: `analyticsdata.googleapis.com`
 
 The standard account connection requests:
 
 ```text
 https://www.googleapis.com/auth/webmasters
+https://www.googleapis.com/auth/indexing
 https://www.googleapis.com/auth/analytics.readonly
 https://www.googleapis.com/auth/userinfo.email
 ```
 
-`webmasters` is deliberately not read-only: the application reads Search Console data, submits sitemaps and performs supported inspection/submission actions. The optional Google API auto-configuration flow also asks for `cloud-platform`; normal day-to-day Search Console and GA4 use does not need that broader scope.
+`webmasters` is deliberately not read-only: the application reads Search Console data, submits sitemaps and performs supported inspection/submission actions. `indexing` is used only for sites that opt in to Indexing API recrawl requests. The Google identity must be a verified **owner** of the Search Console property for those calls. Accounts connected before this scope was added keep working for everything else; reconnect them to use the Indexing API. The optional Google API auto-configuration flow also asks for `cloud-platform`; normal day-to-day Search Console and GA4 use does not need that broader scope.
 
 ### Create the OAuth client
 

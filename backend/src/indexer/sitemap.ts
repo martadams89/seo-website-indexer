@@ -5,6 +5,8 @@ export interface SitemapEntry {
   lastmod?: string;
   changefreq?: string;
   priority?: number;
+  /** Top-level sitemap this entry was read from (set by fetchAllSitemaps). */
+  source?: string;
 }
 
 /**
@@ -118,7 +120,7 @@ export async function fetchAllSitemaps(
   // Primary first so it wins on duplicates.
   const primaryEntries = await fetchSitemap(primarySitemapUrl);
   sitemapsUsed.push(primarySitemapUrl);
-  for (const e of primaryEntries) if (!seen.has(e.url)) seen.set(e.url, e);
+  for (const e of primaryEntries) if (!seen.has(e.url)) seen.set(e.url, { ...e, source: primarySitemapUrl });
 
   const discovered = await discoverSitemapsFromRobots(domain);
   const normalize = (u: string) => u.replace(/\/+$/, '');
@@ -127,7 +129,7 @@ export async function fetchAllSitemaps(
     try {
       const extra = await fetchSitemap(sm);
       sitemapsUsed.push(sm);
-      for (const e of extra) if (!seen.has(e.url)) seen.set(e.url, e);
+      for (const e of extra) if (!seen.has(e.url)) seen.set(e.url, { ...e, source: sm });
     } catch {
       // Skip inaccessible secondary sitemaps (e.g. a robots Sitemap: line 404s).
     }

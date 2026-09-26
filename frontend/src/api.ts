@@ -54,6 +54,7 @@ export interface Site {
   deploy_webhook_url?: string | null;
   ftp_host?: string | null;
   geo_manage?: number | null;
+  google_indexing_api?: number | null;
   ftp_port?: number | null;
   ftp_user?: string | null;
   ftp_pass?: string | null;
@@ -101,6 +102,7 @@ export interface QuotaSummary {
   day: string;
   gsc_inspection:  { used: number; perPropertyLimit: number; properties: Array<{ bucket: string; count: number }> };
   indexnow:        { used: number; perSiteLimit: number; sites: Array<{ bucket: string; count: number }> };
+  google_indexing?: { used: number; perProjectLimit: number; enabledSites: number; projects: Array<{ bucket: string; count: number }> };
 }
 
 export interface UrlFailureRecord {
@@ -301,7 +303,7 @@ export const api = {
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
-  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; gscLimit?: number }) =>
+  triggerRun: (opts?: { siteIds?: string[]; skipGoogle?: boolean; skipIndexNow?: boolean; skipBing?: boolean; skipSitemaps?: boolean; skipIndexingApi?: boolean; gscLimit?: number }) =>
     apiFetch<{ ok: boolean; runId: string }>('/api/runs', {
       method: 'POST', body: JSON.stringify(opts ?? {}),
     }),

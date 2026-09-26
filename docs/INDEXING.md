@@ -30,6 +30,30 @@ Do not set every page to the current time on every build. That makes every URL a
 
 Common sitemap tools already derive this value from the post's modified date. In a custom application, use the source record's update time rather than the deployment time.
 
+## How Google is told to look again
+
+Google has retired its anonymous sitemap ping endpoint. The supported signal is the Search Console Sitemaps API (`sitemaps.submit`), so each run:
+
+1. fingerprints every sitemap that lists HTML pages (the configured one plus HTML sitemaps declared in `robots.txt`) by its URLs and `lastmod` values;
+2. re-submits a sitemap only when its fingerprint differs from the last submission Search Console accepted. A failed submission is retried on the next run.
+
+URL Inspection then checks pages in this order: never inspected, then previously not indexed or changed after Google's last crawl (at most once a day each), then the oldest checks. Each result stores the verdict, coverage state, fetch state and Google's last crawl time.
+
+### Optional: Indexing API recrawl requests
+
+Under **Sites → Config**, a site can opt in to **Use the Google Indexing API for pages that need a recrawl**. After URL Inspection, the run sends `URL_UPDATED` notifications only for pages that meet one of these conditions:
+
+- inspection reports them as not indexed, for example *Discovered – currently not indexed* or *URL is unknown to Google*; or
+- their sitemap `lastmod` is newer than Google's last crawl.
+
+Pages excluded for structural reasons are skipped because a recrawl will not change the outcome. These include `noindex`, a canonical pointing elsewhere, redirects, 404 or soft 404 responses and `robots.txt` blocks. Pages whose inspection is older than seven days are also skipped. A page is not notified again for the same `lastmod` within 14 days. Never-crawled pages go first, then changed pages, then crawled-but-not-indexed pages.
+
+The default quota is 200 notifications a day per Google Cloud project, i.e. the project that owns the OAuth client. Opted-in sites that share a project split the remaining quota evenly. Use `GOOGLE_INDEXING_DAILY_LIMIT` to match a quota Google has granted, or set it to `0` to turn the step off. Today's usage appears in the quota widget.
+
+Requirements: the linked Google account must be a verified **owner** of the property, `indexing.googleapis.com` must be enabled on the Cloud project, and the account must have granted the `indexing` scope. Accounts connected before this option existed must be reconnected.
+
+> Google documents the Indexing API for pages with `JobPosting` or livestream `BroadcastEvent` structured data only. Its effect on other pages is not guaranteed, which is why the option is off by default and sitemaps remain the primary signal.
+
 ## Connect Google Search Console
 
 Connecting Google for Search Console is separate from signing in to the dashboard with Google SSO.
@@ -47,7 +71,7 @@ If the deployment already has Google OAuth credentials in its environment, selec
 Self-hosters can supply their own credentials:
 
 1. Create or select a [Google Cloud project](https://console.cloud.google.com/projectcreate).
-2. Enable the [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com).
+2. Enable the [Google Search Console API](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com), plus the [Web Search Indexing API](https://console.cloud.google.com/apis/library/indexing.googleapis.com) if any site will opt in to Indexing API recrawl requests.
 3. Configure the project's OAuth consent screen.
 4. Create an OAuth client with application type **Web application**.
 5. Add the exact callback shown by the setup screen. It normally has this form:

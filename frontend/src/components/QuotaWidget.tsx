@@ -106,6 +106,34 @@ export function QuotaWidget({ siteNames }: Props) {
         )}
       </div>
 
+      {/* Google Indexing API (opt-in per site) */}
+      {quota.google_indexing && (quota.google_indexing.enabledSites > 0 || quota.google_indexing.used > 0) && (
+        <div className="mb-3">
+          <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>
+            <span style={{ fontWeight: 600 }}>Google Indexing API</span>
+            <span className="text-dim">{quota.google_indexing.used.toLocaleString()} recrawl requests today</span>
+          </div>
+          {quota.google_indexing.projects.length === 0 ? (
+            <div className="text-dim text-xs">No usage yet today.</div>
+          ) : (
+            quota.google_indexing.projects.map((p, i) => {
+              const b = bar(p.count, quota.google_indexing!.perProjectLimit);
+              return (
+                <div key={i} style={{ marginTop: 4 }}>
+                  <div className="flex items-center justify-between" style={{ fontSize: 12 }}>
+                    <span className="truncate text-dim" style={{ maxWidth: 240 }}>{label(p.bucket, 'google_indexing')}</span>
+                    <span className="text-dim">{p.count} / {quota.google_indexing!.perProjectLimit}</span>
+                  </div>
+                  <div className="quota-bar-track" style={{ marginTop: 3, height: 6 }}>
+                    <div className="quota-bar-fill" data-level={b.level} style={{ width: `${b.pct}%` }} />
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
       {/* IndexNow */}
       <div>
         <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>

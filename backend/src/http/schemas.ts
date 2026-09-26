@@ -24,6 +24,7 @@ const siteProperties = {
   ftp_pass: { anyOf: [{ type: 'string', maxLength: 4_096 }, { type: 'null' }] },
   ftp_path: nullableShortString,
   geo_manage: { anyOf: [{ type: 'integer', minimum: 0, maximum: 1 }, { type: 'null' }] },
+  google_indexing_api: { anyOf: [{ type: 'integer', minimum: 0, maximum: 1 }, { type: 'null' }] },
 } as const;
 
 export const createSiteSchema: FastifySchema = {

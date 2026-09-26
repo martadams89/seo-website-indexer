@@ -1151,6 +1151,8 @@ export interface Site {
   llms_txt_content?: string | null;
   workspace_id?: string | null;
   bing_account_id?: string | null;
+  /** 1 = opt-in: spend Google Indexing API quota on pages URL Inspection shows need a recrawl. */
+  google_indexing_api?: number | null;
 }
 
 // All enabled sites across every workspace — used by the background scheduler,
@@ -1198,6 +1200,8 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
     ftp_user: null as string | null,
     ftp_path: null as string | null,
     geo_manage: 0 as number | null,
+    // null = keep the stored opt-in on update (callers that predate the field).
+    google_indexing_api: null as number | null,
     workspace_id: null as string | null,
     bing_account_id: null as string | null,
     ...site,
@@ -1205,8 +1209,8 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
     ftp_pass: encrypt(site.ftp_pass ?? null),
   };
   getDb().prepare(`
-    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path, workspace_id, bing_account_id, geo_manage)
-    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path, @workspace_id, @bing_account_id, @geo_manage)
+    INSERT INTO sites(id, name, domain, sitemap_url, gsc_url, enabled, google_account_id, robots_txt_status, llms_txt_status, deploy_webhook_url, ftp_host, ftp_port, ftp_user, ftp_pass, ftp_path, workspace_id, bing_account_id, geo_manage, google_indexing_api)
+    VALUES(@id, @name, @domain, @sitemap_url, @gsc_url, @enabled, @google_account_id, @robots_txt_status, @llms_txt_status, @deploy_webhook_url, @ftp_host, @ftp_port, @ftp_user, @ftp_pass, @ftp_path, @workspace_id, @bing_account_id, @geo_manage, COALESCE(@google_indexing_api, 0))
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       domain = excluded.domain,
@@ -1226,7 +1230,8 @@ export function upsertSite(site: Omit<Site, 'created_at'>): void {
       -- account is set/cleared explicitly by the caller.
       workspace_id = COALESCE(excluded.workspace_id, sites.workspace_id),
       bing_account_id = excluded.bing_account_id,
-      geo_manage = excluded.geo_manage
+      geo_manage = excluded.geo_manage,
+      google_indexing_api = COALESCE(@google_indexing_api, sites.google_indexing_api)
   `).run(merged);
 }
 
@@ -1256,6 +1261,14 @@ export interface UrlState {
   schema_types?: string | null;
   /** 1 = IndexNow-only (non-HTML, e.g. llms.txt); excluded from Google + inspection. */
   indexnow_only?: number | null;
+  /** URL Inspection detail: PASS / NEUTRAL / FAIL, coverage text, fetch state and Google's last crawl. */
+  gsc_verdict?: string | null;
+  gsc_coverage_state?: string | null;
+  gsc_page_fetch_state?: string | null;
+  gsc_last_crawl_time?: string | null;
+  /** Last Indexing API URL_UPDATED notification and the sitemap lastmod it was sent for. */
+  google_indexing_notified_at?: string | null;
+  google_indexing_lastmod?: string | null;
 }
 
 export function getUrlState(url: string, siteId: string): UrlState | null {
@@ -1431,6 +1444,33 @@ export function upsertIndexNowKey(siteId: string, keyValue: string, verified = f
 
 export function markIndexNowKeyVerified(siteId: string): void {
   getDb().prepare('UPDATE indexnow_keys SET verified = 1 WHERE site_id = ?').run(siteId);
+}
+
+// ── Sitemap state (per-sitemap resubmission signatures) ──────────────────────
+
+export interface SitemapState {
+  site_id: string;
+  sitemap_url: string;
+  signature: string;
+  url_count: number;
+  last_submitted: string | null;
+}
+
+export function getSitemapState(siteId: string, sitemapUrl: string): SitemapState | null {
+  return (getDb().prepare('SELECT * FROM sitemap_state WHERE site_id = ? AND sitemap_url = ?')
+    .get(siteId, sitemapUrl) as SitemapState | undefined) ?? null;
+}
+
+/** Record the signature Search Console last accepted for a sitemap. */
+export function recordSitemapSubmitted(siteId: string, sitemapUrl: string, signature: string, urlCount: number): void {
+  getDb().prepare(`
+    INSERT INTO sitemap_state(site_id, sitemap_url, signature, url_count, last_submitted)
+    VALUES(?, ?, ?, ?, ?)
+    ON CONFLICT(site_id, sitemap_url) DO UPDATE SET
+      signature = excluded.signature,
+      url_count = excluded.url_count,
+      last_submitted = excluded.last_submitted
+  `).run(siteId, sitemapUrl, signature, urlCount, new Date().toISOString());
 }
 
 // ── Google Accounts Helpers ───────────────────────────────────────────────────

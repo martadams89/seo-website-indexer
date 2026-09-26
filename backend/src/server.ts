@@ -85,6 +85,7 @@ import {
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
+import { indexingQuotaBucket } from './indexer/google-indexing.js';
 import {
   getOrCreateIndexNowKey,
   verifyIndexNowKey,
@@ -97,6 +98,7 @@ import {
   startScheduler,
   restartScheduler,
   forceStopRun,
+  GOOGLE_INDEXING_DAILY_LIMIT,
 } from './scheduler.js';
 import { buildLlmsTxt, buildRobotsTxt, deployGeoFiles } from './indexer/geo-deploy.js';
 import { getOverview, getSiteDetail, getAlerts, ackAlert, alertInWorkspace, snapshotAllSites, recordAlert } from './analytics/stats.js';
@@ -1596,6 +1598,7 @@ app.put('/api/sites/:id', { schema: updateSiteSchema }, async (req, reply) => {
     ftp_pass: string | null;
     ftp_path: string | null;
     geo_manage: number | null;
+    google_indexing_api: number | null;
   }>;
 
   // Accept both camelCase and snake_case for the google account id so the
@@ -1650,6 +1653,9 @@ app.put('/api/sites/:id', { schema: updateSiteSchema }, async (req, reply) => {
       ftp_pass: updates.ftp_pass !== undefined ? updates.ftp_pass : existing.ftp_pass,
       ftp_path: updates.ftp_path !== undefined ? updates.ftp_path : existing.ftp_path,
       geo_manage: updates.geo_manage !== undefined ? Number(updates.geo_manage) : existing.geo_manage,
+      google_indexing_api: updates.google_indexing_api !== undefined && updates.google_indexing_api !== null
+        ? Number(updates.google_indexing_api)
+        : existing.google_indexing_api,
       // workspace_id intentionally omitted — upsertSite COALESCEs it, so an edit
       // never moves a site between tenants.
     });
@@ -1713,6 +1719,7 @@ app.post('/api/runs', async (req, reply) => {
     skipIndexNow?: boolean;
     skipBing?: boolean;
     skipSitemaps?: boolean;
+    skipIndexingApi?: boolean;
     gscLimit?: number;
   };
   try {
@@ -1921,12 +1928,21 @@ app.get('/api/quota/today', async (req) => {
   const wsSites = ws ? getSitesForWorkspace(ws) : [];
   const siteIds = new Set(wsSites.map(s => s.id));
   const gscUrls = new Set(wsSites.map(s => s.gsc_url));
-  const inWorkspace = (bucket: string): boolean => {
+  // Indexing API quota is per Cloud project, shared by every account on the
+  // same OAuth client; show only the projects this workspace's sites use.
+  const indexingBuckets = new Set(wsSites
+    .filter(s => s.google_indexing_api === 1 && s.google_account_id)
+    .map(s => getGoogleAccountById(s.google_account_id!))
+    .filter((a): a is NonNullable<typeof a> => !!a)
+    .map(a => indexingQuotaBucket(a)));
+  const inWorkspace = (row: { api: string; bucket: string }): boolean => {
+    const { bucket } = row;
+    if (row.api === 'google_indexing') return indexingBuckets.has(bucket);
     if (bucket.startsWith('site:')) return siteIds.has(bucket.slice(5));
     if (bucket.startsWith('property:')) return gscUrls.has(bucket.slice('property:'.length));
     return false;
   };
-  const rows = getAllQuotaUsageForDay(targetDay).filter(r => inWorkspace(r.bucket));
+  const rows = getAllQuotaUsageForDay(targetDay).filter(inWorkspace);
 
   // Aggregate by API with helpful per-bucket detail.
   const grouped: Record<string, { total: number; buckets: Array<{ bucket: string; count: number }> }> = {};
@@ -1948,6 +1964,12 @@ app.get('/api/quota/today', async (req) => {
       used: grouped['indexnow']?.total ?? 0,
       perSiteLimit: 10_000,
       sites: grouped['indexnow']?.buckets ?? [],
+    },
+    google_indexing: {
+      used: grouped['google_indexing']?.total ?? 0,
+      perProjectLimit: GOOGLE_INDEXING_DAILY_LIMIT,
+      enabledSites: wsSites.filter(s => s.google_indexing_api === 1).length,
+      projects: grouped['google_indexing']?.buckets ?? [],
     },
   };
   return summary;
