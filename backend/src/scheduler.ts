@@ -1181,7 +1181,7 @@ async function _doRun(
   }
   // Ranking playbook: recompute each site's ranked opportunities from the
   // refreshed windows (no network), then a weekly summary notification.
-  await runPlaybookStep(runId, allSites, activeRun);
+  await runPlaybookStep(runId, allSites, activeRun, !options.siteIds?.length);
 
   // Agent-readiness re-score (isitagentready-style): discovery/protocol/identity
   // surfaces per site. Network-bound, best-effort, never fails the run.
@@ -1229,7 +1229,7 @@ async function _doRun(
 
 const PLAYBOOK_NOTIFY_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
 
-async function runPlaybookStep(runId: string, sites: Site[], activeRun: ActiveRun): Promise<void> {
+async function runPlaybookStep(runId: string, sites: Site[], activeRun: ActiveRun, wholeWorkspace: boolean): Promise<void> {
   const digest: string[] = [];
   let totalLow = 0; let totalHigh = 0; let totalCounted = 0;
   for (const site of sites) {
@@ -1252,7 +1252,8 @@ async function runPlaybookStep(runId: string, sites: Site[], activeRun: ActiveRu
     }
   }
   const ws = activeRun.workspaceId;
-  if (totalCounted === 0 || configuredChannels(ws).length === 0 || !notificationEventEnabled(ws, 'playbook_ready')) return;
+  // A run scoped to one site never speaks for the workspace's weekly digest.
+  if (!wholeWorkspace || totalCounted === 0 || configuredChannels(ws).length === 0 || !notificationEventEnabled(ws, 'playbook_ready')) return;
   const last = getDb().prepare('SELECT MAX(notified_at) at FROM playbook_runs WHERE site_id IN (SELECT id FROM sites WHERE workspace_id = ?)').get(ws) as { at: string | null };
   if (last.at && Date.now() - Date.parse(last.at) < PLAYBOOK_NOTIFY_EVERY_MS) return;
   const body = `${totalCounted} ranking opportunit${totalCounted === 1 ? 'y' : 'ies'} worth an estimated +${Math.round(totalLow).toLocaleString()}–${Math.round(totalHigh).toLocaleString()} Google clicks a month. Top: ${digest.slice(0, 3).join(' · ')}`;

@@ -6,7 +6,7 @@
  * per-user daily cap.
  */
 import type { Site } from '../db/database.js';
-import { completeForWorkspace, parseJsonObject } from './complete.js';
+import { completeForWorkspace, generationProvider, parseJsonObject } from './complete.js';
 import { assertWithinBudget, recordUsage } from '../platform/store.js';
 import { queriesForPage } from '../analytics/query-page-performance.js';
 import { getInventoryPage } from '../analytics/internal-links.js';
@@ -108,24 +108,37 @@ export function validateDraft(raw: Record<string, unknown>): { draft: Omit<Playb
  */
 export async function draftPlaybookFix(site: Site, o: StoredOpportunity, brandTerms: string[], userId: string | null): Promise<PlaybookDraft> {
   const ws = site.workspace_id ?? null;
+  const provider = generationProvider(ws);
+  if (!provider) throw Object.assign(new Error('No AI provider is configured. Add an OpenAI, Anthropic, Gemini, xAI or Perplexity key under Settings → API keys.'), { statusCode: 400 });
   const { system, user } = buildDraftPrompt(site, o, brandTerms);
+  let calls = 0;
+  let model = '';
   const ask = async (prompt: string) => {
+    calls++;
     const result = await completeForWorkspace(ws, system, prompt);
+    model = result.model;
     const parsed = parseJsonObject(result.text);
     if (!parsed) throw Object.assign(new Error(`${result.provider} returned no usable JSON. Try again.`), { statusCode: 502 });
     return { ...validateDraft(parsed), provider: result.provider, model: result.model };
   };
-  // Budget is checked once for the request; a retry is the same unit of work.
-  if (ws) assertWithinBudget({ workspaceId: ws, userId, provider: 'ai_draft', quantity: 1 });
-  let attempt = await ask(user);
-  let calls = 1;
-  if (attempt.errors.length) {
-    attempt = await ask(`${user}\n\nYour previous answer had these problems: ${attempt.errors.join('; ')}. Return corrected JSON only.`);
-    calls++;
+  // Every paid call is metered, including one whose output was unusable.
+  const meter = (needsEdit: number) => {
+    if (ws && calls > 0) {
+      recordUsage({ workspace_id: ws, user_id: userId, provider, operation: 'ai.playbook_draft', quantity: calls, unit: 'request', estimated_cost: 0,
+        metadata: { site_id: site.id, opportunity_id: o.id, kind: o.kind, model, needs_edit: needsEdit } });
+    }
+  };
+  // Budget is checked once for the request against the provider that will be billed; a retry is the same unit of work.
+  if (ws) assertWithinBudget({ workspaceId: ws, userId, provider, quantity: 1 });
+  try {
+    let attempt = await ask(user);
+    if (attempt.errors.length) {
+      attempt = await ask(`${user}\n\nYour previous answer had these problems: ${attempt.errors.join('; ')}. Return corrected JSON only.`);
+    }
+    meter(attempt.errors.length);
+    return { ...attempt.draft, needs_edit: attempt.errors, provider: attempt.provider, model: attempt.model };
+  } catch (e) {
+    meter(-1);
+    throw e;
   }
-  if (ws) {
-    recordUsage({ workspace_id: ws, user_id: userId, provider: attempt.provider, operation: 'ai.playbook_draft', quantity: calls, unit: 'request', estimated_cost: 0,
-      metadata: { site_id: site.id, opportunity_id: o.id, kind: o.kind, model: attempt.model, needs_edit: attempt.errors.length } });
-  }
-  return { ...attempt.draft, needs_edit: attempt.errors, provider: attempt.provider, model: attempt.model };
 }

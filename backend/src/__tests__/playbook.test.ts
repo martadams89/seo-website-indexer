@@ -91,10 +91,14 @@ describe('computePlaybook', () => {
     expect(playbook.listOpportunities(site.id).find(o => o.kind === 'ctr_gap')?.counted).toBe(0);
     const item = items.find(i => i.evidence.opportunity_id === snippet.id)!;
     store.updateWorkItem(ws.id, item.id, { status: 'done' });
+    // Pin the completion time to the frozen clock (SQLite stamps the real one).
+    db.getDb().prepare('UPDATE work_items SET resolved_at = ? WHERE id = ?').run(new Date(NOW + 2 * DAY).toISOString(), item.id);
     playbook.computePlaybook(site, NOW + 2 * DAY);
     const done = playbook.getOpportunity(site.id, snippet.id)!;
     expect(done.status).toBe('done');
-    expect(done.baseline_clicks).toBe(27); // the window has moved two days past the seeded rows
+    expect(done.done_at).toBe(new Date(NOW + 2 * DAY).toISOString());
+    // Baseline = the 28 days before the fix; two of them fall after the seeded rows.
+    expect(done.baseline_clicks).toBe(26);
     expect(playbook.playbookResults(site, NOW + 3 * DAY)[0]).toMatchObject({ id: snippet.id, status: 'measuring' });
     // Clicks double after the change while the rest of the site holds: the realised gain is site-adjusted.
     const future = db.getDb().prepare('INSERT OR REPLACE INTO perf_page_daily(site_id, day, page, clicks, impressions, position) VALUES(?,?,?,?,?,?)');

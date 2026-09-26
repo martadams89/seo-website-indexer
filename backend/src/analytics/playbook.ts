@@ -19,7 +19,7 @@ import {
   computeOpportunities, MONTHLY, sig2,
   type Opportunity, type Blocker, type PageHistory, type PlaybookInput, type Window, type Kind, type Effort, type Confidence, type Step,
 } from './playbook-detectors.js';
-import { createWorkItem, getWorkItem, updateWorkItem, resolveWorkItemsBySourceRef, getOpenWorkItemRefs, countOpenWorkItems, listWorkItems } from '../platform/store.js';
+import { createWorkItem, getWorkItem, updateWorkItem, resolveWorkItemsBySourceRef, getActiveWorkItemRefs, countOpenWorkItems } from '../platform/store.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATA_LAG_DAYS = 3;
@@ -31,41 +31,53 @@ const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 // ── Page history from perf_page_daily ───────────────────────────────────────
 
-interface DailyRow { day: string; page: string; clicks: number; impressions: number; position: number }
-
-function window(rows: DailyRow[]): Window {
-  const clicks = rows.reduce((s, r) => s + r.clicks, 0);
-  const impressions = rows.reduce((s, r) => s + r.impressions, 0);
-  const position = impressions ? rows.reduce((s, r) => s + r.position * r.impressions, 0) / impressions : 0;
-  return { clicks, impressions, position, days: new Set(rows.map(r => r.day)).size };
-}
-
-/** W28 / P28 / B28 windows, halves, weekly clicks and the first 21 days for every page. */
-export function pageHistories(siteId: string, now: number): { pages: Map<string, PageHistory>; site: { w28: Window; p28: Window } } {
-  const end = now - DATA_LAG_DAYS * DAY_MS;              // exclusive
-  const w28From = end - 28 * DAY_MS;
-  const p28From = w28From - 28 * DAY_MS;
-  const b28From = p28From - 28 * DAY_MS;
-  const rows = getDb().prepare('SELECT day, page, clicks, impressions, position FROM perf_page_daily WHERE site_id = ? AND day >= ? AND day < ?')
-    .all(siteId, ymd(b28From), ymd(end)) as DailyRow[];
-  const byPage = new Map<string, DailyRow[]>();
-  for (const r of rows) byPage.set(r.page, [...(byPage.get(r.page) ?? []), r]);
+/**
+ * W28 / P28 / B28 windows, halves, weekly clicks and the first 21 days for
+ * every page, aggregated in SQL so a large site costs one row per page. All
+ * windows end on the same day as the query×page window (now − 3 days,
+ * inclusive) so ratios between the two data sets compare the same dates.
+ */
+export function pageHistories(siteId: string, now: number, onlyPages?: string[]): { pages: Map<string, PageHistory>; site: { w28: Window; p28: Window } } {
+  const endDay = ymd(now - DATA_LAG_DAYS * DAY_MS);        // inclusive
+  const day = (offset: number) => ymd(now - (DATA_LAG_DAYS + offset) * DAY_MS);
+  const w28From = day(27); const p28From = day(55); const b28From = day(83);
+  const mid = day(13); const first21End = day(6);
+  const weekStarts = [day(27), day(20), day(13), day(6)];
+  const win = (from: string, to: string, prefix: string) => `
+    SUM(CASE WHEN day >= '${from}' AND day <= '${to}' THEN clicks ELSE 0 END) ${prefix}_clicks,
+    SUM(CASE WHEN day >= '${from}' AND day <= '${to}' THEN impressions ELSE 0 END) ${prefix}_impressions,
+    SUM(CASE WHEN day >= '${from}' AND day <= '${to}' THEN position * impressions ELSE 0 END) ${prefix}_weighted,
+    COUNT(DISTINCT CASE WHEN day >= '${from}' AND day <= '${to}' THEN day END) ${prefix}_days`;
+  const filter = onlyPages?.length ? ` AND page IN (${onlyPages.map(() => '?').join(',')})` : '';
+  const rows = getDb().prepare(`
+    SELECT page,
+      ${win(w28From, endDay, 'w')}, ${win(p28From, day(28), 'p')}, ${win(b28From, day(56), 'b')},
+      ${win(w28From, mid, 'h1')}, ${win(day(12), endDay, 'h2')},
+      ${weekStarts.map((from, i) => `SUM(CASE WHEN day >= '${from}' AND day <= '${i === 3 ? endDay : day(27 - (i + 1) * 7 + 1)}' THEN clicks ELSE 0 END) wk${i}`).join(', ')},
+      SUM(CASE WHEN day >= '${w28From}' AND day <= '${first21End}' THEN clicks ELSE 0 END) first21
+    FROM perf_page_daily WHERE site_id = ? AND day >= '${b28From}' AND day <= '${endDay}'${filter}
+    GROUP BY page
+  `).all(siteId, ...(onlyPages?.length ? onlyPages : [])) as Array<Record<string, number> & { page: string }>;
+  const window = (r: Record<string, number>, prefix: string): Window => ({
+    clicks: r[`${prefix}_clicks`] ?? 0, impressions: r[`${prefix}_impressions`] ?? 0,
+    position: r[`${prefix}_impressions`] ? (r[`${prefix}_weighted`] ?? 0) / r[`${prefix}_impressions`] : 0, days: r[`${prefix}_days`] ?? 0,
+  });
   const pages = new Map<string, PageHistory>();
-  const siteW28: DailyRow[] = []; const siteP28: DailyRow[] = [];
-  for (const [page, list] of byPage) {
-    const w = list.filter(r => r.day >= ymd(w28From));
-    const p = list.filter(r => r.day >= ymd(p28From) && r.day < ymd(w28From));
-    const b = list.filter(r => r.day >= ymd(b28From) && r.day < ymd(p28From));
-    siteW28.push(...w); siteP28.push(...p);
-    const mid = ymd(w28From + 14 * DAY_MS);
-    const weeks = [0, 1, 2, 3].map(i => w.filter(r => r.day >= ymd(w28From + i * 7 * DAY_MS) && r.day < ymd(w28From + (i + 1) * 7 * DAY_MS)).reduce((s, r) => s + r.clicks, 0));
-    pages.set(page, {
-      url: page, w28: window(w), p28: window(p), b28: b.length ? window(b) : null,
-      halves: [window(w.filter(r => r.day < mid)), window(w.filter(r => r.day >= mid))],
-      weeks, first21: w.filter(r => r.day < ymd(w28From + 21 * DAY_MS)).reduce((s, r) => s + r.clicks, 0),
+  const site = { w28: { clicks: 0, impressions: 0, position: 0, days: 0 }, p28: { clicks: 0, impressions: 0, position: 0, days: 0 } };
+  let wWeighted = 0; let pWeighted = 0;
+  for (const r of rows) {
+    const w28 = window(r, 'w'); const p28 = window(r, 'p'); const b = window(r, 'b');
+    site.w28.clicks += w28.clicks; site.w28.impressions += w28.impressions; wWeighted += r.w_weighted ?? 0; site.w28.days = Math.max(site.w28.days, w28.days);
+    site.p28.clicks += p28.clicks; site.p28.impressions += p28.impressions; pWeighted += r.p_weighted ?? 0; site.p28.days = Math.max(site.p28.days, p28.days);
+    pages.set(r.page, {
+      url: r.page, w28, p28, b28: b.days > 0 ? b : null,
+      halves: [window(r, 'h1'), window(r, 'h2')],
+      weeks: [r.wk0 ?? 0, r.wk1 ?? 0, r.wk2 ?? 0, r.wk3 ?? 0], first21: r.first21 ?? 0,
     });
   }
-  return { pages, site: { w28: window(siteW28), p28: window(siteP28) } };
+  site.w28.position = site.w28.impressions ? wWeighted / site.w28.impressions : 0;
+  site.p28.position = site.p28.impressions ? pWeighted / site.p28.impressions : 0;
+  return { pages, site };
 }
 
 // ── Input assembly ───────────────────────────────────────────────────────────
@@ -74,7 +86,8 @@ export function buildPlaybookInput(site: Site, now: number = Date.now()): Playbo
   const { pages, site: totals } = pageHistories(site.id, now);
   const sync = getQueryPageSync(site.id);
   const rows = queryPageRows(site.id);
-  const meta = new Map(listInventory(site.id).map(p => [linkKey(p.url), { status: p.status, title: p.title, h1: p.h1, words: p.words, robots: p.robots, fetchedAt: p.fetched_at }]));
+  const inventory = listInventory(site.id);
+  const meta = new Map(inventory.map(p => [linkKey(p.url), { status: p.status, title: p.title, h1: p.h1, words: p.words, robots: p.robots, fetchedAt: p.fetched_at }]));
   const states = getUrlsBySite(site.id).filter(s => s.indexnow_only !== 1);
   const index = new Map(states.filter(s => s.gsc_verdict || s.content_changed_at).map(s => [linkKey(s.url), {
     verdict: s.gsc_verdict ?? null, coverage: s.gsc_coverage_state ?? null, indexingState: s.gsc_indexing_state ?? null,
@@ -87,7 +100,7 @@ export function buildPlaybookInput(site: Site, now: number = Date.now()): Playbo
     }
   }
   const report = analyseInternalLinks({
-    sitemapUrls: states.map(s => s.url), pages: listInventory(site.id), perf: pagePerformance(site.id, 28, now),
+    sitemapUrls: states.map(s => s.url), pages: inventory, perf: pagePerformance(site.id, 28, now),
     indexed: new Set(states.filter(s => s.gsc_verdict === 'PASS').map(s => s.url)),
     // Suggestions are quadratic in page count; 120 targets covers every page the detectors can price.
     maxTargets: 120,
@@ -118,8 +131,9 @@ const hydrate = (r: Row): StoredOpportunity => ({
   ...r, steps: JSON.parse(r.steps) as Step[], evidence: JSON.parse(r.evidence) as Record<string, unknown>, draft: r.draft ? JSON.parse(r.draft) as Record<string, unknown> : null,
 });
 
-export function opportunityId(siteId: string, o: Pick<Opportunity, 'kind' | 'page' | 'secondaryPage'>): string {
-  return createHash('sha1').update(`${siteId}|${o.kind}|${linkKey(o.page)}|${o.secondaryPage ? linkKey(o.secondaryPage) : ''}`).digest('hex').slice(0, 24);
+export function opportunityId(siteId: string, o: Pick<Opportunity, 'kind' | 'page' | 'secondaryPage' | 'subtype'>): string {
+  const family = o.kind === 'ctr_gap' && o.subtype === 'regression' ? 'ctr_regression' : o.kind;
+  return createHash('sha1').update(`${siteId}|${family}|${linkKey(o.page)}|${o.secondaryPage ? linkKey(o.secondaryPage) : ''}`).digest('hex').slice(0, 24);
 }
 
 export function getOpportunity(siteId: string, id: string): StoredOpportunity | null {
@@ -155,9 +169,17 @@ function persist(site: Site, result: ReturnType<typeof computeOpportunities>, no
   const upsert = db.prepare(`
     INSERT INTO playbook_opportunities(id, site_id, kind, subtype, page, secondary_page, headline, steps, evidence, low, high, point, effort, confidence, counted, hidden, status, changed, dismissed_high, first_seen, last_seen, computed_at)
     VALUES(@id, @site_id, @kind, @subtype, @page, @secondary_page, @headline, @steps, @evidence, @low, @high, @point, @effort, @confidence, @counted, @hidden, @status, @changed, @dismissed_high, @first_seen, @last_seen, @computed_at)
-    ON CONFLICT(id) DO UPDATE SET subtype=excluded.subtype, page=excluded.page, secondary_page=excluded.secondary_page, headline=excluded.headline, steps=excluded.steps,
-      evidence=excluded.evidence, low=excluded.low, high=excluded.high, point=excluded.point, effort=excluded.effort, confidence=excluded.confidence,
-      counted=excluded.counted, hidden=excluded.hidden, status=excluded.status, changed=excluded.changed, last_seen=excluded.last_seen, computed_at=excluded.computed_at
+    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen, computed_at=excluded.computed_at, status=excluded.status, changed=excluded.changed,
+      -- A done item keeps the estimate it was done against, so Results compare like with like.
+      subtype=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.subtype ELSE excluded.subtype END,
+      page=excluded.page, secondary_page=excluded.secondary_page,
+      headline=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.headline ELSE excluded.headline END,
+      steps=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.steps ELSE excluded.steps END,
+      evidence=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.evidence ELSE excluded.evidence END,
+      low=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.low ELSE excluded.low END,
+      high=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.high ELSE excluded.high END,
+      point=CASE WHEN playbook_opportunities.status='done' THEN playbook_opportunities.point ELSE excluded.point END,
+      effort=excluded.effort, confidence=excluded.confidence, counted=excluded.counted, hidden=excluded.hidden
   `);
   const fresh: StoredOpportunity[] = [];
   db.transaction(() => {
@@ -187,7 +209,8 @@ function persist(site: Site, result: ReturnType<typeof computeOpportunities>, no
   return { fresh, resolvedRefs };
 }
 
-const workItemRef = (site: Site, o: Pick<StoredOpportunity, 'kind' | 'page'>) => `${site.id}:${o.kind}:${o.page}`;
+const workItemRef = (site: Site, o: Pick<StoredOpportunity, 'kind' | 'page' | 'secondary_page'>) =>
+  `${site.id}:${o.kind}:${o.page}${o.secondary_page ? `|${o.secondary_page}` : ''}`;
 
 const KIND_LABEL: Record<Kind, string> = { ctr_gap: 'Snippet', striking_distance: 'Striking distance', cannibalisation: 'Cannibalisation', content_decay: 'Content decay' };
 const EFFORT_LABEL: Record<Effort, string> = { S: 'about an hour', M: 'about half a day', L: 'a day or more' };
@@ -203,30 +226,50 @@ function workItemFor(site: Site, o: StoredOpportunity, extra: Record<string, unk
   });
 }
 
-/** Raise a few new Action Centre items per run, close the ones that resolved, and pick up items people finished. */
-function syncWorkItems(site: Site, now: number, resolvedRefs: string[]): { raised: number } {
+/** Work items finished by a person (auto-closes carry evidence.auto_resolved_at; reopened ones are marked). */
+function finishedWorkItems(site: Site): Array<{ id: string; opportunityId: string; resolvedAt: string | null }> {
+  if (!site.workspace_id) return [];
+  return (getDb().prepare(`
+    SELECT id, evidence, resolved_at FROM work_items
+    WHERE workspace_id = ? AND site_id = ? AND source = 'playbook' AND status = 'done'
+      AND json_extract(evidence, '$.auto_resolved_at') IS NULL AND json_extract(evidence, '$.playbook_reopened_at') IS NULL
+  `).all(site.workspace_id, site.id) as Array<{ id: string; evidence: string; resolved_at: string | null }>)
+    .map(r => ({ id: r.id, opportunityId: String((JSON.parse(r.evidence) as { opportunity_id?: string }).opportunity_id ?? ''), resolvedAt: r.resolved_at }));
+}
+
+/** SQLite's datetime('now') has no zone marker; normalise every done timestamp to ISO UTC. */
+function isoTimestamp(value: string | null | undefined, fallback: number): string {
+  if (!value) return new Date(fallback).toISOString();
+  const ms = Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`);
+  return new Date(Number.isFinite(ms) ? ms : fallback).toISOString();
+}
+
+/** Adopt Action Centre items people finished: the opportunity is done, with a baseline taken at that moment. */
+function adoptFinishedWorkItems(site: Site, now: number): void {
+  for (const item of finishedWorkItems(site)) {
+    const o = item.opportunityId ? getOpportunity(site.id, item.opportunityId) : null;
+    if (!o || o.status !== 'open') continue;
+    markDone(site, o, now, isoTimestamp(item.resolvedAt, now));
+  }
+}
+
+/** Raise a few new Action Centre items per run and close the ones that resolved. */
+function syncWorkItems(site: Site, resolvedRefs: string[]): { raised: number } {
   if (!site.workspace_id) return { raised: 0 };
   const ws = site.workspace_id;
   const db = getDb();
   if (resolvedRefs.length) resolveWorkItemsBySourceRef(ws, 'playbook', resolvedRefs);
-
-  // Finished by a person (auto-closes carry evidence.auto_resolved_at): mark done and capture the baseline.
-  for (const item of listWorkItems(ws, { status: 'done', includeSnoozed: true, limit: 500 })) {
-    if (item.source !== 'playbook' || item.site_id !== site.id || item.evidence.auto_resolved_at) continue;
-    const id = String(item.evidence.opportunity_id ?? '');
-    const o = id ? getOpportunity(site.id, id) : null;
-    if (o && o.status === 'open') markDone(site, o, now, item.resolved_at ?? undefined);
-  }
-
-  const open = new Set(getOpenWorkItemRefs(ws, site.id, 'playbook'));
+  // Anything not done/dismissed already has an item (createWorkItem dedupes on the same rule).
+  const active = new Set(getActiveWorkItemRefs(ws, site.id, 'playbook'));
+  let openCount = countOpenWorkItems(ws, site.id, 'playbook');
   let raised = 0;
   for (const o of listOpportunities(site.id, { status: ['open'] })) {
-    if (raised >= MAX_NEW_WORK_ITEMS_PER_RUN || countOpenWorkItems(ws, site.id, 'playbook') >= MAX_OPEN_WORK_ITEMS_PER_SITE) break;
-    if (!o.counted || o.hidden || open.has(workItemRef(site, o))) continue;
+    if (raised >= MAX_NEW_WORK_ITEMS_PER_RUN || openCount >= MAX_OPEN_WORK_ITEMS_PER_SITE) break;
+    if (!o.counted || o.hidden || active.has(workItemRef(site, o))) continue;
     const item = workItemFor(site, o);
     db.prepare('UPDATE playbook_opportunities SET work_item_id = ? WHERE id = ?').run(item.id, o.id);
-    open.add(workItemRef(site, o));
-    raised++;
+    active.add(workItemRef(site, o));
+    raised++; openCount++;
   }
   return { raised };
 }
@@ -243,8 +286,10 @@ export function computePlaybook(site: Site, now: number = Date.now()): ComputeOu
   const input = buildPlaybookInput(site, now);
   if (input.pages.size === 0) return null;
   const result = computeOpportunities(input);
+  // People's finished items are adopted before persistence so a fixed page whose signal vanished still gets measured.
+  adoptFinishedWorkItems(site, now);
   const { fresh, resolvedRefs } = persist(site, result, now);
-  const { raised } = syncWorkItems(site, now, resolvedRefs);
+  const { raised } = syncWorkItems(site, resolvedRefs);
   const stored = listOpportunities(site.id, { status: ['open'] });
   const quick = stored.filter(o => o.counted && !o.hidden && o.effort === 'S').slice(0, 20);
   const kinds: Record<string, number> = {};
@@ -262,19 +307,21 @@ export function computePlaybook(site: Site, now: number = Date.now()): ComputeOu
   return { summary, blockers: result.blockers, raised, fresh: fresh.length };
 }
 
-/** Force a fresh query×page window, then recompute. */
-export async function refreshPlaybook(site: Site, now: number = Date.now()): Promise<ComputeOutcome | null> {
-  await syncQueryPagePerformance(site, { now, force: true });
+/** Refresh the query×page window (forced unless `fetch` is false), then recompute. */
+export async function refreshPlaybook(site: Site, now: number = Date.now(), fetch = true): Promise<ComputeOutcome | null> {
+  if (fetch) await syncQueryPagePerformance(site, { now, force: true });
   return computePlaybook(site, now);
 }
 
 // ── People's actions ─────────────────────────────────────────────────────────
 
 export function markDone(site: Site, o: StoredOpportunity, now: number, doneAt?: string): StoredOpportunity {
-  const { pages, site: totals } = pageHistories(site.id, now);
-  const page = pages.get(o.page);
+  const at = doneAt ?? new Date(now).toISOString();
+  // The baseline is the 28 days before the fix, whenever the run happens to notice it.
+  const { pages, site: totals } = pageHistories(site.id, Math.min(now, Date.parse(at) || now));
+  const page = pages.get(o.page) ?? [...pages.values()].find(p => linkKey(p.url) === linkKey(o.page));
   getDb().prepare(`UPDATE playbook_opportunities SET status = 'done', done_at = ?, baseline_clicks = ?, baseline_site_clicks = ? WHERE id = ?`)
-    .run(doneAt ?? new Date(now).toISOString(), page?.w28.clicks ?? 0, totals.w28.clicks, o.id);
+    .run(at, page ? page.w28.clicks : null, totals.w28.clicks, o.id);
   return getOpportunity(site.id, o.id)!;
 }
 
@@ -293,7 +340,11 @@ export function setOpportunityStatus(site: Site, id: string, status: 'open' | 'd
     getDb().prepare(`UPDATE playbook_opportunities SET status = 'dismissed', dismissed_high = ?, changed = 0 WHERE id = ?`).run(o.high, id);
     if (site.workspace_id) resolveWorkItemsBySourceRef(site.workspace_id, 'playbook', [workItemRef(site, o)]);
   } else {
-    getDb().prepare(`UPDATE playbook_opportunities SET status = 'open', changed = 0, done_at = NULL, baseline_clicks = NULL, baseline_site_clicks = NULL WHERE id = ?`).run(id);
+    getDb().prepare(`UPDATE playbook_opportunities SET status = 'open', changed = 0, done_at = NULL, baseline_clicks = NULL, baseline_site_clicks = NULL, work_item_id = NULL WHERE id = ?`).run(id);
+    if (site.workspace_id && o.work_item_id) {
+      const item = getWorkItem(site.workspace_id, o.work_item_id);
+      if (item?.status === 'done') updateWorkItem(site.workspace_id, item.id, { evidence: { playbook_reopened_at: new Date(now).toISOString() } });
+    }
   }
   return getOpportunity(site.id, id);
 }
@@ -302,6 +353,7 @@ export function setOpportunityStatus(site: Site, id: string, status: 'open' | 'd
 export function sendToWork(site: Site, id: string): StoredOpportunity | null {
   const o = getOpportunity(site.id, id);
   if (!o || !site.workspace_id) return null;
+  if (o.status !== 'open') throw Object.assign(new Error('Reopen the opportunity before sending it to Work.'), { statusCode: 409 });
   const item = workItemFor(site, o, o.draft ? { draft: o.draft } : {});
   if (o.draft && !item.evidence.draft) updateWorkItem(site.workspace_id, item.id, { evidence: { draft: o.draft } });
   getDb().prepare('UPDATE playbook_opportunities SET work_item_id = ? WHERE id = ?').run(item.id, id);
@@ -324,15 +376,16 @@ export interface Result {
 export function playbookResults(site: Site, now: number = Date.now()): Result[] {
   const done = listOpportunities(site.id, { status: ['done'] }).filter(o => o.done_at);
   if (done.length === 0) return [];
-  const { pages, site: totals } = pageHistories(site.id, now);
   return done.map(o => {
     const doneAt = Date.parse(o.done_at!);
     const ready = doneAt + (MEASURE_AFTER_DAYS + DATA_LAG_DAYS) * DAY_MS;
     const base: Result = { id: o.id, kind: o.kind, page: o.page, headline: o.headline, doneAt: o.done_at!, low: o.low, high: o.high, status: 'measuring', readyOn: ymd(ready), realised: null, withinRange: null };
     if (now < ready || o.baseline_clicks === null) return base;
-    const page = pages.get(o.page);
+    // Measured once, on the 28 days ending 31 days after the change; it does not drift with later views.
+    const page = pageHistories(site.id, ready, [o.page]).pages.get(o.page);
+    const siteTotals = pageHistories(site.id, ready).site;
     // Site-adjusted: what the page would have done had it moved with the rest of the site.
-    const siteFactor = o.baseline_site_clicks ? totals.w28.clicks / o.baseline_site_clicks : 1;
+    const siteFactor = o.baseline_site_clicks ? siteTotals.w28.clicks / o.baseline_site_clicks : 1;
     const expected = o.baseline_clicks * Math.min(2, Math.max(0.5, siteFactor));
     const realised = sig2(((page?.w28.clicks ?? 0) - expected) * MONTHLY);
     return { ...base, status: 'measured' as const, realised, withinRange: realised >= o.low };

@@ -84,3 +84,17 @@ describe('syncQueryPagePerformance', () => {
     expect(sync).toMatchObject({ truncated: 1, row_count: 75_000 });
   });
 });
+
+describe('partial windows', () => {
+  it('keeps the head of a window when a later page fails, marked truncated with the error', async () => {
+    const site = makeSite('https://qp4.example/');
+    gscQuery.mockReset();
+    const full = Array.from({ length: 25_000 }, (_, i) => row(`q${i}`, 'https://qp4.example/p', 1, 2, 9));
+    gscQuery.mockResolvedValueOnce(full).mockRejectedValueOnce(new Error('GSC 429: quota'));
+    const sync = await qp.syncQueryPagePerformance(site, { now: NOW });
+    expect(sync).toMatchObject({ truncated: 1, row_count: 25_000 });
+    expect(sync?.error).toMatch(/Partial window: GSC 429/);
+    expect(sync?.success_at).toBeTruthy();
+    expect(qp.queryPageRows(site.id)).toHaveLength(25_000);
+  });
+});

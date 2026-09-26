@@ -269,3 +269,70 @@ describe('ranking and summary', () => {
     expect(r.summary.counted).toBe(0);
   });
 });
+
+describe('review-driven cases', () => {
+  const meta = new Map([['acme.example/boots', { status: 200, title: 'Boots', h1: 'Boots', words: 800, robots: null, fetchedAt: new Date(NOW).toISOString() }]]);
+  const rows = [row('waterproof boots', '/boots', 6, 1200, 4.2), row('best hiking boots', '/boots', 4, 900, 5.1), row('boots for winter', '/boots', 2, 600, 6.0)];
+
+  it('demotes query-based confidence one level on a truncated window, leaving decay alone', () => {
+    const r = computeOpportunities(input({ rows, meta, truncated: true, pages: [
+      history('/boots', win(12, 3000, 5)),
+      history('/repair', win(60, 2400, 9.3), win(200, 2600, 4.8), win(180, 2500, 5.0), { weeks: [18, 15, 14, 13], first21: 46 }),
+      history('/stable', win(500, 8000, 3)),
+    ] }));
+    expect(r.opportunities.find(o => o.kind === 'ctr_gap')).toMatchObject({ confidence: 'low', hidden: true });
+    expect(r.opportunities.find(o => o.kind === 'content_decay')?.confidence).toBe('medium');
+  });
+
+  it('halves the floors only for small sites', () => {
+    const thin = [row('q1', '/boots', 0, 220, 4.5), row('q2', '/boots', 0, 180, 5.5)]; // 400 priced impressions
+    const small = computeOpportunities(input({ rows: thin, meta, pages: [history('/boots', win(0, 480, 5))] }));
+    expect(small.smallSite).toBe(true);
+    expect(small.opportunities.some(o => o.kind === 'ctr_gap')).toBe(true);
+    const big = computeOpportunities(input({ rows: thin, meta, pages: [history('/boots', win(0, 480, 5))], site: { w28: win(5000, 60000, 6), p28: win(5000, 60000, 6) } }));
+    expect(big.smallSite).toBe(false);
+    expect(big.opportunities.some(o => o.kind === 'ctr_gap')).toBe(false); // 400 < 500
+  });
+
+  it('uses the scaled path at 40-60% coverage and the page path below 40%, with honest CTR figures', () => {
+    const scaled = computeOpportunities(input({ rows, meta, pages: [history('/boots', win(20, 5400, 5))] })); // coverage 0.5
+    const s = scaled.opportunities.find(o => o.kind === 'ctr_gap')!;
+    expect(s.subtype).toBe('scaled');
+    expect(s.confidence).toBe('medium');
+    expect(s.evidence.coverage).toBe(0.5);
+    // The displayed CTRs come from the unscaled rows: 12/2700 observed.
+    expect(s.evidence.actualCtr).toBeCloseTo(12 / 2700, 3);
+    const page = computeOpportunities(input({ rows: [row('waterproof boots', '/boots', 2, 600, 4.2)], meta, pages: [history('/boots', win(6, 3000, 4.5))] })); // coverage 0.2
+    const p = page.opportunities.find(o => o.kind === 'ctr_gap')!;
+    expect(p.subtype).toBe('page');
+    expect(p.confidence).toBe('low');
+    expect(p.hidden).toBe(true);
+  });
+
+  it('does not let a hidden item block the page\'s counted item', () => {
+    const r = computeOpportunities(input({ rows, meta, truncated: true, pages: [history('/boots', win(12, 3000, 5))] }));
+    // Both items are demoted to low/hidden under truncation, so nothing is counted; with a visible decay item the page still gets one.
+    expect(r.summary.counted).toBe(0);
+    const mixed = computeOpportunities(input({
+      rows: [row('waterproof boots', '/boots', 2, 600, 4.2)], meta,
+      pages: [history('/boots', win(60, 3000, 9.3), win(200, 3200, 4.8), null, { weeks: [18, 15, 14, 13], first21: 46 }), history('/stable', win(500, 8000, 3))],
+    }));
+    const boots = mixed.opportunities.filter(o => o.page === `${O}/boots`);
+    expect(boots.some(o => o.hidden)).toBe(true);           // the page-path snippet item is hidden
+    expect(boots.filter(o => o.counted)).toHaveLength(1);   // the decay item is still counted
+  });
+
+  it('ignores stale or recovered title regressions and keeps category words searchable for generic site names', () => {
+    const change = (changedAt: string) => ({
+      id: 1, site_id: 's', url: `${O}/boots`, changed_at: changedAt, old_title: 'Waterproof hiking boots', new_title: 'Boots', old_description: null, new_description: null,
+      before: { clicks: 120, impressions: 2000, ctr: 0.06, position: 4.1, days: 28 }, after: { clicks: 60, impressions: 2000, ctr: 0.03, position: 4.3, days: 28 },
+      ctrChangePct: -50, positionChange: 0.2, verdict: 'worse' as const, readyOn: '2026-09-10',
+    });
+    const stale = computeOpportunities(input({ pages: [history('/boots', win(40, 2000, 4))], snippetChanges: [change('2026-01-10T10:00:00Z')] }));
+    expect(stale.opportunities.some(o => o.subtype === 'regression')).toBe(false);
+    const recovered = computeOpportunities(input({ pages: [history('/boots', win(130, 2000, 4))], snippetChanges: [change('2026-08-20T10:00:00Z')] }));
+    expect(recovered.opportunities.some(o => o.subtype === 'regression')).toBe(false);
+    expect(brandTermsFor('Best Hiking Boots', 'besthikingboots.com', [], [])).not.toContain('best');
+    expect(brandTermsFor('Cheap Flights Ltd', 'cheapflights.com', [], [])).not.toContain('cheap');
+  });
+});

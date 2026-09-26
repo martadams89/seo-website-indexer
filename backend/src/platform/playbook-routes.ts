@@ -12,6 +12,8 @@ import type { User } from '../auth/users.js';
 import { canUseAiCitations, workspaceRole } from '../auth/workspaces.js';
 import { getPlaybook, getPlaybookRun, listOpportunities, getOpportunity, refreshPlaybook, setOpportunityStatus, sendToWork, saveDraft } from '../analytics/playbook.js';
 import { draftPlaybookFix } from '../ai/playbook-draft.js';
+import { generationProvider } from '../ai/complete.js';
+import { getQueryPageSync } from '../analytics/query-page-performance.js';
 
 const AI_DRAFT_DAILY_LIMIT = parseInt(process.env.AI_DRAFT_DAILY_LIMIT ?? '25', 10);
 
@@ -37,8 +39,16 @@ function assertDraftAllowed(req: FastifyRequest): void {
   if (used + 1 > AI_DRAFT_DAILY_LIMIT) {
     throw Object.assign(new Error(`Daily AI draft limit reached (${AI_DRAFT_DAILY_LIMIT}/day). Ask a super-admin if you need more.`), { statusCode: 429 });
   }
+}
+
+/** Only a produced draft counts against the daily allowance. */
+function recordDraftUse(req: FastifyRequest): void {
+  const { user, workspaceId } = context(req);
+  if (user.is_super_admin || !workspaceId || workspaceRole(user, workspaceId) === 'owner') return;
   incrementQuota('ai_playbook_draft', `user:${user.id}`);
 }
+
+const REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
 
 export function registerPlaybookRoutes(app: FastifyInstance): void {
   app.get('/api/sites/:id/playbook', async (req, reply) => {
@@ -49,7 +59,10 @@ export function registerPlaybookRoutes(app: FastifyInstance): void {
   app.post('/api/sites/:id/playbook/refresh', async (req, reply) => {
     const site = siteFor(req);
     if (!site.google_account_id) return reply.code(400).send({ error: 'Link a Google account and Search Console property to this website first.' });
-    await refreshPlaybook(site);
+    // A fresh window within the last ten minutes is reused: each refresh spends Search Console quota.
+    const sync = getQueryPageSync(site.id);
+    const fresh = !!sync?.success_at && !sync.error && Date.now() - Date.parse(sync.success_at) < REFRESH_COOLDOWN_MS;
+    await refreshPlaybook(site, Date.now(), !fresh);
     return getPlaybook(site.id);
   });
 
@@ -73,16 +86,26 @@ export function registerPlaybookRoutes(app: FastifyInstance): void {
     const o = getOpportunity(site.id, (req.params as { oppId: string }).oppId);
     if (!o) return reply.code(404).send({ error: 'Opportunity not found' });
     try {
+      if (!generationProvider(site.workspace_id ?? null)) {
+        return reply.code(400).send({ error: 'No AI provider is configured. Add an OpenAI, Anthropic, Gemini, xAI or Perplexity key under Settings → API keys.' });
+      }
       assertDraftAllowed(req);
       const brandTerms = getPlaybookRun(site.id)?.summary.brandTerms ?? [];
       const draft = await draftPlaybookFix(site, o, brandTerms, context(req).user.id);
+      recordDraftUse(req);
       saveDraft(site.id, o.id, draft as unknown as Record<string, unknown>);
       return { opportunity: getOpportunity(site.id, o.id) };
     } catch (e) {
       const status = (e as { statusCode?: number }).statusCode
         ?? ((e as { name?: string }).name === 'TimeoutError' ? 504 : 502);
       const message = e instanceof Error ? e.message : 'AI draft failed';
-      return reply.code(status).send({ error: /HTTP 401|HTTP 403/.test(message) ? 'The AI provider rejected the API key. Check Settings → API keys.' : message });
+      const keyProblem = /HTTP 401|HTTP 403|API key not valid|invalid_api_key|Incorrect API key/i.test(message);
+      // Provider bodies stay in the server log; the person sees a plain reason.
+      const providerFailure = status >= 500 && /HTTP \d{3}/.test(message);
+      if (providerFailure) console.warn(`[playbook] draft failed for ${site.domain}: ${message}`);
+      return reply.code(keyProblem ? 400 : status).send({
+        error: keyProblem ? 'The AI provider rejected the API key. Check Settings → API keys.' : providerFailure ? 'The AI provider returned an error. Try again in a minute.' : message,
+      });
     }
   });
 

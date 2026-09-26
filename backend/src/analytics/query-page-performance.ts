@@ -96,14 +96,24 @@ async function fetchWindow(site: Site, identity: string, now: number): Promise<Q
     INSERT OR REPLACE INTO perf_query_page_sync(site_id, identity, checked_at, success_at, error, truncated, period_start, period_end, row_count)
     VALUES(?,?,?,?,?,?,?,?,?)
   `);
+  const rows: QueryPageRow[] = [];
+  let truncated = false;
+  let partialError: string | null = null;
   try {
     const token = await getAccessTokenForAccount(site.google_account_id!);
-    const rows: QueryPageRow[] = [];
-    let truncated = false;
     for (let pageNo = 0; pageNo < MAX_PAGES; pageNo++) {
-      const batch = await gscQuery(token, site.gsc_url, {
-        startDate, endDate, dimensions: ['query', 'page'], rowLimit: PAGE_SIZE, startRow: pageNo * PAGE_SIZE, dataState: 'final',
-      });
+      let batch: Awaited<ReturnType<typeof gscQuery>>;
+      try {
+        batch = await gscQuery(token, site.gsc_url, {
+          startDate, endDate, dimensions: ['query', 'page'], rowLimit: PAGE_SIZE, startRow: pageNo * PAGE_SIZE, dataState: 'final',
+        });
+      } catch (error) {
+        // A later page failing keeps the head already fetched (Google sorts by clicks): stored as truncated.
+        if (pageNo === 0) throw error;
+        partialError = error instanceof Error ? error.message : 'Google sync failed';
+        truncated = true;
+        break;
+      }
       for (const r of batch) {
         const query = r.keys?.[0];
         const page = r.keys?.[1];
@@ -123,7 +133,7 @@ async function fetchWindow(site: Site, identity: string, now: number): Promise<Q
         ON CONFLICT(site_id, query, page) DO UPDATE SET clicks=excluded.clicks, impressions=excluded.impressions, position=excluded.position
       `);
       for (const r of rows) insert.run(site.id, r.query, r.page, r.clicks, r.impressions, r.position);
-      status.run(site.id, identity, at, at, null, truncated ? 1 : 0, startDate, endDate, rows.length);
+      status.run(site.id, identity, at, at, partialError ? `Partial window: ${partialError.slice(0, 200)}` : null, truncated ? 1 : 0, startDate, endDate, rows.length);
     })();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google sync failed';

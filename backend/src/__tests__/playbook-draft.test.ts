@@ -78,6 +78,18 @@ describe('draftPlaybookFix', () => {
     expect(usage).toMatchObject({ provider: 'anthropic', quantity: 2 });
   });
 
+  it('meters a paid call whose output was unusable, and checks the budget against the billed provider', async () => {
+    const user = users.createUser({ email: `d2-${randomUUID()}@x.com`, password: 'password123' });
+    const ws = workspaces.bootstrapUserWorkspace(user, false);
+    const siteId = randomUUID();
+    db.upsertSite({ id: siteId, name: 'Garbage Co', domain: `${siteId}.example`, sitemap_url: 'https://g.example/sitemap.xml', gsc_url: 'https://g.example/', enabled: 1, workspace_id: ws.id });
+    db.setWorkspaceSetting(ws.id, 'openai_api_key', 'sk-test');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ choices: [{ message: { content: 'Sorry, I cannot help with that.' } }] })));
+    await expect(draft.draftPlaybookFix(db.getSiteById(siteId)!, opportunity(siteId), [], user.id)).rejects.toMatchObject({ statusCode: 502 });
+    const usage = store.usageSummary(ws.id).rows.find(r => r.operation === 'ai.playbook_draft');
+    expect(usage).toMatchObject({ provider: 'openai', quantity: 1 });
+  });
+
   it('fails clearly without a provider', async () => {
     const siteId = randomUUID();
     db.upsertSite({ id: siteId, name: 'No AI', domain: `${siteId}.example`, sitemap_url: 'https://x.example/sitemap.xml', gsc_url: 'https://x.example/', enabled: 1 });

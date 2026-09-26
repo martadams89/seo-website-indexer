@@ -153,7 +153,8 @@ const ctrOf = (w: { clicks: number; impressions: number }) => (w.impressions ? w
 
 // ── Brand terms ──────────────────────────────────────────────────────────────
 
-const GENERIC = new Set(['shop', 'store', 'blog', 'home', 'online', 'official', 'company', 'group', 'limited', 'ltd', 'inc', 'the', 'and']);
+const GENERIC = new Set(['shop', 'store', 'blog', 'home', 'online', 'official', 'company', 'group', 'limited', 'ltd', 'inc', 'the', 'and',
+  'best', 'cheap', 'top', 'free', 'buy', 'guide', 'guides', 'review', 'reviews', 'compare', 'deals', 'sale', 'discount', 'local', 'near', 'new', 'good', 'great', 'easy', 'fast', 'quick', 'pro', 'plus', 'expert', 'experts', 'smart', 'simple', 'direct', 'world', 'global', 'digital', 'services', 'service', 'solutions']);
 
 /**
  * Brand terms. Single tokens come only from the domain label and the first
@@ -171,7 +172,8 @@ export function brandTermsFor(siteName: string, domain: string, titles: string[]
   if (labels.length >= 3 && label.length <= 3 && labels[labels.length - 1].length === 2) label = labels[labels.length - 3];
   if (label.length >= 3) out.add(label.replace(/-/g, ''));
   const nameTokens = terms(siteName);
-  if (nameTokens[0] && nameTokens[0].length >= 4 && !GENERIC.has(nameTokens[0])) out.add(nameTokens[0]);
+  // The first name word is a brand token only when the domain agrees with it ("Acme Boots" / acme.example).
+  if (nameTokens[0] && nameTokens[0].length >= 4 && !GENERIC.has(nameTokens[0]) && label.replace(/-/g, '').includes(nameTokens[0])) out.add(nameTokens[0]);
   if (nameTokens.length >= 2) out.add(nameTokens.join(' '));
   for (const t of extra) { const n = t.trim().toLowerCase(); if (n.length >= 3) out.add(n); }
   // Dominant suffix: "Page title | Acme Boots" on at least 30% of titles.
@@ -321,28 +323,33 @@ function detectCtrGap(ctx: Ctx): Opportunity[] {
 
     let E = 0; let O = 0; let path: 'query' | 'scaled' | 'page'; let confidence: Confidence = 'medium'; let threshold = 0.65;
     let pricedPositions: Array<{ position: number; impressions: number }> = priced.map(r => ({ position: r.position, impressions: r.impressions }));
+    // Unscaled expectation and observation over the rows shown as evidence.
+    const rawE = priced.reduce((s, r) => s + r.impressions * curve.at(r.position), 0);
+    const rawO = priced.reduce((s, r) => s + r.clicks, 0);
+    const nonBrandPageImpr = page.w28.impressions * (1 - brandShare);
     if (coverage >= 0.4 && pricedImpr >= floor(ctx, 500)) {
-      E = priced.reduce((s, r) => s + r.impressions * curve.at(r.position), 0);
-      O = priced.reduce((s, r) => s + r.clicks, 0);
-      path = 'query';
+      E = rawE; O = rawO; path = 'query';
       if (coverage < 0.6) {
-        const nonBrandPageImpr = page.w28.impressions * (1 - brandShare);
+        // Part of the page's searches are anonymised: assume they behave like the disclosed ones, capped.
         const scale = Math.min(1.5, nonBrandPageImpr / Math.max(1, nonBrand.reduce((s, r) => s + r.impressions, 0)));
         E *= scale; O *= scale; path = 'scaled';
       }
-    } else if (page.w28.position <= 8 && page.w28.impressions * (1 - brandShare) >= floor(ctx, 500)) {
-      const impr = page.w28.impressions * (1 - brandShare);
-      E = impr * curve.at(page.w28.position);
+    } else if (page.w28.position <= 8 && nonBrandPageImpr >= floor(ctx, 500)) {
+      E = nonBrandPageImpr * curve.at(page.w28.position);
       O = page.w28.clicks * (1 - brandShare);
       path = 'page'; confidence = 'low'; threshold = 0.5;
-      pricedPositions = [{ position: page.w28.position, impressions: impr }];
+      pricedPositions = [{ position: page.w28.position, impressions: nonBrandPageImpr }];
     } else continue;
 
     const gap = E - O;
     if (E <= 0 || O > threshold * E || gap < 10 || gap / Math.sqrt(E) < 2.5) continue;
-    // Persistence: both halves of W28 below expectation, else it is noise.
-    const expectedPageCtr = E / Math.max(1, path === 'page' ? page.w28.impressions * (1 - brandShare) : pricedImpr * (path === 'scaled' ? E / Math.max(1, priced.reduce((s, r) => s + r.impressions * curve.at(r.position), 0)) : 1));
-    if (!page.halves.every(h => h.impressions === 0 || ctrOf(h) <= 0.8 * expectedPageCtr)) continue;
+    // Persistence: both halves of W28 below the whole page's expectation (all
+    // non-brand rows, brand impressions removed from the halves), else it is noise.
+    const wholeE = nonBrand.reduce((s, r) => s + r.impressions * curve.at(r.position), 0);
+    const wholeImpr = nonBrand.reduce((s, r) => s + r.impressions, 0);
+    const expectedPageCtr = path === 'page' ? curve.at(page.w28.position) : wholeE / Math.max(1, wholeImpr);
+    const halfCtr = (h: Window) => (h.impressions * (1 - brandShare) > 0 ? Math.max(0, h.clicks - h.impressions * brandShare * 0.3) / (h.impressions * (1 - brandShare)) : 0);
+    if (!page.halves.every(h => h.impressions === 0 || halfCtr(h) <= 0.8 * expectedPageCtr)) continue;
 
     const topShare = priced.filter(r => r.position <= 2.5).reduce((s, r) => s + r.impressions * curve.at(r.position) - r.clicks, 0) / Math.max(1, gap);
     if (path !== 'page') {
@@ -353,8 +360,9 @@ function detectCtrGap(ctx: Ctx): Opportunity[] {
     if (topShare > 0.6) confidence = 'low'; // SERP features at positions 1-2 explain low CTR as often as the snippet does
 
     const topQueries = [...priced].sort((a, b) => b.impressions - a.impressions).slice(0, 8);
-    const expectedCtr = E / Math.max(1, pricedPositions.reduce((s, p) => s + p.impressions, 0));
-    const actualCtr = O / Math.max(1, pricedPositions.reduce((s, p) => s + p.impressions, 0));
+    const shownImpr = pricedPositions.reduce((s, p) => s + p.impressions, 0);
+    const expectedCtr = (path === 'page' ? E : rawE) / Math.max(1, shownImpr);
+    const actualCtr = (path === 'page' ? O : rawO) / Math.max(1, shownImpr);
     out.push(finish({
       kind: 'ctr_gap', subtype: path, page: url, secondaryPage: null,
       headline: `Rewrite the title and description of ${pathOf(url)}: ${pct(actualCtr)} of searches click it, pages at its positions typically get ${pct(expectedCtr)}`,
@@ -377,15 +385,21 @@ function detectCtrGap(ctx: Ctx): Opportunity[] {
 
   // Regression variant: a title/description change that measurably cut CTR.
   const seen = new Set<string>();
+  const pageByKey = new Map([...input.pages.keys()].map(u => [linkKey(u), u]));
   for (const c of [...input.snippetChanges].sort((a, b) => b.changed_at.localeCompare(a.changed_at))) {
     const key = linkKey(c.url);
     if (seen.has(key)) continue;
     seen.add(key);
     if (c.verdict !== 'worse' || c.ctrChangePct === null || c.ctrChangePct > -10 || (c.positionChange ?? 0) > 0.5) continue;
     if (c.before.impressions < 300 || c.after.impressions < 300) continue;
+    // Only a recent change whose damage is still visible: the page's current CTR remains below the old one.
+    if (input.now - Date.parse(c.changed_at) > 90 * DAY_MS) continue;
+    const pageUrl = pageByKey.get(key) ?? c.url;
+    const current = input.pages.get(pageUrl);
+    if (current && current.w28.impressions >= 100 && ctrOf(current.w28) >= c.before.ctr * 0.9) continue;
     const gain = (c.before.ctr - c.after.ctr) * c.after.impressions * (28 / Math.max(1, c.after.days));
     out.push(finish({
-      kind: 'ctr_gap', subtype: 'regression', page: c.url, secondaryPage: null,
+      kind: 'ctr_gap', subtype: 'regression', page: pageUrl, secondaryPage: null,
       headline: `Revert the title change on ${pathOf(c.url)}: click-through fell from ${pct(c.before.ctr)} to ${pct(c.after.ctr)} after it changed on ${c.changed_at.slice(0, 10)}`,
       steps: [
         { text: `Restore the previous title: "${c.old_title ?? ''}"`, copy: c.old_title ?? undefined },
@@ -596,11 +610,11 @@ function detectContentDecay(ctx: Ctx): { opportunities: Opportunity[]; blockers:
     const dPos = page.w28.position - baseline.position;
     const imprRatio = baseline.impressions ? page.w28.impressions / baseline.impressions : 1;
     const ctrDrop = ctrOf(baseline) > 0 ? 1 - ctrOf(page.w28) / ctrOf(baseline) : 0;
-    let subtype: 'rank' | 'ctr' | 'demand';
+    let subtype: 'rank' | 'ctr' | 'demand' | 'mixed';
     if (dPos >= 1.5) subtype = 'rank';
     else if (Math.abs(dPos) <= 1 && ctrDrop >= 0.3 && imprRatio >= 0.85) subtype = 'ctr';
     else if (imprRatio <= 0.7) subtype = 'demand';
-    else subtype = 'rank';
+    else subtype = 'mixed';
     const rows = (ctx.byPage.get(url) ?? []).filter(r => !isBrandQuery(r.query, ctx.brandTerms)).sort((a, b) => b.impressions - a.impressions).slice(0, 8);
     const losing = rows.filter(r => r.position > 5);
     const p = pathOf(url);
@@ -627,7 +641,9 @@ function detectContentDecay(ctx: Ctx): { opportunities: Opportunity[]; blockers:
       kind: 'content_decay', subtype, page: url, secondaryPage: null,
       headline: subtype === 'ctr'
         ? `${p} lost about ${Math.round(sig2(lostMonthly))} clicks a month to a weaker snippet: rankings held, click-through fell`
-        : `Refresh ${p}: it lost about ${Math.round(sig2(lostMonthly))} clicks a month as its position slipped from ${roundPos(baseline.position)} to ${roundPos(page.w28.position)}`,
+        : subtype === 'rank'
+          ? `Refresh ${p}: it lost about ${Math.round(sig2(lostMonthly))} clicks a month as its position slipped from ${roundPos(baseline.position)} to ${roundPos(page.w28.position)}`
+          : `Refresh ${p}: it lost about ${Math.round(sig2(lostMonthly))} clicks a month; impressions and click-through both fell while its position held`,
       steps, evidence,
       low: 0.3 * lostMonthly, high: 0.7 * lostMonthly, effort: subtype === 'ctr' ? 'S' : 'M',
       confidence: 'medium', // seasonality unchecked in this version
@@ -687,7 +703,9 @@ export function computeOpportunities(input: PlaybookInput): PlaybookResult {
   const byPage = new Map<string, QueryPageRow[]>();
   const queryTotals = new Map<string, { impressions: number; clicks: number; pages: QueryPageRow[] }>();
   for (const r of input.rows) {
-    byPage.set(r.page, [...(byPage.get(r.page) ?? []), r]);
+    let list = byPage.get(r.page);
+    if (!list) byPage.set(r.page, list = []);
+    list.push(r);
     const t = queryTotals.get(r.query) ?? { impressions: 0, clicks: 0, pages: [] };
     t.impressions += r.impressions; t.clicks += r.clicks; t.pages.push(r);
     queryTotals.set(r.query, t);
@@ -711,6 +729,7 @@ export function computeOpportunities(input: PlaybookInput): PlaybookResult {
   // One counted item per page: the highest-scoring kind; others are "also on this page".
   const bestByPage = new Map<string, Opportunity>();
   for (const o of all) {
+    if (o.hidden || !o.counted) continue;
     const k = linkKey(o.page);
     const cur = bestByPage.get(k);
     if (!cur || o.point > cur.point) bestByPage.set(k, o);
