@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.39.0](https://github.com/martadams89/seo-website-indexer/compare/v1.38.15...v1.39.0) (2026-09-26)
+
+
+### ✨ Features
+
+* smarter Google recrawl signals, inspection feedback and page priorities ([#408](https://github.com/martadams89/seo-website-indexer/issues/408)) ([fbf4896](https://github.com/martadams89/seo-website-indexer/commit/fbf48965cdc79bc4a0f2b2de76e42d18346fc2da))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @simplewebauthn/server to ^14.0.3 ([#406](https://github.com/martadams89/seo-website-indexer/issues/406)) ([7a7cef7](https://github.com/martadams89/seo-website-indexer/commit/7a7cef77e17a807abb04e08fd576475061cf6a5c))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vitest to ^5.0.2 ([#404](https://github.com/martadams89/seo-website-indexer/issues/404)) ([4397e5f](https://github.com/martadams89/seo-website-indexer/commit/4397e5f8f9515e8f7dd7cc708ac5f80d423557c1))
+* **deps:** update renovatebot/github-action action to v46.3.4 ([#405](https://github.com/martadams89/seo-website-indexer/issues/405)) ([4831104](https://github.com/martadams89/seo-website-indexer/commit/483110441e9ee65df4eeea66ff953ec2ab2c594f))
+
 ## [1.38.15](https://github.com/martadams89/seo-website-indexer/compare/v1.38.14...v1.38.15) (2026-09-25)
 
 
