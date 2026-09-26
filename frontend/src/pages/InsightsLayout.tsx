@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BarChart3, Bot, Database, MapPin } from "lucide-react";
+import { BarChart3, Bot, Database, MapPin, Rocket } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "../AppContext";
 import {
@@ -13,6 +13,7 @@ const TABS = [
   { to: "/insights/ai", label: "AI visibility", icon: Bot },
   { to: "/insights/evidence", label: "Connected evidence", icon: Database },
   { to: "/insights/entities", label: "Entities", icon: MapPin },
+  { to: "/insights/playbook", label: "Playbook", icon: Rocket },
 ];
 
 function InsightsShell() {

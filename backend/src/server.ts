@@ -148,6 +148,7 @@ import { ssoProviders, ssoAuthorizeUrl, ssoHandleCallback } from './auth/sso.js'
 import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js';
 import { registerDiscoveryRoutes } from './platform/discovery-routes.js';
 import { registerPlatformRoutes } from './platform/routes.js';
+import { registerPlaybookRoutes } from './platform/playbook-routes.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
 import { listSiteFileSnapshots, recordSiteFileSnapshot } from './db/site-files.js';
@@ -2686,6 +2687,7 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
 
 registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
+registerPlaybookRoutes(app);
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 Organic Command running at http://${HOST}:${PORT}\n`);

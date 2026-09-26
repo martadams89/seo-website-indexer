@@ -8,6 +8,75 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20260926_04_ranking_playbook',
+    description: 'Query×page Search Console window and Ranking Playbook opportunities',
+    up(db) {
+      db.exec(`
+        CREATE TABLE perf_query_page (
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          query TEXT NOT NULL,
+          page TEXT NOT NULL,
+          clicks INTEGER NOT NULL DEFAULT 0,
+          impressions INTEGER NOT NULL DEFAULT 0,
+          position REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY (site_id, query, page)
+        );
+        CREATE INDEX idx_perf_query_page_page ON perf_query_page(site_id, page);
+
+        CREATE TABLE perf_query_page_sync (
+          site_id TEXT PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
+          identity TEXT NOT NULL,
+          checked_at TEXT NOT NULL,
+          success_at TEXT,
+          error TEXT,
+          truncated INTEGER NOT NULL DEFAULT 0,
+          period_start TEXT,
+          period_end TEXT,
+          row_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE playbook_opportunities (
+          id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          subtype TEXT,
+          page TEXT NOT NULL,
+          secondary_page TEXT,
+          headline TEXT NOT NULL,
+          steps TEXT NOT NULL DEFAULT '[]',
+          evidence TEXT NOT NULL DEFAULT '{}',
+          low REAL NOT NULL DEFAULT 0,
+          high REAL NOT NULL DEFAULT 0,
+          point REAL NOT NULL DEFAULT 0,
+          effort TEXT NOT NULL DEFAULT 'M',
+          confidence TEXT NOT NULL DEFAULT 'medium',
+          counted INTEGER NOT NULL DEFAULT 1,
+          hidden INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'open',
+          changed INTEGER NOT NULL DEFAULT 0,
+          dismissed_high REAL,
+          first_seen TEXT NOT NULL,
+          last_seen TEXT NOT NULL,
+          computed_at TEXT NOT NULL,
+          work_item_id TEXT,
+          draft TEXT,
+          draft_at TEXT,
+          done_at TEXT,
+          baseline_clicks REAL,
+          baseline_site_clicks REAL
+        );
+        CREATE INDEX idx_playbook_site ON playbook_opportunities(site_id, status, point DESC);
+
+        CREATE TABLE playbook_runs (
+          site_id TEXT PRIMARY KEY REFERENCES sites(id) ON DELETE CASCADE,
+          computed_at TEXT NOT NULL,
+          summary TEXT NOT NULL DEFAULT '{}',
+          notified_at TEXT
+        );
+      `);
+    },
+  },
+  {
     id: '20260926_03_page_signals',
     description: 'Per-page search performance, page inventory for internal links, snippet changes and page-level Core Web Vitals',
     up(db) {

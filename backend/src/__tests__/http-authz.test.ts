@@ -102,6 +102,11 @@ describe('cross-tenant HTTP authorization', () => {
       { method: 'GET', path: `/api/analytics/site/${siteId}` },
       { method: 'GET', path: `/api/performance/${siteId}?days=7` },
       { method: 'PUT', path: `/api/sites/${siteId}`, body: { name: 'hijacked' } },
+      { method: 'GET', path: `/api/sites/${siteId}/playbook` },
+      { method: 'POST', path: `/api/sites/${siteId}/playbook/refresh` },
+      { method: 'POST', path: `/api/sites/${siteId}/playbook/opp/status`, body: { status: 'dismissed' } },
+      { method: 'POST', path: `/api/sites/${siteId}/playbook/opp/draft` },
+      { method: 'POST', path: `/api/sites/${siteId}/playbook/opp/send-to-work` },
       { method: 'DELETE', path: `/api/sites/${siteId}` },
     ]) {
       const res = await req(route.method, route.path, { sid: userSid, ws: userWs, body: (route as { body?: unknown }).body });
@@ -151,6 +156,11 @@ describe('cross-tenant HTTP authorization', () => {
     }
 
     expect((await req('POST', '/api/platform/work-items/bulk', { sid: userSid, ws: adminWs, body: { ids: ['anything'], changes: { status: 'done' } } })).status).toBe(403);
+    // Playbook: a viewer can read the list but cannot dismiss, draft or refresh.
+    expect((await req('GET', `/api/sites/${siteId}/playbook`, { sid: userSid, ws: adminWs })).status).toBe(200);
+    for (const action of ['refresh', 'opp/status', 'opp/draft', 'opp/send-to-work']) {
+      expect((await req('POST', `/api/sites/${siteId}/playbook/${action}`, { sid: userSid, ws: adminWs, body: { status: 'dismissed' } })).status, action).toBe(403);
+    }
     for (const ids of [Array.from({ length: 201 }, (_, i) => String(i)), [123]]) {
       expect((await req('POST', '/api/platform/work-items/bulk', { sid: adminSid, ws: adminWs, body: { ids, changes: { status: 'done' }, preview: true } })).status).toBe(400);
     }

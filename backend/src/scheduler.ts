@@ -46,6 +46,7 @@ import {
   acquireRunLock,
   releaseRunLock,
   pruneOldQuotaUsage,
+  getDb,
   getSitemapState,
   recordSitemapSubmitted,
   getGoogleAccountById,
@@ -74,6 +75,7 @@ import {
 } from './analytics/internal-links.js';
 import { pagePerformance, recordSnippetChange } from './analytics/page-performance.js';
 import { refreshPageVitals } from './analytics/page-vitals.js';
+import { computePlaybook, listOpportunities } from './analytics/playbook.js';
 import {
   sitemapGroups,
   prioritiseInspections,
@@ -1177,6 +1179,10 @@ async function _doRun(
       log(runId, 'warn', `${site.domain} — page Core Web Vitals check failed: ${e instanceof Error ? e.message : e}`, site.id);
     }
   }
+  // Ranking playbook: recompute each site's ranked opportunities from the
+  // refreshed windows (no network), then a weekly summary notification.
+  await runPlaybookStep(runId, allSites, activeRun);
+
   // Agent-readiness re-score (isitagentready-style): discovery/protocol/identity
   // surfaces per site. Network-bound, best-effort, never fails the run.
   try {
@@ -1217,6 +1223,41 @@ async function _doRun(
     total_skipped: run.total_skipped,
     total_failed: run.total_failed,
   });
+}
+
+// ── Ranking playbook step ───────────────────────────────────────────────────
+
+const PLAYBOOK_NOTIFY_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function runPlaybookStep(runId: string, sites: Site[], activeRun: ActiveRun): Promise<void> {
+  const digest: string[] = [];
+  let totalLow = 0; let totalHigh = 0; let totalCounted = 0;
+  for (const site of sites) {
+    if (activeRun.stopRequested) break;
+    if (!site.google_account_id) continue;
+    try {
+      const outcome = computePlaybook(site);
+      if (!outcome) continue;
+      const s = outcome.summary;
+      log(runId, s.counted > 0 ? 'info' : 'dim',
+        `${site.domain} — ranking playbook: ${s.counted} opportunit${s.counted === 1 ? 'y' : 'ies'} (estimated +${Math.round(s.low)}–${Math.round(s.high)} clicks/month${s.capped ? ', capped' : ''}), ${s.blockers} blocker(s), ${outcome.raised} sent to the Action Centre`,
+        site.id);
+      if (s.counted > 0) {
+        totalCounted += s.counted; totalLow += s.low; totalHigh += s.high;
+        const top = listOpportunities(site.id, { status: ['open'] }).find(o => o.counted && !o.hidden);
+        if (top) digest.push(`${site.domain}: ${top.headline} (+${Math.round(top.low)}–${Math.round(top.high)}/mo)`);
+      }
+    } catch (e) {
+      log(runId, 'warn', `${site.domain} — ranking playbook failed: ${e instanceof Error ? e.message : e}`, site.id);
+    }
+  }
+  const ws = activeRun.workspaceId;
+  if (totalCounted === 0 || configuredChannels(ws).length === 0 || !notificationEventEnabled(ws, 'playbook_ready')) return;
+  const last = getDb().prepare('SELECT MAX(notified_at) at FROM playbook_runs WHERE site_id IN (SELECT id FROM sites WHERE workspace_id = ?)').get(ws) as { at: string | null };
+  if (last.at && Date.now() - Date.parse(last.at) < PLAYBOOK_NOTIFY_EVERY_MS) return;
+  const body = `${totalCounted} ranking opportunit${totalCounted === 1 ? 'y' : 'ies'} worth an estimated +${Math.round(totalLow).toLocaleString()}–${Math.round(totalHigh).toLocaleString()} Google clicks a month. Top: ${digest.slice(0, 3).join(' · ')}`;
+  sendWorkspaceNotification(ws, 'Ranking playbook ready', body, 'playbook_ready').catch(() => null);
+  getDb().prepare('UPDATE playbook_runs SET notified_at = ? WHERE site_id IN (SELECT id FROM sites WHERE workspace_id = ?)').run(new Date().toISOString(), ws);
 }
 
 // ── Google Indexing API step ─────────────────────────────────────────────────

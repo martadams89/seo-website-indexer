@@ -473,6 +473,17 @@ export const api = {
   refreshPageVitals: (siteId: string) =>
     apiFetch<PageVitalsReport & { checked: number; failing: number }>(`/api/sites/${siteId}/page-vitals/refresh`, { method: 'POST' }),
 
+  // ── Ranking playbook ──
+  getPlaybook: (siteId: string) => apiFetch<PlaybookView>(`/api/sites/${encodeURIComponent(siteId)}/playbook`),
+  refreshPlaybook: (siteId: string) => apiFetch<PlaybookView>(`/api/sites/${encodeURIComponent(siteId)}/playbook/refresh`, { method: 'POST' }),
+  setPlaybookStatus: (siteId: string, oppId: string, status: PlaybookStatus) =>
+    apiFetch<{ opportunity: PlaybookOpportunity }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/${encodeURIComponent(oppId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+  draftPlaybookFix: (siteId: string, oppId: string) =>
+    apiFetch<{ opportunity: PlaybookOpportunity }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/${encodeURIComponent(oppId)}/draft`, { method: 'POST' }),
+  sendPlaybookToWork: (siteId: string, oppId: string) =>
+    apiFetch<{ opportunity: PlaybookOpportunity }>(`/api/sites/${encodeURIComponent(siteId)}/playbook/${encodeURIComponent(oppId)}/send-to-work`, { method: 'POST' }),
+  getPlaybookSummary: () => apiFetch<{ sites: PlaybookSummarySite[] }>('/api/playbook/summary'),
+
   // ── AI citations ──
   getAiProviders: () => apiFetch<{ all: string[]; configured: string[] }>('/api/ai/providers'),
   getAiPrompts: () => apiFetch<AiPrompt[]>('/api/ai/prompts'),
@@ -758,6 +769,46 @@ export interface PageVitalsRow {
   rating: 'good' | 'needs_improvement' | 'poor' | null; clicks: number; impressions: number; position: number | null;
 }
 export interface PageVitalsReport { configured: boolean; pages: PageVitalsRow[] }
+
+// ── Ranking playbook ──
+export type PlaybookKind = 'ctr_gap' | 'striking_distance' | 'cannibalisation' | 'content_decay';
+export type PlaybookEffort = 'S' | 'M' | 'L';
+export type PlaybookConfidence = 'high' | 'medium' | 'low';
+export type PlaybookStatus = 'open' | 'dismissed' | 'done';
+export interface PlaybookStep { text: string; copy?: string }
+export interface PlaybookDraft {
+  title: string; title_alternatives: string[]; meta_description: string; h1: string;
+  content_additions: Array<{ heading: string; why: string; queries: string[] }>;
+  internal_link_anchors: Array<{ anchor: string; from: string }>;
+  rationale: string; unsure: string[]; needs_edit: string[]; provider: string; model: string;
+}
+export interface PlaybookOpportunity {
+  id: string; site_id: string; kind: PlaybookKind; subtype: string | null; page: string; secondary_page: string | null;
+  headline: string; steps: PlaybookStep[]; evidence: Record<string, unknown>; low: number; high: number; point: number;
+  effort: PlaybookEffort; confidence: PlaybookConfidence; counted: number; hidden: number;
+  status: 'open' | 'dismissed' | 'done' | 'resolved'; changed: number; first_seen: string; last_seen: string; computed_at: string;
+  work_item_id: string | null; draft: PlaybookDraft | null; draft_at: string | null; done_at: string | null;
+}
+export interface PlaybookBlocker { kind: 'index_blocker' | 'site_wide_decline' | 'vitals'; page: string | null; headline: string; detail: string; atStake: number | null }
+export interface PlaybookSummary {
+  counted: number; low: number; high: number; capped: boolean; siteMonthlyClicks: number; blockers: number; smallSite: boolean;
+  curveLabels: string[]; brandTerms: string[]; quickWins: { count: number; low: number; high: number }; kinds: Record<string, number>; computedAt: string;
+}
+export interface PlaybookResult { id: string; kind: PlaybookKind; page: string; headline: string; doneAt: string; low: number; high: number; status: 'measuring' | 'measured'; readyOn: string; realised: number | null; withinRange: boolean | null }
+export interface PlaybookData {
+  searchConsoleDays: number; queryRows: number;
+  querySync: { checked_at: string; success_at: string | null; error: string | null; truncated: number; period_start: string | null; period_end: string | null; row_count: number } | null;
+  inventoryCoverage: number; inspected: number; sitemapPages: number; cruxConfigured: boolean;
+}
+export interface PlaybookView {
+  site: { id: string; name: string; domain: string; googleConnected: boolean };
+  computedAt: string | null; summary: PlaybookSummary | null; blockers: PlaybookBlocker[];
+  opportunities: PlaybookOpportunity[]; results: PlaybookResult[]; data: PlaybookData; methodology: string;
+}
+export interface PlaybookSummarySite {
+  id: string; name: string; domain: string; computedAt: string | null; summary: PlaybookSummary | null;
+  top: Array<{ id: string; kind: PlaybookKind; page: string; headline: string; low: number; high: number; effort: PlaybookEffort; confidence: PlaybookConfidence }>;
+}
 
 export type AgentCheckStatus = 'pass' | 'fail' | 'neutral';
 export interface AgentCheck {
