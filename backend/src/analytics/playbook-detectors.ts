@@ -645,8 +645,9 @@ const RECRAWLABLE = /discovered|crawled - currently not indexed|unknown to googl
 function detectBlockers(ctx: Ctx): Blocker[] {
   const { input } = ctx;
   const out: Blocker[] = [];
+  const pageByKey = new Map([...input.pages.keys()].map(u => [linkKey(u), u]));
   for (const [key, idx] of input.index) {
-    const url = [...input.pages.keys()].find(u => linkKey(u) === key) ?? key;
+    const url = pageByKey.get(key) ?? key;
     const meta = input.meta.get(key);
     const history = input.pages.get(url);
     const peak = history ? Math.max(history.p28.clicks, history.b28?.clicks ?? 0) : 0;

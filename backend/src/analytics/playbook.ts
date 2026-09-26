@@ -89,7 +89,8 @@ export function buildPlaybookInput(site: Site, now: number = Date.now()): Playbo
   const report = analyseInternalLinks({
     sitemapUrls: states.map(s => s.url), pages: listInventory(site.id), perf: pagePerformance(site.id, 28, now),
     indexed: new Set(states.filter(s => s.gsc_verdict === 'PASS').map(s => s.url)),
-    maxTargets: 500,
+    // Suggestions are quadratic in page count; 120 targets covers every page the detectors can price.
+    maxTargets: 120,
   });
   const links = new Map(report.targets.map(t => [linkKey(t.url), { inbound: t.inbound, suggestions: t.suggestions, anchorHint: t.anchorHint, orphansConfirmed: report.orphansConfirmed }]));
   return {
