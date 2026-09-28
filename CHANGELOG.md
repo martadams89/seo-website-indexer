@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.40.2](https://github.com/martadams89/seo-website-indexer/compare/v1.40.1...v1.40.2) (2026-09-28)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^10.0.11 ([#414](https://github.com/martadams89/seo-website-indexer/issues/414)) ([416086e](https://github.com/martadams89/seo-website-indexer/commit/416086ee2664f000d50b8f3230e01592ef3d6db4))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.5 ([#413](https://github.com/martadams89/seo-website-indexer/issues/413)) ([84791c2](https://github.com/martadams89/seo-website-indexer/commit/84791c213ce5e6d6cb1db3de6bb22fbea9c89ce5))
+
 ## [1.40.1](https://github.com/martadams89/seo-website-indexer/compare/v1.40.0...v1.40.1) (2026-09-27)
 
 
