@@ -91,6 +91,11 @@ export default function GovernancePage() {
   >([]);
   const [mcpInfo, setMcpInfo] = useState<{ endpoint: string; claudeCodeCommand: string } | null>(null);
   const [mcpForm, setMcpForm] = useState({ name: "Claude (Cowork)", allowWrite: false });
+  const [mcpCreated, setMcpCreated] = useState<string | null>(null);
+  function copy(value: string) {
+    navigator.clipboard.writeText(value);
+    toast("success", "Copied to clipboard");
+  }
   const load = useCallback(async () => {
     const [u, w, t, g, m, mt, mi] = await Promise.all([
       api.getUsage(),
@@ -163,7 +168,7 @@ export default function GovernancePage() {
     try {
       const scopes = mcpForm.allowWrite ? ["mcp:read", "mcp:write"] : ["mcp:read"];
       const result = await api.createMcpToken({ name: mcpForm.name, scopes });
-      setRevealed(result.token);
+      setMcpCreated(result.token);
       await load();
       toast("success", "MCP token created—copy it now, it won't be shown again");
     } catch (e) {
@@ -495,59 +500,114 @@ export default function GovernancePage() {
               </div>
             </div>
             <p className="card-intro">
-              Create a personal token, then add this MCP server to Claude to read
-              (and optionally act on) all of your data across every workspace you
-              can access. In Claude Code:
+              Add this MCP server to Claude to read — and optionally act on — all
+              of your data across every workspace you can access, in plain
+              language. Endpoint:{" "}
+              <code>{mcpInfo?.endpoint ?? `${window.location.origin}/mcp`}</code>
             </p>
-            {mcpInfo && (
-              <div className="code-hint" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
-                  {mcpInfo.claudeCodeCommand}
-                </code>
+
+            {/* Step 1 — mint */}
+            <div className="mcp-step">
+              <strong>1. Create a personal token</strong>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "8px 0 4px" }}>
+                <input
+                  className="input"
+                  style={{ flex: "1 1 180px" }}
+                  value={mcpForm.name}
+                  onChange={(e) => setMcpForm({ ...mcpForm, name: e.target.value })}
+                  placeholder="Token name (e.g. Claude Desktop)"
+                  aria-label="MCP token name"
+                />
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={mcpForm.allowWrite}
+                    onChange={(e) => setMcpForm({ ...mcpForm, allowWrite: e.target.checked })}
+                  />
+                  Allow actions (submit URLs, trigger runs)
+                </label>
                 <button
-                  className="btn-icon btn-icon-ghost"
-                  aria-label="Copy Claude Code command"
-                  onClick={() => {
-                    navigator.clipboard.writeText(mcpInfo.claudeCodeCommand);
-                    toast("success", "Command copied");
-                  }}
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy === "mcp" || !mcpForm.name.trim()}
+                  onClick={saveMcpToken}
                 >
-                  <Copy size={13} />
+                  <Plus size={12} /> Create token
                 </button>
               </div>
-            )}
-            <p className="card-intro" style={{ fontSize: 11, opacity: 0.8 }}>
-              For Claude web/desktop &amp; Cowork, add a custom connector with URL{" "}
-              <code>{mcpInfo?.endpoint ?? "/mcp"}</code> and an{" "}
-              <code>Authorization: Bearer &lt;token&gt;</code> request header
-              (header auth requires the connector-headers beta on your Claude org;
-              otherwise use Claude Code).
-            </p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "8px 0 12px" }}>
-              <input
-                className="input"
-                style={{ flex: "1 1 180px" }}
-                value={mcpForm.name}
-                onChange={(e) => setMcpForm({ ...mcpForm, name: e.target.value })}
-                placeholder="Token name (e.g. Claude Cowork)"
-                aria-label="MCP token name"
-              />
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={mcpForm.allowWrite}
-                  onChange={(e) => setMcpForm({ ...mcpForm, allowWrite: e.target.checked })}
-                />
-                Allow actions (submit URLs, trigger runs)
-              </label>
-              <button
-                className="btn btn-secondary btn-sm"
-                disabled={busy === "mcp" || !mcpForm.name.trim()}
-                onClick={saveMcpToken}
-              >
-                <Plus size={12} /> Create token
-              </button>
             </div>
+
+            {/* Step 2 — the freshly minted token + ready-to-paste connection details */}
+            {mcpCreated && mcpInfo && (
+              <div className="mcp-reveal">
+                <div className="mcp-reveal-head">
+                  <strong>2. Copy your connection details</strong>
+                  <button className="btn-icon btn-icon-ghost" aria-label="Done" onClick={() => setMcpCreated(null)}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: "var(--warning, #b8860b)", margin: "0 0 10px" }}>
+                  <AlertTriangle size={12} style={{ verticalAlign: "-1px" }} /> This
+                  token is shown once. Copy what you need now — you can’t see it again.
+                </p>
+
+                <div className="mcp-copy-group">
+                  <span className="mcp-copy-title">Claude Code (terminal)</span>
+                  {(() => {
+                    const cmd = mcpInfo.claudeCodeCommand.replace("<token>", mcpCreated);
+                    return (
+                      <div className="mcp-copy-row">
+                        <code>{cmd}</code>
+                        <button className="btn-icon btn-icon-ghost" aria-label="Copy command" onClick={() => copy(cmd)}><Copy size={13} /></button>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="mcp-copy-group">
+                  <span className="mcp-copy-title">Claude Desktop / web — easiest: URL with token</span>
+                  <p style={{ fontSize: 11, opacity: 0.75, margin: "0 0 4px" }}>
+                    Add a custom connector and paste this as the URL. No header needed.
+                  </p>
+                  {(() => {
+                    const url = `${mcpInfo.endpoint}?token=${mcpCreated}`;
+                    return (
+                      <div className="mcp-copy-row">
+                        <code>{url}</code>
+                        <button className="btn-icon btn-icon-ghost" aria-label="Copy URL with token" onClick={() => copy(url)}><Copy size={13} /></button>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="mcp-copy-group">
+                  <span className="mcp-copy-title">Claude Desktop / web — or: URL + header</span>
+                  <p style={{ fontSize: 11, opacity: 0.75, margin: "0 0 4px" }}>
+                    If you prefer a header, use the plain URL and add the header below (requires the connector-headers beta on your Claude org).
+                  </p>
+                  <div className="mcp-copy-row">
+                    <span className="mcp-copy-label">URL</span>
+                    <code>{mcpInfo.endpoint}</code>
+                    <button className="btn-icon btn-icon-ghost" aria-label="Copy URL" onClick={() => copy(mcpInfo.endpoint)}><Copy size={13} /></button>
+                  </div>
+                  <div className="mcp-copy-row">
+                    <span className="mcp-copy-label">Header name</span>
+                    <code>Authorization</code>
+                    <button className="btn-icon btn-icon-ghost" aria-label="Copy header name" onClick={() => copy("Authorization")}><Copy size={13} /></button>
+                  </div>
+                  <div className="mcp-copy-row">
+                    <span className="mcp-copy-label">Header value</span>
+                    <code>{`Bearer ${mcpCreated}`}</code>
+                    <button className="btn-icon btn-icon-ghost" aria-label="Copy header value" onClick={() => copy(`Bearer ${mcpCreated}`)}><Copy size={13} /></button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <p className="card-intro" style={{ fontSize: 11, opacity: 0.8, marginTop: 12 }}>
+              After creating a token you’ll get a ready-to-paste command for Claude
+              Code and, for Claude Desktop/web, a URL you can use on its own or with
+              an <code>Authorization: Bearer &lt;token&gt;</code> header.
+            </p>
             <div className="automation-list">
               {mcpTokens
                 .filter((row) => !row.revoked_at)

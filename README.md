@@ -215,7 +215,12 @@ claude mcp add --transport http seo-indexer https://<your-host>/mcp \
   --header "Authorization: Bearer seomcp_your_token"
 ```
 
-**Claude web / desktop / Cowork:** add a custom connector with the URL above and an `Authorization: Bearer …` request header. Static request headers require the connector-headers beta on your Claude organisation; without it, use Claude Code, or connect via an OAuth-fronted proxy.
+**Claude web / desktop / Cowork:** add a custom connector. Two ways to authenticate:
+
+- **URL with the token baked in (simplest):** use `https://<your-host>/mcp?token=seomcp_your_token` as the connector URL — no header needed. (The token is scrubbed from request logs.)
+- **URL + header:** use `https://<your-host>/mcp` and add request header name `Authorization`, value `Bearer seomcp_your_token`. Static request headers require the connector-headers beta on your Claude organisation.
+
+The **Connect Claude to your data** card generates copy-paste-ready values for all of the above the moment you mint a token.
 
 The server is stateless and re-authenticates every request. Tokens are stored only as a SHA-256 hash, can be revoked at any time, and every tool is fenced to the token owner's own workspaces. The endpoint must be reachable over public HTTPS for hosted Claude apps.
 

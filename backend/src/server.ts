@@ -30,7 +30,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -166,11 +166,27 @@ const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : nu
 // ── Fastify Setup ─────────────────────────────────────────────────────────────
 
 const isDev = process.env.NODE_ENV !== 'production';
-const app = Fastify({
+// Keep secrets out of logs: redact the auth header/cookie, and scrub a token
+// baked into the MCP URL (?token=/?key=) from the logged request URL.
+function redactUrl(url: string | undefined): string | undefined {
+  return url ? url.replace(/([?&](?:token|key)=)[^&]*/gi, '$1REDACTED') : url;
+}
+const logSerializers = {
+  req(request: FastifyRequest) {
+    return {
+      method: request.method,
+      url: redactUrl(request.url),
+      host: request.headers?.host,
+      remoteAddress: request.ip,
+    };
+  },
+};
+const app: FastifyInstance = Fastify({
   trustProxy: TRUST_PROXY,
   logger: isDev
     ? {
         level: process.env.LOG_LEVEL ?? 'info',
+        serializers: logSerializers,
         transport: {
           target: 'pino-pretty',
           options: { translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname,reqId' },
@@ -178,6 +194,7 @@ const app = Fastify({
       }
     : {
         level: process.env.LOG_LEVEL ?? 'info',
+        serializers: logSerializers,
         redact: { paths: ['req.headers.authorization', 'req.headers.cookie'], remove: true },
       },
 });
@@ -2691,12 +2708,17 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
 // These belong to the USER (not a workspace) and let an AI assistant reach every
 // workspace they can access. Self-account actions: exempt from the workspace
 // capability gate (see SELF_ACCOUNT_EXEMPT_PREFIXES), still session-authenticated.
-app.get('/api/mcp/info', async (req) => ({
-  endpoint: `${requestOrigin(req as never)}/mcp`,
-  transport: 'http',
-  scopes: ['mcp:read', 'mcp:write'],
-  claudeCodeCommand: `claude mcp add --transport http seo-indexer ${requestOrigin(req as never)}/mcp --header "Authorization: Bearer <your-token>"`,
-}));
+app.get('/api/mcp/info', async (req) => {
+  const endpoint = `${requestOrigin(req as never)}/mcp`;
+  return {
+    endpoint,
+    transport: 'http',
+    scopes: ['mcp:read', 'mcp:write'],
+    headerName: 'Authorization',
+    // The frontend fills <token> in from the freshly minted value at create time.
+    claudeCodeCommand: `claude mcp add --transport http seo-indexer ${endpoint} --header "Authorization: Bearer <token>"`,
+  };
+});
 
 app.get('/api/mcp/tokens', async (req) => listMcpTokens(currentUser(req).id));
 

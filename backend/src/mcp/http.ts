@@ -15,11 +15,22 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { authenticateMcpToken } from './tokens.js';
 import { buildContext, buildMcpServer } from './tools.js';
 
+/**
+ * Extract the token from either the `Authorization: Bearer …` header (preferred)
+ * or a `?token=`/`?key=` query parameter. The query form lets clients whose
+ * connector UI is URL-only (e.g. Claude Desktop) bake auth straight into the URL;
+ * the token is scrubbed from request logs (see the logger's req serializer).
+ */
 function bearer(req: FastifyRequest): string | null {
   const header = req.headers['authorization'];
-  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
-  const raw = header.slice('Bearer '.length).trim();
-  return raw || null;
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    const raw = header.slice('Bearer '.length).trim();
+    if (raw) return raw;
+  }
+  const query = req.query as Record<string, unknown> | undefined;
+  const fromQuery = query?.token ?? query?.key;
+  if (typeof fromQuery === 'string' && fromQuery.trim()) return fromQuery.trim();
+  return null;
 }
 
 function unauthorized(reply: FastifyReply, message: string) {

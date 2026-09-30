@@ -54,6 +54,14 @@ async function connect(token: string): Promise<Client> {
   return client;
 }
 
+/** Auth baked into the URL (?token=…), no Authorization header — the Claude Desktop path. */
+async function connectViaUrlToken(token: string): Promise<Client> {
+  const client = new Client({ name: 'test-client', version: '1.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}?token=${encodeURIComponent(token)}`));
+  await client.connect(transport);
+  return client;
+}
+
 describe('MCP Streamable HTTP protocol', () => {
   it('completes initialize + tools/list + tools/call over the real transport', async () => {
     const client = await connect(goodToken);
@@ -69,6 +77,16 @@ describe('MCP Streamable HTTP protocol', () => {
       const content = res.content as Array<{ type: string; text?: string }>;
       const text = content.find(c => c.type === 'text')?.text ?? '';
       expect(text).toContain('proto.example.com');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('authenticates with the token baked into the URL query (no header)', async () => {
+    const client = await connectViaUrlToken(goodToken);
+    try {
+      const listed = await client.listTools();
+      expect(listed.tools.map(t => t.name)).toContain('list_sites');
     } finally {
       await client.close();
     }
