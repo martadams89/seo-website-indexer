@@ -149,6 +149,8 @@ import { backupNow, listBackups, startBackupScheduler } from './utils/backup.js'
 import { registerDiscoveryRoutes } from './platform/discovery-routes.js';
 import { registerPlatformRoutes } from './platform/routes.js';
 import { registerPlaybookRoutes } from './platform/playbook-routes.js';
+import { registerMcpProtocolRoute } from './mcp/http.js';
+import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
 import { listSiteFileSnapshots, recordSiteFileSnapshot } from './db/site-files.js';
@@ -352,7 +354,7 @@ const SELF_ACCOUNT_EXEMPT_EXACT = new Set<string>([
   '/api/auth/set-required-password', '/api/auth/impersonation/stop',
   '/api/auth/totp/setup', '/api/auth/totp/enable', '/api/auth/totp/disable',
 ]);
-const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/'];
+const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/', '/api/mcp/'];
 const WORKSPACE_GATE_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
 
 // Maps a mutating request's path to the workspace capability it requires (for
@@ -2685,9 +2687,42 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
   return result;
 });
 
+// ── MCP access tokens (account-wide personal tokens for the MCP server) ────────
+// These belong to the USER (not a workspace) and let an AI assistant reach every
+// workspace they can access. Self-account actions: exempt from the workspace
+// capability gate (see SELF_ACCOUNT_EXEMPT_PREFIXES), still session-authenticated.
+app.get('/api/mcp/info', async (req) => ({
+  endpoint: `${requestOrigin(req as never)}/mcp`,
+  transport: 'http',
+  scopes: ['mcp:read', 'mcp:write'],
+  claudeCodeCommand: `claude mcp add --transport http seo-indexer ${requestOrigin(req as never)}/mcp --header "Authorization: Bearer <your-token>"`,
+}));
+
+app.get('/api/mcp/tokens', async (req) => listMcpTokens(currentUser(req).id));
+
+app.post('/api/mcp/tokens', async (req, reply) => {
+  const { name, scopes, expiresInDays } = (req.body ?? {}) as { name?: string; scopes?: string[]; expiresInDays?: number };
+  if (!name || !name.trim()) return reply.status(400).send({ error: 'A token name is required.' });
+  const days = Number(expiresInDays);
+  const expiresAt = Number.isFinite(days) && days > 0
+    ? new Date(Date.now() + days * 86_400_000).toISOString()
+    : null;
+  const created = createMcpToken({ userId: currentUser(req).id, name: name.trim(), scopes: normalizeScopes(scopes), expiresAt });
+  recordAuditEvent({ actorUserId: auditActor(req).id, action: 'mcp.token.created', detail: { id: created.id, name: name.trim(), scopes: normalizeScopes(scopes) }, ipAddress: requestIp(req) });
+  return created; // { id, token } — the plaintext token is shown exactly once.
+});
+
+app.delete('/api/mcp/tokens/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  if (!revokeMcpToken(currentUser(req).id, id)) return reply.status(404).send({ error: 'Token not found.' });
+  recordAuditEvent({ actorUserId: auditActor(req).id, action: 'mcp.token.revoked', detail: { id }, ipAddress: requestIp(req) });
+  return { ok: true };
+});
+
 registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
 registerPlaybookRoutes(app);
+registerMcpProtocolRoute(app);
 
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 Organic Command running at http://${HOST}:${PORT}\n`);

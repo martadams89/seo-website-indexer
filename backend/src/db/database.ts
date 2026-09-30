@@ -641,6 +641,23 @@ function initSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_service_tokens_ws ON service_tokens(workspace_id);
 
+    -- Account-wide personal access tokens for the MCP server. Unlike
+    -- service_tokens (scoped to one workspace, for automation), an MCP token
+    -- belongs to a USER and grants an AI assistant read/action access to every
+    -- workspace that user can reach. Only the SHA-256 hash is stored.
+    CREATE TABLE IF NOT EXISTS mcp_tokens (
+      id            TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      token_hash    TEXT NOT NULL UNIQUE,
+      scopes        TEXT NOT NULL,
+      expires_at    TEXT,
+      last_used_at  TEXT,
+      revoked_at    TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_tokens_user ON mcp_tokens(user_id);
+
     -- Governed content changes: proposal, evidence, approval, staging,
     -- publishing, verification and rollback all remain separate states.
     CREATE TABLE IF NOT EXISTS content_actions (

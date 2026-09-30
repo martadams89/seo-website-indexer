@@ -86,19 +86,28 @@ export default function GovernancePage() {
     name: "Automation token",
     scopes: ["workspace:read", "metrics:read"],
   });
+  const [mcpTokens, setMcpTokens] = useState<
+    Array<{ id: string; name: string; scopes: string[]; last_used_at: string | null; revoked_at: string | null }>
+  >([]);
+  const [mcpInfo, setMcpInfo] = useState<{ endpoint: string; claudeCodeCommand: string } | null>(null);
+  const [mcpForm, setMcpForm] = useState({ name: "Claude (Cowork)", allowWrite: false });
   const load = useCallback(async () => {
-    const [u, w, t, g, m] = await Promise.all([
+    const [u, w, t, g, m, mt, mi] = await Promise.all([
       api.getUsage(),
       api.getWebhooks(),
       api.getServiceTokens(),
       api.getGovernance(),
       active ? api.getWorkspaceMembers(active.id) : Promise.resolve([]),
+      api.getMcpTokens().catch(() => []),
+      api.getMcpInfo().catch(() => null),
     ]);
     setUsage(u);
     setWebhooks(w);
     setTokens(t);
     setGovernance(g);
     setMembers(m);
+    setMcpTokens(mt);
+    setMcpInfo(mi);
   }, [active]);
   useEffect(() => {
     load().catch(() => null);
@@ -144,6 +153,19 @@ export default function GovernancePage() {
       setModal(null);
       await load();
       toast("success", "Service token created—copy it now");
+    } catch (e) {
+      toast("error", String(e).replace("Error: ", ""));
+    }
+    setBusy(null);
+  }
+  async function saveMcpToken() {
+    setBusy("mcp");
+    try {
+      const scopes = mcpForm.allowWrite ? ["mcp:read", "mcp:write"] : ["mcp:read"];
+      const result = await api.createMcpToken({ name: mcpForm.name, scopes });
+      setRevealed(result.token);
+      await load();
+      toast("success", "MCP token created—copy it now, it won't be shown again");
     } catch (e) {
       toast("error", String(e).replace("Error: ", ""));
     }
@@ -462,6 +484,96 @@ export default function GovernancePage() {
                 <div className="ops-empty compact">
                   No active service tokens.
                 </div>
+              )}
+            </div>
+          </section>
+          <section className="ops-card">
+            <div className="ops-card-head">
+              <div>
+                <span className="eyebrow">AI assistant access (MCP)</span>
+                <h2>Connect Claude to your data</h2>
+              </div>
+            </div>
+            <p className="card-intro">
+              Create a personal token, then add this MCP server to Claude to read
+              (and optionally act on) all of your data across every workspace you
+              can access. In Claude Code:
+            </p>
+            {mcpInfo && (
+              <div className="code-hint" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <code style={{ fontSize: 11, wordBreak: "break-all", flex: 1 }}>
+                  {mcpInfo.claudeCodeCommand}
+                </code>
+                <button
+                  className="btn-icon btn-icon-ghost"
+                  aria-label="Copy Claude Code command"
+                  onClick={() => {
+                    navigator.clipboard.writeText(mcpInfo.claudeCodeCommand);
+                    toast("success", "Command copied");
+                  }}
+                >
+                  <Copy size={13} />
+                </button>
+              </div>
+            )}
+            <p className="card-intro" style={{ fontSize: 11, opacity: 0.8 }}>
+              For Claude web/desktop &amp; Cowork, add a custom connector with URL{" "}
+              <code>{mcpInfo?.endpoint ?? "/mcp"}</code> and an{" "}
+              <code>Authorization: Bearer &lt;token&gt;</code> request header
+              (header auth requires the connector-headers beta on your Claude org;
+              otherwise use Claude Code).
+            </p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "8px 0 12px" }}>
+              <input
+                className="input"
+                style={{ flex: "1 1 180px" }}
+                value={mcpForm.name}
+                onChange={(e) => setMcpForm({ ...mcpForm, name: e.target.value })}
+                placeholder="Token name (e.g. Claude Cowork)"
+                aria-label="MCP token name"
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={mcpForm.allowWrite}
+                  onChange={(e) => setMcpForm({ ...mcpForm, allowWrite: e.target.checked })}
+                />
+                Allow actions (submit URLs, trigger runs)
+              </label>
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={busy === "mcp" || !mcpForm.name.trim()}
+                onClick={saveMcpToken}
+              >
+                <Plus size={12} /> Create token
+              </button>
+            </div>
+            <div className="automation-list">
+              {mcpTokens
+                .filter((row) => !row.revoked_at)
+                .map((row) => (
+                  <article key={row.id}>
+                    <KeyRound />
+                    <div>
+                      <strong>{row.name}</strong>
+                      <small>{row.scopes.join(", ")}</small>
+                      <span>
+                        {row.last_used_at
+                          ? `Last used ${new Date(row.last_used_at).toLocaleString()}`
+                          : "Never used"}
+                      </span>
+                    </div>
+                    <button
+                      className="btn-icon btn-icon-ghost"
+                      aria-label={`Revoke MCP token ${row.name}`}
+                      onClick={() => api.revokeMcpToken(row.id).then(load)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </article>
+                ))}
+              {!mcpTokens.filter((row) => !row.revoked_at).length && (
+                <div className="ops-empty compact">No active MCP tokens.</div>
               )}
             </div>
           </section>
