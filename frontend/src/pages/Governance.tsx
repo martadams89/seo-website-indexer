@@ -545,7 +545,7 @@ export default function GovernancePage() {
                     <X size={14} />
                   </button>
                 </div>
-                <p style={{ fontSize: 11, color: "var(--warning, #b8860b)", margin: "0 0 10px" }}>
+                <p style={{ fontSize: 12, color: "var(--warning, #b8860b)", margin: "0 0 10px" }}>
                   <AlertTriangle size={12} style={{ verticalAlign: "-1px" }} /> This
                   token is shown once. Copy what you need now — you can’t see it again.
                 </p>
@@ -565,7 +565,7 @@ export default function GovernancePage() {
 
                 <div className="mcp-copy-group">
                   <span className="mcp-copy-title">Claude Desktop / web — easiest: URL with token</span>
-                  <p style={{ fontSize: 11, opacity: 0.75, margin: "0 0 4px" }}>
+                  <p style={{ fontSize: 12, opacity: 0.75, margin: "0 0 4px" }}>
                     Add a custom connector and paste this as the URL. No header needed.
                   </p>
                   {(() => {
@@ -581,7 +581,7 @@ export default function GovernancePage() {
 
                 <div className="mcp-copy-group">
                   <span className="mcp-copy-title">Claude Desktop / web — or: URL + header</span>
-                  <p style={{ fontSize: 11, opacity: 0.75, margin: "0 0 4px" }}>
+                  <p style={{ fontSize: 12, opacity: 0.75, margin: "0 0 4px" }}>
                     If you prefer a header, use the plain URL and add the header below (requires the connector-headers beta on your Claude org).
                   </p>
                   <div className="mcp-copy-row">
@@ -603,7 +603,7 @@ export default function GovernancePage() {
               </div>
             )}
 
-            <p className="card-intro" style={{ fontSize: 11, opacity: 0.8, marginTop: 12 }}>
+            <p className="card-intro" style={{ fontSize: 12, opacity: 0.8, marginTop: 12 }}>
               After creating a token you’ll get a ready-to-paste command for Claude
               Code and, for Claude Desktop/web, a URL you can use on its own or with
               an <code>Authorization: Bearer &lt;token&gt;</code> header.
