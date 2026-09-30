@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.41.0](https://github.com/martadams89/seo-website-indexer/compare/v1.40.3...v1.41.0) (2026-09-30)
+
+
+### ✨ Features
+
+* **mcp:** add remote MCP server with per-user bearer tokens ([#423](https://github.com/martadams89/seo-website-indexer/issues/423)) ([b4c0b26](https://github.com/martadams89/seo-website-indexer/commit/b4c0b26a2698515c1feb75c77434dbea95cdb454))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.49.0 ([#421](https://github.com/martadams89/seo-website-indexer/issues/421)) ([73fcec3](https://github.com/martadams89/seo-website-indexer/commit/73fcec3aee5e1e62f1ae77bce961b5d5bf92a44a))
+* **deps:** update dependency nodemailer to ^10.0.13 ([#420](https://github.com/martadams89/seo-website-indexer/issues/420)) ([bcec9b8](https://github.com/martadams89/seo-website-indexer/commit/bcec9b84d69d27e8dea8f6d508f90fc5aa8abe28))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.6 ([#419](https://github.com/martadams89/seo-website-indexer/issues/419)) ([d47fbc7](https://github.com/martadams89/seo-website-indexer/commit/d47fbc7f457f1c44644b3cfc804c1b212c15238a))
+
 ## [1.40.3](https://github.com/martadams89/seo-website-indexer/compare/v1.40.2...v1.40.3) (2026-09-29)
 
 
