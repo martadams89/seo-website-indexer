@@ -406,6 +406,11 @@ export const api = {
   getServiceTokens: () => apiFetch<Array<{ id: string; name: string; scopes: string[]; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }>>('/api/platform/tokens'),
   createServiceToken: (data: { name: string; scopes: string[]; expires_at?: string }) => apiFetch<{ id: string; token: string }>('/api/platform/tokens', { method: 'POST', body: JSON.stringify(data) }),
   revokeServiceToken: (id: string) => apiFetch<{ ok: boolean }>(`/api/platform/tokens/${id}`, { method: 'DELETE' }),
+  // MCP (AI assistant) access — account-wide personal tokens for the MCP server.
+  getMcpInfo: () => apiFetch<{ endpoint: string; transport: string; scopes: string[]; claudeCodeCommand: string }>('/api/mcp/info'),
+  getMcpTokens: () => apiFetch<Array<{ id: string; name: string; scopes: string[]; expires_at: string | null; last_used_at: string | null; revoked_at: string | null; created_at: string }>>('/api/mcp/tokens'),
+  createMcpToken: (data: { name: string; scopes: string[]; expiresInDays?: number }) => apiFetch<{ id: string; token: string }>('/api/mcp/tokens', { method: 'POST', body: JSON.stringify(data) }),
+  revokeMcpToken: (id: string) => apiFetch<{ ok: boolean }>(`/api/mcp/tokens/${id}`, { method: 'DELETE' }),
   getContentActions: () => apiFetch<ContentAction[]>('/api/platform/content/actions'),
   createContentAction: (data: { site_id?: string; integration_id?: string; kind: string; title: string; rationale?: string; evidence?: Record<string, unknown>; payload: Record<string, unknown> }) => apiFetch<ContentAction>('/api/platform/content/actions', { method: 'POST', body: JSON.stringify(data) }),
   advanceContentAction: (id: string, step: 'approve' | 'stage' | 'publish' | 'verify' | 'rollback') => apiFetch<ContentAction>(`/api/platform/content/actions/${id}/${step}`, { method: 'POST' }),

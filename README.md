@@ -201,6 +201,29 @@ Create a service token under **Governance & Usage → API & Webhooks**. The toke
 
 Send the token as `Authorization: Bearer oc_…`. See the [automation API guide](docs/AUTOMATION_API.md) for request examples and webhook verification.
 
+## MCP server (connect Claude / AI assistants)
+
+The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server so an AI assistant can read — and optionally act on — your data through natural language: sites, Search Console performance, URL inspection, indexing quota, hygiene, AI-agent readiness and AI citations.
+
+1. Go to **Governance & Usage → API & Webhooks → Connect Claude to your data** and create a personal token. Unlike a service token it is **account-wide**: it exposes every workspace you can access. Tick *Allow actions* to also grant the `mcp:write` scope (submit URLs, trigger runs, refresh snapshots); otherwise the token is read-only.
+2. The MCP endpoint is `https://<your-host>/mcp` (Streamable HTTP transport), authenticated with `Authorization: Bearer seomcp_…`.
+
+**Claude Code (CLI):**
+
+```bash
+claude mcp add --transport http seo-indexer https://<your-host>/mcp \
+  --header "Authorization: Bearer seomcp_your_token"
+```
+
+**Claude web / desktop / Cowork:** add a custom connector. Two ways to authenticate:
+
+- **URL with the token baked in (simplest):** use `https://<your-host>/mcp?token=seomcp_your_token` as the connector URL — no header needed. (The token is scrubbed from request logs.)
+- **URL + header:** use `https://<your-host>/mcp` and add request header name `Authorization`, value `Bearer seomcp_your_token`. Static request headers require the connector-headers beta on your Claude organisation.
+
+The **Connect Claude to your data** card generates copy-paste-ready values for all of the above the moment you mint a token.
+
+The server is stateless and re-authenticates every request. Tokens are stored only as a SHA-256 hash, can be revoked at any time, and every tool is fenced to the token owner's own workspaces. The endpoint must be reachable over public HTTPS for hosted Claude apps.
+
 ## Updating and backups
 
 To update a Compose installation:
