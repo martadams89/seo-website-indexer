@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.1](https://github.com/martadams89/seo-website-indexer/compare/v1.41.0...v1.41.1) (2026-10-01)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency globals to ^17.13.0 ([#425](https://github.com/martadams89/seo-website-indexer/issues/425)) ([8c66503](https://github.com/martadams89/seo-website-indexer/commit/8c66503e1e0d24f4bcb371033599081a272e0c0b))
+* **deps:** update dependency vitest to ^5.0.3 ([#424](https://github.com/martadams89/seo-website-indexer/issues/424)) ([55b6ed6](https://github.com/martadams89/seo-website-indexer/commit/55b6ed6a6c3a1a9d97766a7dc9702f113dcb007c))
+
 ## [1.41.0](https://github.com/martadams89/seo-website-indexer/compare/v1.40.3...v1.41.0) (2026-09-30)
 
 
