@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.41.3](https://github.com/martadams89/seo-website-indexer/compare/v1.41.2...v1.41.3) (2026-10-03)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @modelcontextprotocol/sdk to ^1.32.0 ([#430](https://github.com/martadams89/seo-website-indexer/issues/430)) ([72586c7](https://github.com/martadams89/seo-website-indexer/commit/72586c766733970d9cf4fdb50d3ad6745f0029e9))
+* **deps:** update dependency lucide-react to ^1.51.0 ([#431](https://github.com/martadams89/seo-website-indexer/issues/431)) ([e33d7d5](https://github.com/martadams89/seo-website-indexer/commit/e33d7d5aa167ebc2f46ca7acce6408c24dce09c0))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.12.0 ([#429](https://github.com/martadams89/seo-website-indexer/issues/429)) ([48b56ef](https://github.com/martadams89/seo-website-indexer/commit/48b56ef7e89be6df3a370f3d6da7ee180acbddb0))
+
 ## [1.41.2](https://github.com/martadams89/seo-website-indexer/compare/v1.41.1...v1.41.2) (2026-10-02)
 
 
