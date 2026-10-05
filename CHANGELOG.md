@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.4](https://github.com/martadams89/seo-website-indexer/compare/v1.41.3...v1.41.4) (2026-10-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^10.0.14 ([#433](https://github.com/martadams89/seo-website-indexer/issues/433)) ([fefdcd5](https://github.com/martadams89/seo-website-indexer/commit/fefdcd5e5fe1abe74659d8d552b567e83e90ddcd))
+* **deps:** update dependency pino to ^10.4.0 ([#434](https://github.com/martadams89/seo-website-indexer/issues/434)) ([d0c7937](https://github.com/martadams89/seo-website-indexer/commit/d0c7937dff1618f617044eb5a05bafd501ca3178))
+
 ## [1.41.3](https://github.com/martadams89/seo-website-indexer/compare/v1.41.2...v1.41.3) (2026-10-03)
 
 
