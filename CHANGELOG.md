@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.41.6](https://github.com/martadams89/seo-website-indexer/compare/v1.41.5...v1.41.6) (2026-10-07)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @modelcontextprotocol/sdk to ^1.32.1 ([#444](https://github.com/martadams89/seo-website-indexer/issues/444)) ([457c40a](https://github.com/martadams89/seo-website-indexer/commit/457c40a89b046d7910fcbd701f70e4827c8a05ab))
+* **deps:** update dependency nodemailer to ^10.0.15 ([#445](https://github.com/martadams89/seo-website-indexer/issues/445)) ([d75fa7e](https://github.com/martadams89/seo-website-indexer/commit/d75fa7ec4ffc7c8b6b29920f993301bdc3964055))
+* **deps:** update dependency pino-pretty to ^13.2.0 ([#446](https://github.com/martadams89/seo-website-indexer/issues/446)) ([5d4a2fd](https://github.com/martadams89/seo-website-indexer/commit/5d4a2fde51dea2294a2d66388c4c579b26666459))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.1.2 ([#440](https://github.com/martadams89/seo-website-indexer/issues/440)) ([81ba926](https://github.com/martadams89/seo-website-indexer/commit/81ba926ca26dd2b5cba9e9e31438390ffe2eed98))
+* **deps:** update dependency typescript-eslint to ^8.71.1 ([#441](https://github.com/martadams89/seo-website-indexer/issues/441)) ([080c488](https://github.com/martadams89/seo-website-indexer/commit/080c4882ee66ad0ad0b8f849786aec3a5f0d13d6))
+* **deps:** update dependency vite to ^8.3.3 ([#442](https://github.com/martadams89/seo-website-indexer/issues/442)) ([6b3fffd](https://github.com/martadams89/seo-website-indexer/commit/6b3fffd75a46f3a4b13ea414daffc085b3b17579))
+
 ## [1.41.5](https://github.com/martadams89/seo-website-indexer/compare/v1.41.4...v1.41.5) (2026-10-05)
 
 
