@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.41.7](https://github.com/martadams89/seo-website-indexer/compare/v1.41.6...v1.41.7) (2026-10-08)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to ^11.2.0 ([#448](https://github.com/martadams89/seo-website-indexer/issues/448)) ([04ab26c](https://github.com/martadams89/seo-website-indexer/commit/04ab26c099a2026bf4853dd9c63feab5a84eabc4))
+* **deps:** update dependency lucide-react to ^1.53.0 ([#449](https://github.com/martadams89/seo-website-indexer/issues/449)) ([1634f9f](https://github.com/martadams89/seo-website-indexer/commit/1634f9f3c02f3d5e9479792c4c8f2951879a6960))
+* **deps:** update dependency nodemailer to ^10.0.16 ([#447](https://github.com/martadams89/seo-website-indexer/issues/447)) ([aa60a44](https://github.com/martadams89/seo-website-indexer/commit/aa60a440af9050af43ee6438d161d0639421e2ec))
+
 ## [1.41.6](https://github.com/martadams89/seo-website-indexer/compare/v1.41.5...v1.41.6) (2026-10-07)
 
 
