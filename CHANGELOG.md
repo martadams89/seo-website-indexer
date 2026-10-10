@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.41.8](https://github.com/martadams89/seo-website-indexer/compare/v1.41.7...v1.41.8) (2026-10-10)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/cors to ^11.3.1 ([#452](https://github.com/martadams89/seo-website-indexer/issues/452)) ([b07bf3b](https://github.com/martadams89/seo-website-indexer/commit/b07bf3b2a1017bb1c37910e402bccdf53268c5b3))
+* **deps:** update dependency @fastify/rate-limit to ^11.2.1 ([#453](https://github.com/martadams89/seo-website-indexer/issues/453)) ([40bc443](https://github.com/martadams89/seo-website-indexer/commit/40bc4430b78f75739725c12910ac0973d67d823b))
+* **deps:** update dependency @fastify/static to ^10.1.6 ([#455](https://github.com/martadams89/seo-website-indexer/issues/455)) ([92023c7](https://github.com/martadams89/seo-website-indexer/commit/92023c72e4f446484d4994fde16828f9722c4e12))
+* **deps:** update dependency lucide-react to ^1.54.0 ([#456](https://github.com/martadams89/seo-website-indexer/issues/456)) ([d0b9654](https://github.com/martadams89/seo-website-indexer/commit/d0b9654d48129ced71f0fa15202f2b24ae57049e))
+* **deps:** update dependency lucide-react to ^1.55.0 ([#457](https://github.com/martadams89/seo-website-indexer/issues/457)) ([c46edd1](https://github.com/martadams89/seo-website-indexer/commit/c46edd17745dc42e0391b00875055be63f310f67))
+* **deps:** update dependency nodemailer to ^10.1.0 ([#458](https://github.com/martadams89/seo-website-indexer/issues/458)) ([46a860a](https://github.com/martadams89/seo-website-indexer/commit/46a860a9ed60ec30dd663baca7e5207370bbad49))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vite to ^8.3.4 ([#451](https://github.com/martadams89/seo-website-indexer/issues/451)) ([96a2259](https://github.com/martadams89/seo-website-indexer/commit/96a22596dc1ad8465ad2b4940c68f46f94d871d0))
+
 ## [1.41.7](https://github.com/martadams89/seo-website-indexer/compare/v1.41.6...v1.41.7) (2026-10-08)
 
 
