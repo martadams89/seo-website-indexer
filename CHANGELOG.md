@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.41.10](https://github.com/martadams89/seo-website-indexer/compare/v1.41.9...v1.41.10) (2026-10-13)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency fastify to ^5.12.7 ([#463](https://github.com/martadams89/seo-website-indexer/issues/463)) ([8f4851c](https://github.com/martadams89/seo-website-indexer/commit/8f4851cdfeadea823d100d943386d9a5d65af5a7))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency typescript-eslint to ^8.71.2 ([#461](https://github.com/martadams89/seo-website-indexer/issues/461)) ([beb1636](https://github.com/martadams89/seo-website-indexer/commit/beb16365939f96bacd3c5e61fb2896d68c6d41f6))
+* **deps:** update dependency vitest to ^5.0.4 ([#462](https://github.com/martadams89/seo-website-indexer/issues/462)) ([5b2cb66](https://github.com/martadams89/seo-website-indexer/commit/5b2cb661d7c1236ed66d541e77cf8f2172dd2f1d))
+
 ## [1.41.9](https://github.com/martadams89/seo-website-indexer/compare/v1.41.8...v1.41.9) (2026-10-12)
 
 
