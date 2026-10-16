@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.41.12](https://github.com/martadams89/seo-website-indexer/compare/v1.41.11...v1.41.12) (2026-10-16)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to ^11.3.1 ([#471](https://github.com/martadams89/seo-website-indexer/issues/471)) ([6dea559](https://github.com/martadams89/seo-website-indexer/commit/6dea5598c68b1a9c71eeeeba12abcdd1f2357f23))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency jsdom to ^30.1.3 ([#469](https://github.com/martadams89/seo-website-indexer/issues/469)) ([ea9ed95](https://github.com/martadams89/seo-website-indexer/commit/ea9ed9551a7663706fc4831ed42fdcac09812f2b))
+* **deps:** update dependency vitest to ^5.0.5 ([#470](https://github.com/martadams89/seo-website-indexer/issues/470)) ([a420ba3](https://github.com/martadams89/seo-website-indexer/commit/a420ba34ac8bf54e0354738c2e9d3ed72368b563))
+
 ## [1.41.11](https://github.com/martadams89/seo-website-indexer/compare/v1.41.10...v1.41.11) (2026-10-14)
 
 
