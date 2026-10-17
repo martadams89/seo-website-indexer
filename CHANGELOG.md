@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.13](https://github.com/martadams89/seo-website-indexer/compare/v1.41.12...v1.41.13) (2026-10-17)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^10.1.2 ([#474](https://github.com/martadams89/seo-website-indexer/issues/474)) ([306521f](https://github.com/martadams89/seo-website-indexer/commit/306521fda39175ca94e023330b20c609a6c9bb94))
+* **deps:** update react monorepo to ^19.3.1 ([#475](https://github.com/martadams89/seo-website-indexer/issues/475)) ([e2545c5](https://github.com/martadams89/seo-website-indexer/commit/e2545c5332425e6499bfa2c41d435d4d6b475333))
+
 ## [1.41.12](https://github.com/martadams89/seo-website-indexer/compare/v1.41.11...v1.41.12) (2026-10-16)
 
 
