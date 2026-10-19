@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.42.0](https://github.com/martadams89/seo-website-indexer/compare/v1.41.14...v1.42.0) (2026-10-19)
+
+
+### ✨ Features
+
+* Google Ads management, MCP sign-in for any AI assistant, and Request indexing help ([#484](https://github.com/martadams89/seo-website-indexer/issues/484)) ([42c922e](https://github.com/martadams89/seo-website-indexer/commit/42c922e69bd207668de33aae8dae5e7f2335be0a))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^10.1.7 ([#482](https://github.com/martadams89/seo-website-indexer/issues/482)) ([a3282c5](https://github.com/martadams89/seo-website-indexer/commit/a3282c5137cb1807121fce7b660fb857eeaebcf8))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.9 ([#481](https://github.com/martadams89/seo-website-indexer/issues/481)) ([bbe7782](https://github.com/martadams89/seo-website-indexer/commit/bbe7782071d62a95147807cb6d381c3cfae4678e))
+
 ## [1.41.14](https://github.com/martadams89/seo-website-indexer/compare/v1.41.13...v1.41.14) (2026-10-18)
 
 
