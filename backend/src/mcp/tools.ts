@@ -386,7 +386,10 @@ export function buildMcpServer(ctx: McpContext): McpServer {
             ? (result as Record<string, unknown>) : { result };
           return { content: [{ type: 'text' as const, text }], structuredContent: structured };
         } catch (e) {
-          return { content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }], isError: true };
+          // Google Ads errors carry an actionable hint (enable the API, allow a host…); pass it on.
+          const hint = (e as { hint?: unknown } | null)?.hint;
+          const text = `${e instanceof Error ? e.message : String(e)}${typeof hint === 'string' && hint ? `\n\nHint: ${hint}` : ''}`;
+          return { content: [{ type: 'text' as const, text }], isError: true };
         }
       },
     );

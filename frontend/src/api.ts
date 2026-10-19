@@ -96,6 +96,8 @@ export interface AppStatus {
   sites: number;
   accounts?: number;
   version?: string;
+  /** The origin the server builds callback and MCP URLs from. */
+  publicOrigin?: string;
 }
 
 export interface QuotaSummary {

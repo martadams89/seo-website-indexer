@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AdsApiError, buildGaql, cleanCustomerId, flattenRow, formatCustomerId, microsToUnits, parseAdsError, unitsToMicros } from '../ads/client.js';
+import { AdsApiError, buildGaql, cleanCustomerId, flattenRow, formatCustomerId, microsToUnits, networkError, parseAdsError, unitsToMicros } from '../ads/client.js';
 import {
   addKeywordOperations, budgetAmountOperation, campaignBiddingOperation, operationTypeFor, resourceName,
   responsiveSearchAdOperation, searchCampaignOperations, statusOperations,
@@ -61,6 +61,35 @@ describe('Google Ads error mapping', () => {
     const err = parseAdsError(403, { error: { details: [{ errors: [{ errorCode: { authorizationError: 'USER_PERMISSION_DENIED' }, message: 'User doesn\'t have permission to access customer.' }] }] } }, null);
     expect(err.kind).toBe('PERMISSION');
     expect(err.hint).toMatch(/manager/);
+  });
+});
+
+describe('Google Ads network failures', () => {
+  const fetchFailed = (cause: unknown) => new TypeError('fetch failed', { cause });
+
+  it('names the DNS failure behind a bare "fetch failed"', () => {
+    const err = networkError(fetchFailed(Object.assign(new Error('getaddrinfo ENOTFOUND googleads.googleapis.com'), { code: 'ENOTFOUND' })), 'googleads.googleapis.com');
+    expect(err?.kind).toBe('NETWORK');
+    expect(err?.message).toContain('ENOTFOUND');
+    expect(err?.hint).toMatch(/Pi-hole/);
+  });
+
+  it('digs the code out of an AggregateError from dual-stack connects', () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 0.0.0.0:443'), { code: 'ECONNREFUSED' });
+    const err = networkError(fetchFailed(new AggregateError([refused], 'connect failed')), 'googleads.googleapis.com');
+    expect(err?.message).toContain('ECONNREFUSED');
+    expect(err?.hint).toMatch(/refused/);
+  });
+
+  it('explains timeouts and TLS interception', () => {
+    expect(networkError(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }), 'googleads.googleapis.com')?.message).toMatch(/did not answer/);
+    const tls = networkError(fetchFailed(Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' })), 'googleads.googleapis.com');
+    expect(tls?.hint).toMatch(/NODE_EXTRA_CA_CERTS/);
+  });
+
+  it('leaves other errors alone', () => {
+    expect(networkError(new Error('invalid_grant'), 'oauth2.googleapis.com')).toBeNull();
+    expect(networkError('nope', 'oauth2.googleapis.com')).toBeNull();
   });
 });
 

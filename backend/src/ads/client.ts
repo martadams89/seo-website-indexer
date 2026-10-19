@@ -55,7 +55,7 @@ export function projectFromClientId(clientId: string | null | undefined): string
 
 export type AdsErrorKind =
   | 'INVALID_CUSTOMER_ID' | 'INVALID_AMOUNT' | 'NO_ADS_SCOPE' | 'NEEDS_REAUTH' | 'API_DISABLED'
-  | 'ACCESS_LEVEL' | 'PERMISSION' | 'NOT_FOUND' | 'QUOTA' | 'INVALID_REQUEST' | 'UNKNOWN';
+  | 'ACCESS_LEVEL' | 'PERMISSION' | 'NOT_FOUND' | 'QUOTA' | 'INVALID_REQUEST' | 'NETWORK' | 'UNKNOWN';
 
 export class AdsApiError extends Error {
   kind: AdsErrorKind;
@@ -124,6 +124,38 @@ export function parseAdsError(status: number, body: unknown, projectNumber: stri
   return new AdsApiError(message, 'UNKNOWN', { status, requestId, details: body });
 }
 
+/**
+ * Node's fetch reports every connection problem as a bare "fetch failed", so
+ * dig out the underlying cause (DNS, refused, TLS…) and say what to check.
+ * Returns null for errors that aren't network failures.
+ */
+export function networkError(e: unknown, host: string): AdsApiError | null {
+  if (!(e instanceof Error)) return null;
+  if (e.name === 'TimeoutError') {
+    return new AdsApiError(`${host} did not answer within ${REQUEST_TIMEOUT_MS / 1000} seconds.`, 'NETWORK', {
+      hint: 'Google may be slow right now — try again in a minute. If it keeps happening, check the server\'s outbound HTTPS connection.',
+    });
+  }
+  if (e.message !== 'fetch failed') return null;
+  type Cause = { code?: string; message?: string; errors?: Cause[] };
+  const cause = (e as { cause?: Cause }).cause;
+  const inner = cause?.code ? cause : cause?.errors?.find(c => c.code) ?? cause;
+  const code = inner?.code ?? '';
+  const detail = [code, inner?.message && inner.message !== code ? inner.message : ''].filter(Boolean).join(': ');
+  const message = `The server couldn't connect to ${host}${detail ? ` (${detail})` : ''}.`;
+  let hint = `Check that the server can make outbound HTTPS requests to ${host}.`;
+  if (/ENOTFOUND|EAI_AGAIN/.test(code)) {
+    hint = `The server's DNS couldn't look up ${host}. Ad-blocking DNS (Pi-hole, AdGuard Home, NextDNS and similar) often blocks Google Ads domains — allow ${host} there, then scan again.`;
+  } else if (/ECONNREFUSED/.test(code)) {
+    hint = `The connection was refused. Ad-blocking DNS that answers 0.0.0.0 for Google Ads domains (Pi-hole, AdGuard Home…) or a firewall rule usually causes this — allow ${host}, then scan again.`;
+  } else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|TLS|SSL/i.test(code)) {
+    hint = 'Something between the server and Google is intercepting HTTPS (a TLS-inspecting proxy or firewall). Exempt Google\'s APIs from inspection, or trust its certificate with NODE_EXTRA_CA_CERTS.';
+  } else if (/TIMEOUT|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNRESET/.test(code)) {
+    hint = `The connection to ${host} timed out or was cut off. Check the server's firewall and outbound network; if it was a one-off, scan again.`;
+  }
+  return new AdsApiError(message, 'NETWORK', { hint });
+}
+
 // ── Transport ────────────────────────────────────────────────────────────────
 
 export interface AdsCallContext {
@@ -151,7 +183,7 @@ async function call<T>(ctx: AdsCallContext, path: string, body?: unknown, method
   const account = getGoogleAccountById(ctx.googleAccountId);
   if (!account) throw new AdsApiError('The Google connection for this ad account was removed. Link the account again from the Google Ads page.', 'NEEDS_REAUTH');
   if (account.needs_reauth) throw new AdsApiError(`Google connection ${account.email ?? account.id} must be reconnected before it can be used.`, 'NEEDS_REAUTH', { hint: 'Reconnect it under Settings → Google Accounts or from the Google Ads page.' });
-  const token = await tokenSource(ctx.googleAccountId);
+  const token = await tokenSource(ctx.googleAccountId).catch((e: unknown) => { throw networkError(e, 'oauth2.googleapis.com') ?? e; });
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   if (ctx.loginCustomerId) headers['login-customer-id'] = cleanCustomerId(ctx.loginCustomerId);
   const res = await fetcher(`${BASE}${path}`, {
@@ -159,7 +191,7 @@ async function call<T>(ctx: AdsCallContext, path: string, body?: unknown, method
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  }).catch((e: unknown) => { throw networkError(e, new URL(BASE).host) ?? e; });
   const text = await res.text();
   let parsed: unknown = null;
   try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }

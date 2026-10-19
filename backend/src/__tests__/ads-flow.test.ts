@@ -210,4 +210,18 @@ describe('Google Ads over MCP', () => {
     const result = await m.tools.runTool(ctx, 'ads_search', { account: accountId, fields: ['campaign.id'], resource: 'campaign', conditions: ["campaign.status = 'ENABLED'"], limit: 5 }) as { query: string };
     expect(result.query).toBe("SELECT campaign.id FROM campaign WHERE campaign.status = 'ENABLED' LIMIT 5");
   });
+
+  it('reports why Google Ads could not be reached instead of "fetch failed"', async () => {
+    const dnsFailure = Object.assign(new Error('getaddrinfo ENOTFOUND googleads.googleapis.com'), { code: 'ENOTFOUND' });
+    m.client.__setAdsTransportForTests({ fetcher: async () => { throw new TypeError('fetch failed', { cause: dnsFailure }); } });
+    try {
+      const err = await m.client.listAccessibleCustomers('alice@agency.test').catch((e: unknown) => e) as InstanceType<typeof m.client.AdsApiError>;
+      expect(err).toBeInstanceOf(m.client.AdsApiError);
+      expect(err.kind).toBe('NETWORK');
+      expect(err.message).toMatch(/couldn't connect to googleads\.googleapis\.com \(ENOTFOUND/);
+      expect(err.hint).toMatch(/DNS/);
+    } finally {
+      m.client.__setAdsTransportForTests({ fetcher: fakeGoogleAds });
+    }
+  });
 });

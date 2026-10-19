@@ -235,5 +235,7 @@ Errors from Google are translated into a message and a next step.
 | Quota exceeded | Explorer allows 2,880 operations a day across all clients; apply for Basic. |
 | Keyword ideas fail on Explorer | Planning services need Basic access. |
 | Reconnect required | The refresh token was revoked or expired; reconnect the Google account. Publish the OAuth app so tokens don't expire after seven days. |
+| *The server couldn't connect to googleads.googleapis.com* (`ENOTFOUND`, `ECONNREFUSED`, a timeout…) | The request never reached Google. Ad-blocking DNS (Pi-hole, AdGuard Home, NextDNS) often blocks Google Ads domains: allow `googleads.googleapis.com`, check the server's firewall for outbound HTTPS, then click **Scan again**. Search Console can keep working because it uses other hosts. |
+| Google sign-in fails with `redirect_uri_mismatch`, or the callback starts with `http://` | The app is behind an HTTPS reverse proxy but builds its links from the plain-http request. Set `PUBLIC_URL=https://your-host` (or `TRUST_PROXY=true` if the proxy sends `X-Forwarded-Proto`) and restart. The dashboard shows a warning until this is fixed. |
 | The AI app says the server failed to authenticate | Check `PUBLIC_URL`, that the reverse proxy forwards `/.well-known/*`, `/oauth/*` and `/mcp`, that the app's redirect URL is in `MCP_OAUTH_REDIRECT_ALLOWLIST` if you set it, and remove and re-add the server. |
 | The AI app asks for a client ID and secret | Register a client under *Apps that need a client ID* with the redirect URL the app shows. |
