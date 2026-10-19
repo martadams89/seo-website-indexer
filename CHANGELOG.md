@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.1](https://github.com/martadams89/seo-website-indexer/compare/v1.42.0...v1.42.1) (2026-10-19)
+
+
+### 🐛 Bug Fixes
+
+* explain Google Ads connection failures and use https callbacks behind a proxy ([#485](https://github.com/martadams89/seo-website-indexer/issues/485)) ([a7415b3](https://github.com/martadams89/seo-website-indexer/commit/a7415b3c73e93ee3d947d2275f8c57374de3a5ee))
+
 ## [1.42.0](https://github.com/martadams89/seo-website-indexer/compare/v1.41.14...v1.42.0) (2026-10-19)
 
 
