@@ -31,11 +31,12 @@ Before exposing the application to the internet:
 2. Set a stable, random `APP_SECRET` and keep a separate copy in your secrets manager.
 3. Keep `/data` on persistent storage and copy its backups to another machine or storage service.
 4. Set `CORS_ORIGIN` if the dashboard is served from a different origin.
-5. Set `PUBLIC_URL` to the canonical HTTPS origin and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers.
-6. Configure SMTP if users need invitations and self-service password resets.
-7. Decide whether local passwords, SSO or both should be available.
-8. Sign in as the first super-admin, enable MFA and create named accounts for other people.
-9. Pin a versioned image tag if you require controlled upgrade windows.
+5. Set `PUBLIC_URL` to the canonical HTTPS origin and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers. `PUBLIC_URL` is also the OAuth issuer that MCP clients (ChatGPT, Claude, IDEs, agent CLIs) see, so it must be the public `https://` address.
+6. Make sure the reverse proxy forwards `/mcp`, `/oauth/*` and `/.well-known/oauth-*` to the container as well as the dashboard. MCP clients discover sign-in through these paths.
+7. Configure SMTP if users need invitations and self-service password resets.
+8. Decide whether local passwords, SSO or both should be available.
+9. Sign in as the first super-admin, enable MFA and create named accounts for other people. For workspaces whose members can change Google Ads, turn on **Require MFA** under **Governance & usage → Workspace policy**.
+10. Pin a versioned image tag if you require controlled upgrade windows.
 
 A suitable secret can be generated with:
 
@@ -68,7 +69,31 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `AI_CITATION_DAILY_LIMIT` | `25` | Citation checks allowed each day for non-owner members. |
 | `AI_DRAFT_DAILY_LIMIT` | `25` | Ranking-playbook AI drafts allowed each day for non-owner members. |
 | `GSC_INSPECTION_DAILY_LIMIT` | `2000` | Daily Google URL Inspection allowance per Search Console property. |
+| `GOOGLE_ADS_API_VERSION` | `v26` | Google Ads REST API version. Raise it when Google releases a new version and the release notes allow. |
+| `OAUTH_RATE_LIMIT_MAX` | `30` | MCP OAuth registration, token and revocation requests allowed per IP per minute. |
+| `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Comma-separated redirect hosts/schemes MCP clients may use, e.g. `chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1`. Unset allows any `https` redirect. |
 | `GOOGLE_INDEXING_DAILY_LIMIT` | `200` | Daily Google Indexing API notifications per Cloud project, shared by sites that opt in. Set `0` to disable. Raise it only if Google has granted a higher quota. |
+
+### Security notes for a public install
+
+- The dashboard API requires a session cookie and an `X-Requested-With` header on every change; workspace roles and capabilities are enforced by the API.
+- The MCP endpoint accepts only OAuth access tokens (one hour, refreshable for 30 days, revocable under **Connected apps**) or hashed personal tokens. Prefer OAuth or a header over a `?token=` URL, which can end up in proxy logs.
+- OAuth uses PKCE (S256 only) and exact redirect-URI matching (loopback redirects may change port); client registration only accepts `https` redirects (or `http` on localhost and app-specific schemes) and is rate-limited. Set `MCP_OAUTH_REDIRECT_ALLOWLIST` to the AI apps you actually use so look-alike apps can't register — see below.
+
+### Redirect allowlist examples
+
+`MCP_OAUTH_REDIRECT_ALLOWLIST` takes hostnames, `*.` wildcards for subdomains, and app schemes ending in `:`. Common clients:
+
+| Client | Entries |
+| --- | --- |
+| ChatGPT | `chatgpt.com,platform.openai.com` |
+| Claude | `claude.ai,*.claude.com` |
+| VS Code | `vscode.dev,insiders.vscode.dev,127.0.0.1` |
+| Cursor | `cursor:` |
+| Agent CLIs (Claude Code, Codex, Gemini CLI) and local tools | `localhost,127.0.0.1` |
+
+For example: `MCP_OAUTH_REDIRECT_ALLOWLIST=chatgpt.com,platform.openai.com,claude.ai,*.claude.com,vscode.dev,insiders.vscode.dev,cursor:,localhost,127.0.0.1`. If an app fails to connect, its sign-in error shows the redirect URL it used; add that host. The allowlist also applies to clients registered on the dashboard and to client metadata documents.
+- Google Ads changes are validated by Google before they are stored and are always subject to the client's monthly budget and guardrails. Every applied change is in the change log and the audit trail.
 
 The liveness endpoint is `GET /api/livez`. The readiness endpoint is `GET /api/healthz` and also checks the database and scheduler.
 

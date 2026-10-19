@@ -111,6 +111,33 @@ Requirements: the linked Google account must be a verified **owner** of the prop
 
 > Google documents the Indexing API for pages with `JobPosting` or livestream `BroadcastEvent` structured data only. Its effect on other pages is not guaranteed, which is why the option is off by default and sitemaps remain the primary signal.
 
+## What Google's APIs can and can't do
+
+Google gives software far fewer indexing levers than the Search Console website does. This is the complete picture, and the same table appears on each site's **Indexing** tab.
+
+| Action | How | Available to this app |
+| --- | --- | --- |
+| Submit or resubmit a sitemap | Search Console Sitemaps API | **Automatic.** Changed sitemaps are resubmitted every run. A signal, not a guarantee. |
+| Check whether a page is indexed | URL Inspection API | **Automatic.** Read-only status; 2,000 inspections per property per day, 600 per minute. |
+| Request indexing of a specific page | Search Console website only | **No API.** The "Request indexing" button can't be called by software. Google doesn't publish its quota; it is small (typically around 10 pages per property per day). See below for the browser-agent option. |
+| Notify Google that a page changed or was removed | Indexing API | **Limited.** Supported by Google only for job-posting and livestream pages; 200 URLs a day per Cloud project by default. Opt-in per site (see above). |
+| Validate a fix in the Page indexing report | Search Console website only | **No API.** A browser agent can click it the same way. |
+| Temporarily hide a URL from results | Removals tool | **No API**, and not an indexing tool. |
+| Ping a sitemap URL | `google.com/ping` | **Retired** by Google in 2023. |
+| IndexNow | IndexNow protocol | **Not Google.** Bing, Yandex, Seznam, Naver and others. |
+
+## Request indexing with a browser agent
+
+Because "Request indexing" has no API, each site's **Indexing** tab includes **Ask Google to crawl specific pages**:
+
+- **The queue** — the pages most worth one of the few daily requests, best first: inspected and not indexed but fixable (not `noindex`, canonicalised, redirected or 404), then pages changed since Google's last crawl, then pages never inspected. Pages requested in the past seven days are left out unless they change again. Each has a direct URL Inspection link and a **mark as requested** button.
+- **One-off prompt** — includes the page list. Paste it into any AI browser agent (a browser extension or AI browser that acts in your own signed-in session); no MCP connection is needed.
+- **Recurring routine prompt** — for a scheduled task in an assistant that can use this app's MCP server and control your browser. Each run calls the MCP tool `get_indexing_request_queue` for a fresh list, requests the pages, then calls `record_indexing_requests` (needs a connection with **SEO actions** allowed) so the queue stays honest.
+
+Before using either prompt, **sign in yourself**: open Search Console in the Chrome profile the agent uses, with a Google account that has Owner or Full permission on the property, and stay signed in. The prompts tell the agent never to type passwords or 2-step codes and to stop if it sees a sign-in page, the wrong account or no access. They also tell it to work one page at a time, skip pages that are already indexed, not request pages whose live test shows a problem (fix those on the site instead), and stop immediately when Search Console reports the quota is exceeded.
+
+This uses your own browser session at a human pace within Google's quota. It is not an official API and depends on the Search Console interface, so expect occasional changes.
+
 ## Connect Google Search Console
 
 Connecting Google for Search Console is separate from signing in to the dashboard with Google SSO.

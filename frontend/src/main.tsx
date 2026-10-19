@@ -29,6 +29,8 @@ const ClientPortalPage = lazy(() => import('./pages/ClientPortal'))
 const InsightsLayout = lazy(() => import('./pages/InsightsLayout'))
 const SiteWorkspacePage = lazy(() => import('./pages/SiteWorkspace'))
 const PlaybookPage = lazy(() => import('./pages/Playbook'))
+const GoogleAdsPage = lazy(() => import('./pages/GoogleAds'))
+const OAuthConsentPage = lazy(() => import('./pages/OAuthConsent'))
 
 const loading = <div className="page-loading">Opening workspace…</div>
 
@@ -63,6 +65,8 @@ function InnerRoutes() {
               <SetupPage />
             </div>
           } />
+          {/* MCP connector sign-in: no sidebar, reached from an AI app's OAuth flow */}
+          <Route path="/oauth/consent" element={<OAuthConsentPage />} />
           <Route path="/executive-view" element={<ClientPortalPage />} />
           <Route path="/portal" element={<Navigate to="/executive-view" replace />} />
           {/* All other pages use the sidebar layout */}
@@ -72,6 +76,7 @@ function InnerRoutes() {
             <Route path="/actions"  element={<ActionCenterPage />} />
             <Route path="/sites"    element={<SitesPage />} />
             <Route path="/sites/:siteId" element={<SiteWorkspacePage />} />
+            <Route path="/ads" element={<GoogleAdsPage />} />
             <Route path="/publishing" element={<PublishingPage />} />
             {/* Google accounts now live under Settings → Google Accounts */}
             <Route path="/accounts" element={<Navigate to="/settings" replace />} />

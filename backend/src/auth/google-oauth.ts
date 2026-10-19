@@ -52,6 +52,12 @@ export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
+// Opt-in: Google Ads management. Google publishes no read-only Ads scope, so
+// this one grant covers reporting and changes; the app's own guardrails and
+// MCP scopes decide what may actually be changed.
+export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
+export const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
 
 const BUILTIN_CLIENT_ID     = process.env.GOOGLE_OAUTH_CLIENT_ID     || '';
@@ -123,7 +129,7 @@ export interface PendingGoogleOAuth {
 /** Create a concurrency-safe, single-use OAuth handshake and authorization URL. */
 export function createGoogleOAuthAuthorization(opts: {
   userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
-  clientId?: string; clientSecret?: string; loginHint?: string | null;
+  clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -136,7 +142,7 @@ export function createGoogleOAuthAuthorization(opts: {
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
     VALUES(?,?,?,?,?,?,?)
   `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
-  const scopes = opts.autoSetup ? `${OAUTH_SCOPES} https://www.googleapis.com/auth/cloud-platform` : OAUTH_SCOPES;
+  const scopes = [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : ''].filter(Boolean).join(' ');
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: opts.redirectUri,
@@ -144,6 +150,9 @@ export function createGoogleOAuthAuthorization(opts: {
     scope: scopes,
     access_type: 'offline',
     prompt: 'select_account consent',
+    // Incremental authorization: re-consenting an existing connection (for
+    // example to add Google Ads) keeps everything it already granted.
+    include_granted_scopes: 'true',
     state,
   });
   if (opts.loginHint) params.set('login_hint', opts.loginHint);
@@ -289,8 +298,10 @@ export async function exchangeCodeForTokens(
   // hand in the Cloud console. Needs the cloud-platform scope; if that wasn't
   // granted the enable calls 403 and we skip silently (logged). Fire-and-forget
   // so it never delays the OAuth response.
-  if ((data.scope ?? '').split(' ').includes('https://www.googleapis.com/auth/cloud-platform')) {
-    void enableRequiredApis(data.access_token, clientId, email);
+  const granted = (data.scope ?? '').split(' ');
+  if (granted.includes(CLOUD_PLATFORM_SCOPE)) {
+    const services = granted.includes(GOOGLE_ADS_SCOPE) ? [...AUTO_ENABLE_SERVICES, GOOGLE_ADS_SERVICE] : AUTO_ENABLE_SERVICES;
+    void enableRequiredApis(data.access_token, clientId, email, services);
   }
 
   // Clear in-memory temp custom credentials
@@ -308,18 +319,19 @@ function projectFromClientId(clientId: string): string | null {
 }
 
 const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'indexing.googleapis.com', 'analyticsdata.googleapis.com'];
+export const GOOGLE_ADS_SERVICE = 'googleads.googleapis.com';
 
 /**
  * Enable the APIs the tool depends on, on the project owning the OAuth client.
  * Idempotent (Google no-ops an already-enabled service). Best-effort — any
  * failure (no cloud-platform scope, no permission) is logged, not thrown.
  */
-export async function enableRequiredApis(accessToken: string, clientId: string, label: string): Promise<{ enabled: string[]; skipped: string[] }> {
+export async function enableRequiredApis(accessToken: string, clientId: string, label: string, services: string[] = AUTO_ENABLE_SERVICES): Promise<{ enabled: string[]; skipped: string[] }> {
   const project = projectFromClientId(clientId);
   const enabled: string[] = [];
   const skipped: string[] = [];
-  if (!project) return { enabled, skipped: [...AUTO_ENABLE_SERVICES] };
-  for (const svc of AUTO_ENABLE_SERVICES) {
+  if (!project) return { enabled, skipped: [...services] };
+  for (const svc of services) {
     try {
       const res = await fetch(`https://serviceusage.googleapis.com/v1/projects/${project}/services/${svc}:enable`, {
         method: 'POST',

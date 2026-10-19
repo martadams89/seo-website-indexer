@@ -21,7 +21,7 @@ An upgrade from an older single-workspace installation is automatic. The first u
 | Editor | Full operational access by default, without member or workspace administration. Individual capabilities can be removed. |
 | Viewer | Read-only access. API writes are rejected. |
 
-Editors have six separately controlled capabilities:
+Editors have seven separately controlled capabilities:
 
 - Manage sites and submissions
 - Manage integrations and API keys
@@ -29,8 +29,9 @@ Editors have six separately controlled capabilities:
 - Manage actions, entities and content
 - Manage reports and saved views
 - Manage governance, budgets, tokens and webhooks
+- Manage Google Ads: link accounts, set client budgets and guardrails, approve, reject and revert changes (also required for an assistant to change Google Ads on this member's behalf)
 
-Admins always have all six capabilities. Viewers cannot be granted write capabilities. Owners and super-admins have full access.
+Admins always have all seven capabilities. Viewers cannot be granted write capabilities. Owners and super-admins have full access.
 
 AI Visibility has a separate membership switch because running provider queries can incur a cost. Owners and super-admins always have access. Other members must have the switch enabled and are subject to `AI_CITATION_DAILY_LIMIT`.
 
