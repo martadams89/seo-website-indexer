@@ -34,6 +34,7 @@ import {
 } from "../api";
 import { useApp, useToast } from "../AppContext";
 import { useWorkspace } from "../workspace/WorkspaceContext";
+import { RequestIndexingCard } from "../components/RequestIndexing";
 
 type SiteTab =
   | "overview"
@@ -563,6 +564,7 @@ export default function SiteWorkspacePage() {
               )}
             </div>
           </section>
+          <RequestIndexingCard siteId={siteId} canManage={!!active?.permissions?.manage_sites} />
           {failures.length > 0 && (
             <section className="ops-card full">
               <div className="ops-card-head">

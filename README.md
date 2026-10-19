@@ -2,7 +2,7 @@
 
 # SEO Website Indexer
 
-**A self-hosted SEO, GEO and ASO workbench for indexing, search performance, backlinks, content and website operations across multiple clients or teams.**
+**A self-hosted SEO, GEO, ASO and Google Ads workbench for indexing, search performance, paid search, backlinks, content and website operations across multiple clients or teams — with an MCP server so Claude can do the work on a schedule.**
 
 [![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github)](https://github.com/martadams89/seo-website-indexer/releases)
@@ -19,7 +19,8 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 
 | Area | What you can do |
 | --- | --- |
-| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. |
+| Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. See exactly what Google's APIs can and can't do, and get a prioritised "Request indexing" queue with copyable prompts for a browser agent. |
+| Google Ads | Link each client's ad accounts (including through a manager account), set monthly budgets and guardrails, see performance, pacing and an audit, and approve, reject or revert changes. An AI routine builder turns a short questionnaire into a ready-to-schedule Claude prompt that reviews, researches competitors and optimises spend inside the guardrails. |
 | Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
 | Ranking playbook | A ranked list of what to change to earn more Google clicks: snippet rewrites, striking-distance pages, cannibalising pairs and decaying content, each with evidence, steps, an estimated monthly click range and an AI-drafted fix for review. Done items are measured after 31 days. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
@@ -65,8 +66,11 @@ After signing in:
 4. Put the site's IndexNow key file in place if you want URL submissions.
 5. Add any analytics, AI, publishing or notification services you need.
 6. Run an audit first, review the result, then enable scheduled submissions.
+7. For paid search, open **Google Ads → Setup**: add Google Ads access to a Google connection, link your clients' ad accounts, set their monthly budgets and build an AI routine.
 
-The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing and failed-submission recovery.
+The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing, failed-submission recovery, what Google's indexing APIs can and can't do, and requesting indexing with a browser agent.
+
+The [Google Ads guide](docs/GOOGLE_ADS.md) covers Cloud project access levels, linking client accounts, budgets and guardrails, approvals, connecting Claude and the AI routine.
 
 The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair flow, copyable issue briefs and the supported Search Console sitemap plus URL Inspection check. The [ranking playbook guide](docs/RANKING_PLAYBOOK.md) explains how opportunities are found, estimated and measured.
 
@@ -119,6 +123,7 @@ Connections are configured in the dashboard and scoped to the active workspace u
 | Purpose | Supported services |
 | --- | --- |
 | Search and indexing | Google Search Console, IndexNow, Bing Webmaster |
+| Paid search | Google Ads (API v26, access through your own Google Cloud project) |
 | Analytics and performance | Google Analytics 4, PageSpeed and CrUX, Cloudflare, Plausible, Matomo |
 | AI visibility | OpenAI, Anthropic, Gemini, Perplexity, xAI, Brave Search |
 | Publishing | WordPress, Shopify, Webflow |
@@ -168,7 +173,10 @@ Most settings live in the dashboard. These environment variables control the con
 | `AUTH_RATE_LIMIT_MAX` | `10` | Sign-in requests allowed per `AUTH_RATE_LIMIT_WINDOW`. |
 | `AI_CITATION_DAILY_LIMIT` | `25` | Daily citation checks for non-owner members. Owners and super-admins are exempt. |
 | `AI_DRAFT_DAILY_LIMIT` | `25` | Daily ranking-playbook AI drafts for non-owner members. Owners and super-admins are exempt. |
-| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Optional deployment-level Google connection credentials. They can also be entered during setup. |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Optional deployment-level Google connection credentials (Search Console, GA4, Google Ads). They can also be entered during setup. |
+| `GOOGLE_ADS_API_VERSION` | `v26` | Google Ads REST API version. |
+| `OAUTH_RATE_LIMIT_MAX` | `30` | MCP OAuth registration/token requests per IP per minute. |
+| `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Redirect hosts MCP clients may register (e.g. `claude.ai,*.claude.com,localhost`). |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*` | unset | Optional Google or generic OpenID Connect sign-in. |
 | `SMTP_*` | unset | Optional email delivery and password-reset links. |
 
@@ -182,6 +190,8 @@ The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, reco
 - Human sessions are stored in the database and authentication routes have a stricter rate limit.
 - Workspace access is checked by the API, not only hidden in the interface.
 - Service tokens are hashed, scoped to one workspace and can be expired or revoked.
+- MCP clients sign in with OAuth 2.1 (PKCE, one-hour access tokens, rotating refresh tokens, revocable connected apps) or hashed personal tokens, and never get more than their user's role allows.
+- Google Ads changes are validated by Google, checked against each client's monthly budget and guardrails, and recorded with the person or assistant that made them.
 - Administrative actions, impersonation and security changes are recorded in the audit history.
 - User-configured HTTP, webhook, SSO and FTP destinations are checked against loopback, private and reserved networks before connection and again after redirects/DNS resolution.
 - Cross-origin browser access is disabled unless an explicit `CORS_ORIGIN` allowlist is configured; forwarded client addresses are ignored unless `TRUST_PROXY` is enabled.
@@ -203,26 +213,25 @@ Send the token as `Authorization: Bearer oc_…`. See the [automation API guide]
 
 ## MCP server (connect Claude / AI assistants)
 
-The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server so an AI assistant can read — and optionally act on — your data through natural language: sites, Search Console performance, URL inspection, indexing quota, hygiene, AI-agent readiness and AI citations.
+The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so Claude or another assistant can read — and, with your permission, act on — your data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness, AI citations and Google Ads.
 
-1. Go to **Governance & Usage → API & Webhooks → Connect Claude to your data** and create a personal token. Unlike a service token it is **account-wide**: it exposes every workspace you can access. Tick *Allow actions* to also grant the `mcp:write` scope (submit URLs, trigger runs, refresh snapshots); otherwise the token is read-only.
-2. The MCP endpoint is `https://<your-host>/mcp` (Streamable HTTP transport), authenticated with `Authorization: Bearer seomcp_…`.
+**Connect with OAuth (recommended):**
 
-**Claude Code (CLI):**
+- **Claude web, desktop or Cowork:** **Settings → Connectors → Add custom connector**, paste `https://<your-host>/mcp` and leave the OAuth fields empty. Claude registers itself and opens this app, where you sign in and choose what it may do: read data, run SEO actions (`mcp:write`) and/or manage Google Ads (`ads:write`).
+- **Claude Code:** `claude mcp add --transport http seo-indexer https://<your-host>/mcp`, then `/mcp` to sign in.
+
+Access tokens last an hour and refresh automatically; revoke an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
+
+**Or use a personal token:** create one on the same card (tick *SEO actions* and/or *Google Ads changes* as needed) and send `Authorization: Bearer seomcp_…`:
 
 ```bash
 claude mcp add --transport http seo-indexer https://<your-host>/mcp \
   --header "Authorization: Bearer seomcp_your_token"
 ```
 
-**Claude web / desktop / Cowork:** add a custom connector. Two ways to authenticate:
+A `?token=` URL also works for clients that can't send headers, but the token may then appear in reverse-proxy logs.
 
-- **URL with the token baked in (simplest):** use `https://<your-host>/mcp?token=seomcp_your_token` as the connector URL — no header needed. (The token is scrubbed from request logs.)
-- **URL + header:** use `https://<your-host>/mcp` and add request header name `Authorization`, value `Bearer seomcp_your_token`. Static request headers require the connector-headers beta on your Claude organisation.
-
-The **Connect Claude to your data** card generates copy-paste-ready values for all of the above the moment you mint a token.
-
-The server is stateless and re-authenticates every request. Tokens are stored only as a SHA-256 hash, can be revoked at any time, and every tool is fenced to the token owner's own workspaces. The endpoint must be reachable over public HTTPS for hosted Claude apps.
+Tokens reach every workspace their owner can access and never exceed the owner's role. The Google Ads tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded change tools; see the [Google Ads guide](docs/GOOGLE_ADS.md#mcp-tools). The endpoint must be reachable over public HTTPS for hosted Claude apps.
 
 ## Updating and backups
 
@@ -270,6 +279,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Users, roles and workspaces](docs/USERS_AND_WORKSPACES.md)
 - [Integration permissions and setup](docs/INTEGRATIONS.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
+- [Google Ads: setup, guardrails, MCP tools and AI routines](docs/GOOGLE_ADS.md)
 - [Page-level Action Centre and Google verification](docs/ACTION_CENTRE.md)
 - [Ranking playbook: opportunities ranked by clicks gained](docs/RANKING_PLAYBOOK.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)

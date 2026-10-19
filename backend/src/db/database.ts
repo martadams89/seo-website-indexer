@@ -1292,6 +1292,9 @@ export interface UrlState {
   /** Fingerprint of the page's visible text, and when that fingerprint last changed. */
   content_hash?: string | null;
   content_changed_at?: string | null;
+  /** Last Search Console "Request indexing" made outside the API (by a person or a browser agent) and its outcome. */
+  manual_index_requested_at?: string | null;
+  manual_index_outcome?: string | null;
 }
 
 export function getUrlState(url: string, siteId: string): UrlState | null {

@@ -125,7 +125,7 @@ export function canUseAiCitations(user: User, workspaceId: string): boolean {
 // never have any (read-only is absolute) — overrides only affect editors.
 export const CAPABILITIES = [
   'manage_sites', 'manage_integrations', 'manage_notifications',
-  'manage_content', 'manage_reports', 'manage_governance',
+  'manage_content', 'manage_reports', 'manage_governance', 'manage_ads',
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export type CapabilityMap = Record<Capability, boolean>;
@@ -193,7 +193,7 @@ export function listWorkspaceMembers(workspaceId: string): WorkspaceMember[] {
       user_id: r.user_id, email: r.email, name: r.name, is_owner: isOwner, role,
       ai_citations: !!r.ai_citations, disabled: !!r.disabled,
       permissions: isOwner
-        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true }
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true, manage_ads: true }
         : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', r.permissions),
     };
   });
@@ -246,7 +246,7 @@ export function listUserWorkspaceAccess(userId: string): UserWorkspaceAccess[] {
       ai_citations: !!row.ai_citations,
       disabled: !!row.disabled,
       permissions: isOwner
-        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true }
+        ? { manage_sites: true, manage_integrations: true, manage_notifications: true, manage_content: true, manage_reports: true, manage_governance: true, manage_ads: true }
         : effectiveCapabilities(role as 'admin' | 'editor' | 'viewer', row.permissions),
     };
   });

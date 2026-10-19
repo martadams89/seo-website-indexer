@@ -14,6 +14,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticateMcpToken } from './tokens.js';
 import { buildContext, buildMcpServer } from './tools.js';
+import { publicOrigin } from '../utils/origin.js';
+import { resourceMetadataUrl } from './oauth.js';
 
 /**
  * Extract the token from either the `Authorization: Bearer …` header (preferred)
@@ -33,21 +35,26 @@ function bearer(req: FastifyRequest): string | null {
   return null;
 }
 
-function unauthorized(reply: FastifyReply, message: string) {
+/**
+ * 401 with the RFC 9728 pointer to this server's OAuth metadata, which is how
+ * MCP clients discover they can sign in instead of needing a pasted token.
+ */
+function unauthorized(req: FastifyRequest, reply: FastifyReply, message: string, tokenSent: boolean) {
+  const metadata = `resource_metadata="${resourceMetadataUrl(publicOrigin(req))}"`;
   return reply
     .code(401)
-    .header('WWW-Authenticate', 'Bearer realm="mcp", error="invalid_token"')
+    .header('WWW-Authenticate', tokenSent ? `Bearer realm="mcp", error="invalid_token", ${metadata}` : `Bearer realm="mcp", ${metadata}`)
     .send({ jsonrpc: '2.0', error: { code: -32001, message }, id: null });
 }
 
 export function registerMcpProtocolRoute(app: FastifyInstance): void {
   app.post('/mcp', async (req, reply) => {
     const raw = bearer(req);
-    if (!raw) return unauthorized(reply, 'Missing bearer token. Create one under Settings → API & MCP access.');
+    if (!raw) return unauthorized(req, reply, 'Sign in with OAuth, or send a token created under Governance & Usage → API & Webhooks.', false);
     const auth = authenticateMcpToken(raw);
-    if (!auth) return unauthorized(reply, 'Invalid, expired or revoked MCP token.');
-    const ctx = buildContext(auth);
-    if (!ctx) return unauthorized(reply, 'The user for this token no longer exists or is disabled.');
+    if (!auth) return unauthorized(req, reply, 'Invalid, expired or revoked MCP token.', true);
+    const ctx = buildContext(auth, publicOrigin(req));
+    if (!ctx) return unauthorized(req, reply, 'The user for this token no longer exists or is disabled.', true);
 
     // Stateless: a fresh server + transport per request. Hand Fastify's raw
     // req/res to the SDK and stop Fastify from also replying.

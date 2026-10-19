@@ -8,6 +8,143 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261019_03_manual_index_requests',
+    description: 'Track Search Console "Request indexing" clicks made by a person or a browser agent',
+    up(db) {
+      db.exec(`
+        ALTER TABLE url_state ADD COLUMN manual_index_requested_at TEXT;
+        ALTER TABLE url_state ADD COLUMN manual_index_outcome TEXT;
+      `);
+    },
+  },
+  {
+    id: '20261019_01_google_ads',
+    description: 'Google Ads client accounts, guarded change plans and AI routine history',
+    up(db) {
+      db.exec(`
+        CREATE TABLE ads_accounts (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL,
+          customer_id TEXT NOT NULL,
+          login_customer_id TEXT,
+          name TEXT,
+          currency TEXT,
+          time_zone TEXT,
+          is_manager INTEGER NOT NULL DEFAULT 0,
+          test_account INTEGER NOT NULL DEFAULT 0,
+          monthly_budget REAL,
+          brief TEXT NOT NULL DEFAULT '{}',
+          guardrails TEXT NOT NULL DEFAULT '{}',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_checked_at TEXT,
+          last_error TEXT,
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (workspace_id, customer_id)
+        );
+        CREATE INDEX idx_ads_accounts_ws ON ads_accounts(workspace_id);
+
+        CREATE TABLE ads_changes (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          ads_account_id TEXT NOT NULL REFERENCES ads_accounts(id) ON DELETE CASCADE,
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          source TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          rationale TEXT,
+          operations TEXT NOT NULL,
+          before_state TEXT NOT NULL DEFAULT '{}',
+          impact TEXT NOT NULL DEFAULT '{}',
+          findings TEXT NOT NULL DEFAULT '[]',
+          validation TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          decided_at TEXT,
+          applied_at TEXT,
+          result TEXT,
+          error TEXT,
+          reverts_change_id TEXT,
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_ads_changes_account ON ads_changes(ads_account_id, created_at DESC);
+        CREATE INDEX idx_ads_changes_ws_status ON ads_changes(workspace_id, status, created_at DESC);
+
+        CREATE TABLE ads_routine_runs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          ads_account_id TEXT REFERENCES ads_accounts(id) ON DELETE CASCADE,
+          user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+          summary TEXT NOT NULL,
+          findings TEXT NOT NULL DEFAULT '[]',
+          actions TEXT NOT NULL DEFAULT '[]',
+          next_steps TEXT NOT NULL DEFAULT '[]',
+          market_notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_ads_routine_runs_ws ON ads_routine_runs(workspace_id, created_at DESC);
+      `);
+    },
+  },
+  {
+    id: '20261019_02_mcp_oauth',
+    description: 'OAuth 2.1 authorization for MCP connectors (dynamic client registration, PKCE, refresh tokens)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE mcp_oauth_clients (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          redirect_uris TEXT NOT NULL,
+          secret_hash TEXT,
+          token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+          created_ip TEXT,
+          last_used_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE mcp_oauth_requests (
+          id TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL REFERENCES mcp_oauth_clients(id) ON DELETE CASCADE,
+          redirect_uri TEXT NOT NULL,
+          state TEXT,
+          scope TEXT,
+          code_challenge TEXT NOT NULL,
+          resource TEXT,
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE mcp_oauth_codes (
+          code_hash TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL REFERENCES mcp_oauth_clients(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          redirect_uri TEXT NOT NULL,
+          code_challenge TEXT NOT NULL,
+          scopes TEXT NOT NULL,
+          expires_at TEXT NOT NULL
+        );
+
+        CREATE TABLE mcp_oauth_grants (
+          id TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL REFERENCES mcp_oauth_clients(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          scopes TEXT NOT NULL,
+          refresh_hash TEXT UNIQUE,
+          refresh_expires_at TEXT,
+          last_used_at TEXT,
+          revoked_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_mcp_oauth_grants_user ON mcp_oauth_grants(user_id);
+
+        ALTER TABLE mcp_tokens ADD COLUMN oauth_grant_id TEXT REFERENCES mcp_oauth_grants(id) ON DELETE CASCADE;
+      `);
+    },
+  },
+  {
     id: '20260926_04_ranking_playbook',
     description: 'Query×page Search Console window and Ranking Playbook opportunities',
     up(db) {

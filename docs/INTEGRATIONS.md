@@ -31,6 +31,7 @@ Official references: [Data API quickstart](https://developers.google.com/analyti
 | --- | --- | --- |
 | Google Search Console | OAuth `webmasters`; Owner or Full user on the property | Settings → Google Accounts, then Sites |
 | Google Analytics 4 | OAuth `analytics.readonly`; GA4 Viewer or higher | Integrations |
+| Google Ads | OAuth `adwords` (opt-in); the Google user needs access to the ad accounts (directly or through a manager account); the OAuth client's Cloud project needs Explorer or Basic API access | Google Ads → Setup |
 | PageSpeed Insights | PageSpeed Insights API key; no OAuth | Integrations |
 | Chrome UX Report | Chrome UX Report API key; no OAuth | Settings → API Keys |
 | Cloudflare | `Account Analytics: Read`, limited to the selected zone | Integrations |
@@ -76,6 +77,7 @@ Enable these APIs in the Google Cloud project that owns the OAuth client:
 - **Google Search Console API**: `searchconsole.googleapis.com`
 - **Web Search Indexing API**: `indexing.googleapis.com` (only used by sites that opt in to Indexing API recrawl requests)
 - **Google Analytics Data API**: `analyticsdata.googleapis.com`
+- **Google Ads API**: `googleads.googleapis.com` (only when Google Ads is used)
 
 The standard account connection requests:
 
@@ -85,6 +87,14 @@ https://www.googleapis.com/auth/indexing
 https://www.googleapis.com/auth/analytics.readonly
 https://www.googleapis.com/auth/userinfo.email
 ```
+
+Google Ads is opt-in. Ticking **Also allow Google Ads management** (or **Add Google Ads access** on an existing connection) adds:
+
+```text
+https://www.googleapis.com/auth/adwords
+```
+
+Google publishes no read-only Ads scope, so what may change is decided by the app: the MCP `ads:write` scope, the member's **Manage Google Ads** capability and each client's monthly budget and guardrails. Re-consent uses incremental authorisation, so existing scopes and linked sites are kept. Google Ads API access is granted to the Cloud project that owns the OAuth client (Explorer or Basic; developer tokens are no longer used). See the [Google Ads guide](GOOGLE_ADS.md).
 
 `webmasters` is deliberately not read-only: the application reads Search Console data, submits sitemaps and performs supported inspection/submission actions. `indexing` is used only for sites that opt in to Indexing API recrawl requests. The Google identity must be a verified **owner** of the Search Console property for those calls. Accounts connected before this scope was added keep working for everything else; reconnect them to use the Indexing API. The optional Google API auto-configuration flow also asks for `cloud-platform`; normal day-to-day Search Console and GA4 use does not need that broader scope.
 
@@ -314,6 +324,16 @@ Create tokens under **Governance & Usage → API & Webhooks**. Each token is sho
 | Server/CDN request logs | `logs:write` | `POST /api/v1/logs/ingest` |
 
 Do not give a log shipper `events:write` or a rank exporter `logs:write` unless it genuinely uses both endpoints. Send tokens as `Authorization: Bearer oc_…`. See the [Automation API](AUTOMATION_API.md) for payloads and signed outbound-webhook verification.
+
+AI assistants use the MCP server at `/mcp` instead. Connect them with OAuth (paste the URL into the client and approve the permissions) or a personal token. MCP scopes are separate from service-token scopes:
+
+| MCP scope | Allows |
+| --- | --- |
+| `mcp:read` | Read sites, Search Console, indexing, AI citations and Google Ads data in every workspace the user can access. |
+| `mcp:write` | SEO actions: submit URLs, trigger runs, refresh snapshots, record Request indexing results. |
+| `ads:write` | Propose and apply Google Ads changes, always within each client's guardrails. |
+
+A token never exceeds its owner's role: viewers stay read-only and editors need the matching capability. See the [Google Ads guide](GOOGLE_ADS.md#connect-claude).
 
 ## Troubleshooting order
 

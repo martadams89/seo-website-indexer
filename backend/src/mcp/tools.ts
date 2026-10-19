@@ -16,29 +16,33 @@ import {
   getAllUrlFailures, getQuotaUsage, todayKey, type Site,
 } from '../db/database.js';
 import { getUserById, type User } from '../auth/users.js';
-import { accessibleWorkspaces, canAccessSiteInWorkspace, workspaceRole } from '../auth/workspaces.js';
+import { accessibleWorkspaces, canAccessSiteInWorkspace, canEditWorkspace, hasCapability, workspaceRole } from '../auth/workspaces.js';
 import { inspectGoogleUrl } from '../indexer/google.js';
 import { getGooglePerformance, getGoogleDimension } from '../indexer/performance.js';
 import { checkSiteHygiene } from '../indexer/hygiene.js';
 import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
+import { GOOGLE_INDEXING_CAPABILITIES, recordRequestOutcomes, siteRequestCandidates, type RequestOutcome } from '../indexer/request-indexing.js';
 import { snapshotSitePerformance, getWowDeltas } from '../analytics/perf-store.js';
 import { getResults } from '../ai/citations.js';
 import { runIndexing, isRunning } from '../scheduler.js';
 import { type McpScope, type McpTokenAuth } from './tokens.js';
+import { ADS_TOOLS } from './ads-tools.js';
 
 export interface McpContext {
   user: User;
   scopes: McpScope[];
   /** Ids of every workspace the user can reach — the tenant fence for all tools. */
   workspaceIds: string[];
+  /** Public origin of this install, for links back to the dashboard. */
+  origin?: string;
 }
 
 /** Resolve an authenticated token into a usable context, or null if the user is gone. */
-export function buildContext(auth: McpTokenAuth): McpContext | null {
+export function buildContext(auth: McpTokenAuth, origin?: string): McpContext | null {
   const user = getUserById(auth.userId);
   if (!user || user.disabled) return null;
-  return { user, scopes: auth.scopes, workspaceIds: accessibleWorkspaces(user).map(w => w.id) };
+  return { user, scopes: auth.scopes, workspaceIds: accessibleWorkspaces(user).map(w => w.id), origin };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -52,6 +56,20 @@ function requireSite(ctx: McpContext, siteId: string): Site {
     }
   }
   throw new Error(`Site "${siteId}" not found or not accessible with this token.`);
+}
+
+/**
+ * A site the caller may act on: the token's scope is not enough on its own —
+ * the user must also be allowed to manage sites in that workspace, exactly as
+ * in the dashboard (viewers stay read-only even with an mcp:write token).
+ */
+function requireWritableSite(ctx: McpContext, siteId: string): Site {
+  const site = requireSite(ctx, siteId);
+  const ws = site.workspace_id;
+  if (!ws || !canEditWorkspace(ctx.user, ws) || !hasCapability(ctx.user, ws, 'manage_sites')) {
+    throw new Error('You have read-only access to this site\'s workspace.');
+  }
+  return site;
 }
 
 /** Project a Site to fields safe to hand an AI assistant (no FTP/deploy secrets). */
@@ -87,6 +105,7 @@ export interface ToolDef {
   scope: McpScope;
   inputShape: ZodRawShape;
   handler: (ctx: McpContext, args: Record<string, unknown>) => Promise<unknown> | unknown;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
 }
 
 const DAYS = z.number().int().min(1).max(480).optional();
@@ -230,6 +249,23 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, args) => checkAgentReadiness(requireSite(ctx, String(args.siteId))),
   },
   {
+    name: 'get_indexing_request_queue',
+    title: 'Get pages to request indexing for',
+    description: 'Google has no API for Search Console\'s "Request indexing" button. This returns the site\'s pages most worth a manual request (not indexed but fixable, changed since Google\'s last crawl, or never inspected), each with its URL Inspection link, so a browser agent can request them in the person\'s signed-in Search Console. Pages requested in the past 7 days are left out. Also returns what Google\'s indexing APIs can and cannot do.',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string(), limit: z.number().int().min(1).max(100).optional() },
+    handler: (ctx, args) => {
+      const site = requireSite(ctx, String(args.siteId));
+      return {
+        site: site.name,
+        property: site.gsc_url,
+        daily_quota_note: 'Google does not publish the Request indexing quota; it is small (typically around 10 per property per day). Stop when Search Console says the quota is exceeded.',
+        pages: siteRequestCandidates(site, Number(args.limit ?? 10)),
+        capabilities: GOOGLE_INDEXING_CAPABILITIES,
+      };
+    },
+  },
+  {
     name: 'list_ai_citations',
     title: 'List AI citation results',
     description: 'Recent AI citation tracking results (whether AI assistants cite the site for tracked prompts) across accessible workspaces.',
@@ -250,7 +286,7 @@ export const TOOLS: ToolDef[] = [
     scope: 'mcp:write',
     inputShape: { siteId: z.string(), urls: z.array(z.string().url()).min(1).max(50) },
     handler: async (ctx, args) => {
-      const site = requireSite(ctx, String(args.siteId));
+      const site = requireWritableSite(ctx, String(args.siteId));
       if (!site.google_account_id) throw new Error('No Google account linked to this site.');
       const urls = args.urls as string[];
       const results = [];
@@ -266,13 +302,32 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'record_indexing_requests',
+    title: 'Record Request indexing results',
+    description: 'After requesting indexing in Search Console (by a person or a browser agent), record the outcome for each page so the queue skips recent requests. Requires the mcp:write scope.',
+    scope: 'mcp:write',
+    inputShape: {
+      siteId: z.string(),
+      results: z.array(z.object({
+        url: z.string().url(),
+        outcome: z.enum(['requested', 'already_indexed', 'quota_exceeded', 'not_allowed', 'error']),
+        note: z.string().max(200).optional(),
+      })).min(1).max(100),
+    },
+    handler: (ctx, args) => {
+      const site = requireWritableSite(ctx, String(args.siteId));
+      const results = args.results as Array<{ url: string; outcome: RequestOutcome; note?: string }>;
+      return { updated: recordRequestOutcomes(site.id, results) };
+    },
+  },
+  {
     name: 'trigger_indexing_run',
     title: 'Trigger an indexing run',
     description: 'Start a manual indexing run for one site (discovers and submits changed URLs). Fails if a run is already in progress for that workspace. Requires the mcp:write scope.',
     scope: 'mcp:write',
     inputShape: { siteId: z.string() },
     handler: async (ctx, args) => {
-      const site = requireSite(ctx, String(args.siteId));
+      const site = requireWritableSite(ctx, String(args.siteId));
       const ws = site.workspace_id ?? undefined;
       if (isRunning(ws)) throw new Error('A run is already in progress for this workspace.');
       const runId = await runIndexing({ trigger: 'manual', workspaceId: ws, siteIds: [site.id] });
@@ -286,21 +341,24 @@ export const TOOLS: ToolDef[] = [
     scope: 'mcp:write',
     inputShape: { siteId: z.string() },
     handler: async (ctx, args) => {
-      const site = requireSite(ctx, String(args.siteId));
+      const site = requireWritableSite(ctx, String(args.siteId));
       await snapshotSitePerformance(site);
       return { ok: true, siteId: site.id, snapshotAt: new Date().toISOString() };
     },
   },
 ];
 
+/** Every tool: the SEO tools above plus the Google Ads tools. */
+export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS];
+
 /** Tools this context is allowed to use, by scope. */
 export function toolsForContext(ctx: McpContext): ToolDef[] {
-  return TOOLS.filter(t => ctx.scopes.includes(t.scope));
+  return ALL_TOOLS.filter(t => ctx.scopes.includes(t.scope));
 }
 
 /** Directly run a tool by name (used by the HTTP layer's fallbacks and by tests). */
 export async function runTool(ctx: McpContext, name: string, args: Record<string, unknown>): Promise<unknown> {
-  const tool = TOOLS.find(t => t.name === name);
+  const tool = ALL_TOOLS.find(t => t.name === name);
   if (!tool) throw new Error(`Unknown tool: ${name}`);
   if (!ctx.scopes.includes(tool.scope)) throw new Error(`This token lacks the "${tool.scope}" scope required by ${name}.`);
   return tool.handler(ctx, args);
@@ -309,13 +367,17 @@ export async function runTool(ctx: McpContext, name: string, args: Record<string
 /** Build a fully-wired MCP server exposing exactly the tools this token may use. */
 export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
-    { name: 'seo-website-indexer', version: 'mcp-1' },
-    { instructions: 'Read and act on your SEO Website Indexer data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness and AI citations. Site ids come from list_sites.' },
+    { name: 'seo-website-indexer', version: 'mcp-2' },
+    { instructions: [
+      'Read and act on your SEO Website Indexer data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness and AI citations. Site ids come from list_sites.',
+      'Google Ads tools start with ads_. Start with ads_list_clients, then ads_get_client_brief for the client\'s budget, goals and guardrails. Use ads_get_resource_metadata before writing GAQL for ads_search/ads_query.',
+      'Every Google Ads change tool validates the change with Google and returns a change plan: apply "pending" plans with ads_apply_change; "needs_approval" plans wait for a person on the dashboard. Never try to split a change to get around a guardrail.',
+    ].join(' ') },
   );
   for (const tool of toolsForContext(ctx)) {
     server.registerTool(
       tool.name,
-      { title: tool.title, description: tool.description, inputSchema: tool.inputShape },
+      { title: tool.title, description: tool.description, inputSchema: tool.inputShape, ...(tool.annotations ? { annotations: tool.annotations } : {}) },
       async (args: Record<string, unknown>) => {
         try {
           const result = await tool.handler(ctx, args ?? {});

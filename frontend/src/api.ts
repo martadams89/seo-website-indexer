@@ -255,7 +255,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 
@@ -300,6 +300,16 @@ export const api = {
     apiFetch<KeyVerification>(`/api/sites/${id}/verify-indexnow`, { method: 'POST' }),
   getSiteUrls: (id: string) =>
     apiFetch<UrlState[]>(`/api/sites/${id}/urls`),
+  getRequestIndexing: (id: string, maxPerRun = 10) =>
+    apiFetch<{
+      property: string;
+      capabilities: Array<{ action: string; via: string; support: string; notes: string }>;
+      candidates: Array<{ url: string; reason: string; coverage: string | null; last_crawl: string | null; lastmod: string | null; last_requested: string | null; inspect_url: string }>;
+      max_per_run: number;
+      prompts: { one_off: string; routine: string };
+    }>(`/api/sites/${id}/request-indexing?maxPerRun=${maxPerRun}`),
+  recordIndexingRequests: (id: string, results: Array<{ url: string; outcome: 'requested' | 'already_indexed' | 'quota_exceeded' | 'not_allowed' | 'error'; note?: string }>) =>
+    apiFetch<{ updated: number }>(`/api/sites/${id}/request-indexing/record`, { method: 'POST', body: JSON.stringify({ results }) }),
 
   // Runs
   getRuns: () => apiFetch<RunRecord[]>('/api/runs'),
@@ -411,6 +421,10 @@ export const api = {
   getMcpTokens: () => apiFetch<Array<{ id: string; name: string; scopes: string[]; expires_at: string | null; last_used_at: string | null; revoked_at: string | null; created_at: string }>>('/api/mcp/tokens'),
   createMcpToken: (data: { name: string; scopes: string[]; expiresInDays?: number }) => apiFetch<{ id: string; token: string }>('/api/mcp/tokens', { method: 'POST', body: JSON.stringify(data) }),
   revokeMcpToken: (id: string) => apiFetch<{ ok: boolean }>(`/api/mcp/tokens/${id}`, { method: 'DELETE' }),
+  getConnectedApps: () => apiFetch<Array<{ id: string; client_name: string; scopes: string[]; created_at: string; last_used_at: string | null }>>('/api/oauth/apps'),
+  revokeConnectedApp: (id: string) => apiFetch<{ ok: boolean }>(`/api/oauth/apps/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  getOAuthRequest: (id: string) => apiFetch<{ id: string; client_name: string; redirect_host: string; requested_scopes: string[]; scopes: Array<{ id: string; label: string; description: string }>; user: { email: string; name: string | null }; workspaces: string[] }>(`/api/oauth/requests/${encodeURIComponent(id)}`),
+  decideOAuthRequest: (id: string, approve: boolean, scopes: string[]) => apiFetch<{ redirect: string }>(`/api/oauth/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ approve, scopes }) }),
   getContentActions: () => apiFetch<ContentAction[]>('/api/platform/content/actions'),
   createContentAction: (data: { site_id?: string; integration_id?: string; kind: string; title: string; rationale?: string; evidence?: Record<string, unknown>; payload: Record<string, unknown> }) => apiFetch<ContentAction>('/api/platform/content/actions', { method: 'POST', body: JSON.stringify(data) }),
   advanceContentAction: (id: string, step: 'approve' | 'stage' | 'publish' | 'verify' | 'rollback') => apiFetch<ContentAction>(`/api/platform/content/actions/${id}/${step}`, { method: 'POST' }),
@@ -617,7 +631,7 @@ export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
   ai_citations: boolean; disabled: boolean; permissions: Record<WorkspaceCapability, boolean>;
 }
-export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications' | 'manage_content' | 'manage_reports' | 'manage_governance';
+export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications' | 'manage_content' | 'manage_reports' | 'manage_governance' | 'manage_ads';
 export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: string }> = [
   { id: 'manage_sites', label: 'Manage sites' },
   { id: 'manage_integrations', label: 'Manage integrations & API keys' },
@@ -625,6 +639,7 @@ export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: str
   { id: 'manage_content', label: 'Manage work & content' },
   { id: 'manage_reports', label: 'Manage reports' },
   { id: 'manage_governance', label: 'Manage governance & budgets' },
+  { id: 'manage_ads', label: 'Manage Google Ads (budgets, guardrails, approvals)' },
 ];
 export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;

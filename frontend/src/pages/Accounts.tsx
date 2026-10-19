@@ -4,6 +4,9 @@ import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 
+const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
+const hasAds = (acc: GoogleAccount) => !!acc.granted_scopes?.split(' ').includes(ADS_SCOPE);
+
 export default function AccountsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { status, refresh } = useApp();
   const { active } = useWorkspace();
@@ -24,6 +27,10 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   // to reauth/session-control policies → periodic "invalid_rapt" failures. Core
   // Search Console works without it.
   const [autoSetup, setAutoSetup] = useState(false);
+  // Opt-in Google Ads management (adwords scope). Re-consenting an existing
+  // connection adds it without losing the scopes it already has.
+  const [withAds, setWithAds] = useState(false);
+  const [useOwnClient, setUseOwnClient] = useState(false);
   const [connectError, setConnectError] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -64,13 +71,15 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   // `reconnect` re-authorises an existing account in place: it reuses the
   // account's encrypted client id/secret through a single-use server-side OAuth
   // state, so the user never has to disconnect it or re-enter credentials.
-  async function startGoogleAuth(reconnect?: GoogleAccount) {
+  async function startGoogleAuth(reconnect?: GoogleAccount, opts: { ads?: boolean } = {}) {
     setConnectError('');
     if (reconnect) setReconnectingId(reconnect.id); else setConnecting(true);
+    const ownClient = !hasBuiltin || useOwnClient;
     try {
+      const ads = opts.ads ?? (reconnect ? hasAds(reconnect) || withAds : withAds);
       const { authorizationUrl } = await api.beginGoogleAuth(reconnect
-        ? { accountId: reconnect.id, autoSetup }
-        : { clientId: hasBuiltin ? undefined : clientId.trim(), clientSecret: hasBuiltin ? undefined : clientSecret.trim(), autoSetup });
+        ? { accountId: reconnect.id, autoSetup, ads }
+        : { clientId: ownClient ? clientId.trim() : undefined, clientSecret: ownClient ? clientSecret.trim() : undefined, autoSetup, ads });
 
       const width = 600;
       const height = 700;
@@ -209,7 +218,30 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             </div>
           </label>
 
-          {hasBuiltin ? (
+          <label className="autosetup-row">
+            <input type="checkbox" checked={withAds} onChange={e => setWithAds(e.target.checked)} />
+            <div>
+              <strong>Also allow Google Ads management</strong>
+              <div className="text-dim" style={{ fontSize: 12 }}>
+                Adds Google's Ads permission so this connection can report on and manage the ad accounts this Google user can reach.
+                Manage clients, budgets and guardrails on the Google Ads page.
+              </div>
+            </div>
+          </label>
+
+          {hasBuiltin && (
+            <label className="autosetup-row">
+              <input type="checkbox" checked={useOwnClient} onChange={e => setUseOwnClient(e.target.checked)} />
+              <div>
+                <strong>Use a different Google Cloud project</strong>
+                <div className="text-dim" style={{ fontSize: 12 }}>
+                  Enter another OAuth client — for example a client's own project, so their API usage stays on their Google Cloud account.
+                </div>
+              </div>
+            </label>
+          )}
+
+          {hasBuiltin && !useOwnClient ? (
             <div className="text-center py-3">
               <div style={{ background: 'var(--ok-dim)', width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
                 <Smartphone size={20} style={{ color: 'var(--ok)' }} />
@@ -290,6 +322,7 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                   <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                     {acc.email || 'Google Account'}
                     {!!acc.needs_reauth && <span className="badge badge-error">Reconnect required</span>}
+                    {hasAds(acc) && <span className="badge badge-accent">Google Ads</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <span>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></span>
@@ -323,6 +356,16 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     </div>
                   )}
                 </div>
+                {acc.can_disconnect && !hasAds(acc) && !acc.needs_reauth && (
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => startGoogleAuth(acc, { ads: true })}
+                    disabled={reconnectingId === acc.id || !canConnect}
+                    title="Re-consent with Google Ads access, keeping the current permissions"
+                  >
+                    <Plus size={14} /> Add Google Ads
+                  </button>
+                )}
                 {acc.can_disconnect && (
                   <button
                     className={`btn btn-sm ${acc.needs_reauth ? 'btn-primary' : 'btn-ghost'}`}

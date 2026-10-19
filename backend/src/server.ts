@@ -85,6 +85,7 @@ import {
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
+import { GOOGLE_INDEXING_CAPABILITIES, oneOffPrompt, recordRequestOutcomes, routinePrompt, siteRequestCandidates, type RequestOutcome } from './indexer/request-indexing.js';
 import { indexingQuotaBucket } from './indexer/google-indexing.js';
 import {
   getOrCreateIndexNowKey,
@@ -150,6 +151,8 @@ import { registerDiscoveryRoutes } from './platform/discovery-routes.js';
 import { registerPlatformRoutes } from './platform/routes.js';
 import { registerPlaybookRoutes } from './platform/playbook-routes.js';
 import { registerMcpProtocolRoute } from './mcp/http.js';
+import { registerMcpOAuthRoutes, registerMcpOAuthApiRoutes } from './mcp/oauth.js';
+import { registerAdsRoutes } from './ads/routes.js';
 import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
@@ -371,7 +374,7 @@ const SELF_ACCOUNT_EXEMPT_EXACT = new Set<string>([
   '/api/auth/set-required-password', '/api/auth/impersonation/stop',
   '/api/auth/totp/setup', '/api/auth/totp/enable', '/api/auth/totp/disable',
 ]);
-const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/', '/api/mcp/'];
+const SELF_ACCOUNT_EXEMPT_PREFIXES = ['/api/auth/passkeys/', '/api/mcp/', '/api/oauth/'];
 const WORKSPACE_GATE_EXEMPT_EXACT = new Set<string>(['/api/workspaces']);
 
 // Maps a mutating request's path to the workspace capability it requires (for
@@ -393,6 +396,7 @@ function capabilityForPath(path: string): Capability | null {
     return 'manage_integrations';
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
+  if (path.startsWith('/api/ads/')) return 'manage_ads';
   if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
   if (path.startsWith('/api/platform/discovery')) return 'manage_content';
   if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
@@ -813,6 +817,7 @@ app.get('/api/workspaces', async (req) => {
       manage_content: hasCapability(user, w.id, 'manage_content'),
       manage_reports: hasCapability(user, w.id, 'manage_reports'),
       manage_governance: hasCapability(user, w.id, 'manage_governance'),
+      manage_ads: hasCapability(user, w.id, 'manage_ads'),
     },
   }));
 });
@@ -1373,8 +1378,8 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId } = (req.body ?? {}) as {
-    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string;
+  const { clientId, clientSecret, autoSetup, accountId, ads } = (req.body ?? {}) as {
+    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean;
   };
   let reconnect: ReturnType<typeof getGoogleAccountById> = null;
   if (accountId) {
@@ -1390,6 +1395,7 @@ app.post('/api/auth/google/start', async (req, reply) => {
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
+      ads: !!ads,
       clientId: reconnect?.client_id ?? clientId,
       clientSecret: reconnect?.client_secret ?? clientSecret,
       loginHint: reconnect?.email ?? null,
@@ -1715,6 +1721,36 @@ app.get('/api/sites/:id/urls', async (req, reply) => {
   if (!site) return reply.status(404).send({ error: 'Site not found.' });
   const urls = getUrlsBySite(id);
   return urls;
+});
+
+// "Request indexing" has no Google API. Explain what is possible, rank the
+// pages worth a manual request, and hand out browser-agent prompts for them.
+app.get('/api/sites/:id/request-indexing', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.status(404).send({ error: 'Site not found.' });
+  const q = req.query as { limit?: string; maxPerRun?: string };
+  const maxPerRun = Math.max(1, Math.min(50, Number(q.maxPerRun) || 10));
+  const candidates = siteRequestCandidates(site, Math.max(maxPerRun, Number(q.limit) || 50));
+  const endpoint = `${requestOrigin(req as never)}/mcp`;
+  return {
+    property: site.gsc_url,
+    capabilities: GOOGLE_INDEXING_CAPABILITIES,
+    candidates,
+    max_per_run: maxPerRun,
+    prompts: {
+      one_off: oneOffPrompt({ siteName: site.name, property: site.gsc_url, candidates, maxPerRun }),
+      routine: routinePrompt({ siteName: site.name, siteId: site.id, property: site.gsc_url, maxPerRun, connectorName: 'SEO Website Indexer', endpoint }),
+    },
+  };
+});
+
+app.post('/api/sites/:id/request-indexing/record', async (req, reply) => {
+  const site = getSiteById((req.params as { id: string }).id);
+  if (!site) return reply.status(404).send({ error: 'Site not found.' });
+  const { results } = (req.body ?? {}) as { results?: Array<{ url: string; outcome: RequestOutcome; note?: string }> };
+  if (!Array.isArray(results) || !results.length) return reply.status(400).send({ error: 'results is required.' });
+  const valid = results.filter(r => typeof r?.url === 'string' && ['requested', 'already_indexed', 'quota_exceeded', 'not_allowed', 'error'].includes(r.outcome));
+  return { updated: recordRequestOutcomes(site.id, valid) };
 });
 
 app.post('/api/sites/:id/verify-indexnow', async (req, reply) => {
@@ -2713,7 +2749,8 @@ app.get('/api/mcp/info', async (req) => {
   return {
     endpoint,
     transport: 'http',
-    scopes: ['mcp:read', 'mcp:write'],
+    scopes: ['mcp:read', 'mcp:write', 'ads:write'],
+    oauth: true,
     headerName: 'Authorization',
     // The frontend fills <token> in from the freshly minted value at create time.
     claudeCodeCommand: `claude mcp add --transport http seo-indexer ${endpoint} --header "Authorization: Bearer <token>"`,
@@ -2743,7 +2780,10 @@ app.delete('/api/mcp/tokens/:id', async (req, reply) => {
 
 registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
+registerAdsRoutes(app);
 registerPlaybookRoutes(app);
+registerMcpOAuthRoutes(app);
+registerMcpOAuthApiRoutes(app, currentUser);
 registerMcpProtocolRoute(app);
 
 await app.listen({ port: PORT, host: HOST });

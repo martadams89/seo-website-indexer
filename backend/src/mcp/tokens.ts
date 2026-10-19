@@ -9,8 +9,12 @@
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { getDb } from '../db/database.js';
 
-/** Scopes an MCP token can carry. `mcp:read` = read data; `mcp:write` = safe actions. */
-export const MCP_SCOPES = ['mcp:read', 'mcp:write'] as const;
+/**
+ * Scopes an MCP token can carry. `mcp:read` = read data (including Google Ads
+ * reporting); `mcp:write` = safe SEO actions; `ads:write` = propose and apply
+ * Google Ads changes, always subject to each client's guardrails.
+ */
+export const MCP_SCOPES = ['mcp:read', 'mcp:write', 'ads:write'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /** Human-visible prefix so a leaked token is easy to recognise and revoke. */
@@ -64,7 +68,7 @@ export function createMcpToken(input: {
 /** Token metadata for a user (never the hash or plaintext). */
 export function listMcpTokens(userId: string): McpTokenRow[] {
   return (getDb()
-    .prepare('SELECT id,user_id,name,scopes,expires_at,last_used_at,revoked_at,created_at FROM mcp_tokens WHERE user_id=? ORDER BY created_at DESC')
+    .prepare('SELECT id,user_id,name,scopes,expires_at,last_used_at,revoked_at,created_at FROM mcp_tokens WHERE user_id=? AND oauth_grant_id IS NULL ORDER BY created_at DESC')
     .all(userId) as Array<Record<string, unknown>>)
     .map(row => ({ ...row, scopes: parseScopes(row.scopes) })) as McpTokenRow[];
 }
@@ -81,7 +85,7 @@ export interface McpTokenAuth { id: string; userId: string; scopes: McpScope[] }
 /**
  * Validate a raw bearer token. Returns the owning user + granted scopes, or null
  * when the token is unknown, revoked or expired. Bumps last_used_at on success.
- * `mcp:write` grants `mcp:read` too, and `*` grants everything.
+ * Write scopes grant `mcp:read` too, and `*` grants everything.
  */
 export function authenticateMcpToken(raw: string): McpTokenAuth | null {
   const trimmed = raw.trim();
@@ -95,11 +99,16 @@ export function authenticateMcpToken(raw: string): McpTokenAuth | null {
   if (!row) return null;
   getDb().prepare("UPDATE mcp_tokens SET last_used_at=datetime('now') WHERE token_hash=?").run(hash);
 
-  const stored = parseScopes(row.scopes);
+  return { id: row.id, userId: row.user_id, scopes: expandScopes(parseScopes(row.scopes)) };
+}
+
+/** Any write scope implies read; `*` grants everything. */
+export function expandScopes(stored: string[]): McpScope[] {
   const scopes = new Set<McpScope>();
-  if (stored.includes('*') || stored.includes('mcp:read') || stored.includes('mcp:write')) scopes.add('mcp:read');
+  if (stored.includes('*') || stored.some(s => (MCP_SCOPES as readonly string[]).includes(s))) scopes.add('mcp:read');
   if (stored.includes('*') || stored.includes('mcp:write')) scopes.add('mcp:write');
-  return { id: row.id, userId: row.user_id, scopes: [...scopes] };
+  if (stored.includes('*') || stored.includes('ads:write')) scopes.add('ads:write');
+  return [...scopes];
 }
 
 /** True when the authenticated token carries the required scope. */
