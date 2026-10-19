@@ -466,6 +466,20 @@ function rpInfo(req: { protocol?: string; headers: Record<string, unknown> }): {
   const origin = requestOrigin(req);
   return { rpID: new URL(origin).hostname, origin };
 }
+// The setup screens tell people to register `${window.location.origin}/api/auth/google/callback`.
+// Behind a TLS-terminating proxy with neither PUBLIC_URL nor TRUST_PROXY set the
+// request itself looks like plain http, so follow the browser's https Origin
+// when it names this same host. It only shapes the caller's own redirect,
+// which Google checks against the OAuth client's registered URIs.
+function browserOrigin(req: { protocol?: string; headers: Record<string, unknown> }): string {
+  const origin = requestOrigin(req);
+  if (PUBLIC_URL || origin.startsWith('https://')) return origin;
+  try {
+    const browser = new URL(String(req.headers.origin ?? ''));
+    if (browser.protocol === 'https:' && browser.host === new URL(origin).host) return browser.origin;
+  } catch { /* no or malformed Origin header */ }
+  return origin;
+}
 function currentUser(req: unknown): User { return (req as RequestCtx).ctx.user; }
 function currentWorkspace(req: unknown): string | null { return (req as RequestCtx).ctx.workspaceId; }
 // Mutations execute with the target user's workspace permissions while
@@ -545,6 +559,9 @@ app.get('/api/status', async (req) => {
     sites: ws ? getSitesForWorkspace(ws).length : 0,
     accounts: ws ? getGoogleAccountsForWorkspace(ws).length : 0,
     version: process.env.APP_VERSION ?? 'dev',
+    // The address the server builds callback and MCP URLs from, so the
+    // dashboard can flag an HTTPS proxy that PUBLIC_URL/TRUST_PROXY don't cover.
+    publicOrigin: requestOrigin(req),
   };
 });
 
@@ -1388,7 +1405,7 @@ app.post('/api/auth/google/start', async (req, reply) => {
       return reply.status(404).send({ error: 'Account not found' });
     }
   }
-  const { origin } = rpInfo(req);
+  const origin = browserOrigin(req);
   try {
     const authorizationUrl = createGoogleOAuthAuthorization({
       userId: user.id,
@@ -2463,7 +2480,7 @@ app.post('/api/auth/bing/start', async (req, reply) => {
   const clientId = effectiveSetting(workspaceId, 'bing_oauth_client_id');
   const clientSecret = effectiveSetting(workspaceId, 'bing_oauth_client_secret');
   if (!clientId || !clientSecret) return reply.code(400).send({ error: 'Configure the Bing OAuth client ID and secret for this workspace first.' });
-  const name = String(((req.body ?? {}) as { name?: string }).name ?? 'Bing OAuth'); const { origin } = rpInfo(req);
+  const name = String(((req.body ?? {}) as { name?: string }).name ?? 'Bing OAuth'); const origin = browserOrigin(req);
   const redirectUri = `${origin}/api/auth/bing/callback`; const state = createBingOAuthState({ workspaceId, userId: current.id, name, redirectUri });
   const params = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: 'webmaster.manage', state });
   return { authorizationUrl: `https://www.bing.com/webmasters/oauth/authorize?${params}` };

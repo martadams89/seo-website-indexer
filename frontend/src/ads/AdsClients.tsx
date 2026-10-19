@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { BarChart3, Link2, Pencil, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { BarChart3, Link2, Pencil, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { useToast } from '../AppContext';
 import { adsApi, errorMessage, money, type AdsAccount, type AdsBrief, type AdsGuardrails, type DiscoveryResult } from './api';
@@ -73,10 +73,19 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Record<string, { googleAccountId: string; loginCustomerId: string | null }>>({});
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(true);
 
-  useEffect(() => {
-    adsApi.discover().then(setResult).catch(e => setError(errorMessage(e)));
-  }, []);
+  const scan = useCallback(() => adsApi.discover()
+    .then(next => { setResult(next); setError(''); })
+    .catch(e => setError(errorMessage(e)))
+    .finally(() => setScanning(false)), []);
+  useEffect(() => { void scan(); }, [scan]);
+
+  function rescan() {
+    setScanning(true);
+    setError('');
+    void scan();
+  }
 
   async function link() {
     setBusy(true);
@@ -93,9 +102,9 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
   return (
     <Modal onClose={onClose} size="lg" title="Link client ad accounts" eyebrow="Google Ads" icon={<Link2 />}
       description="Accounts the connected Google users can reach, including clients under your manager accounts."
-      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!count || busy} onClick={link}>{busy ? 'Linking…' : `Link ${count || ''} account${count === 1 ? '' : 's'}`}</button></>}>
+      footer={<><button className="btn btn-ghost" disabled={scanning} onClick={rescan}><RefreshCw size={13} /> {scanning && result ? 'Scanning…' : 'Scan again'}</button><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!count || busy} onClick={link}>{busy ? 'Linking…' : `Link ${count || ''} account${count === 1 ? '' : 's'}`}</button></>}>
       {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
-      {!result && !error && <div className="page-loading">Asking Google which accounts you can manage…</div>}
+      {!result && scanning && <div className="page-loading">Asking Google which accounts you can manage…</div>}
       {result?.connections.map(conn => (
         <div key={conn.google_account_id} className="ads-discovery-group">
           <h3>{conn.email ?? conn.google_account_id}</h3>

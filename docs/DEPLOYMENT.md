@@ -54,7 +54,7 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `HOST` | `0.0.0.0` | Address the server binds to. |
 | `DATA_DIR` | `/data` | Directory containing the database, generated encryption key and backups. |
 | `APP_SECRET` | generated in `/data/.key` | Encrypts OAuth tokens and delivery credentials. Set it explicitly for portable restores. |
-| `PUBLIC_URL` | request origin | Canonical HTTPS origin for cookies, passkeys and SSO. |
+| `PUBLIC_URL` | request origin | Canonical HTTPS origin for cookies, passkeys, SSO and Google/Bing sign-in callbacks, and the MCP OAuth issuer. Set it behind any reverse proxy that terminates TLS: otherwise the app sees plain http and builds `http://` callbacks that Google and AI apps reject (the dashboard warns when this happens). |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` values. Enable only behind a proxy that overwrites them. |
 | `CORS_ORIGIN` | disabled | Comma-separated browser origins allowed to call the API when the frontend is separate. |
 | `OUTBOUND_HOST_ALLOWLIST` | unset | Exact trusted hostnames that may resolve to private/reserved addresses. |
