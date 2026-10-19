@@ -18,9 +18,10 @@ services:
       # and signing future cookies. If unset, a per-volume key is auto-generated
       # at /data/.key (0600).
       # - APP_SECRET=please-change-me
-      # Canonical browser origin (recommended behind a reverse proxy). This is
-      # used for passkeys, SSO callbacks, Secure cookie detection and as the
-      # OAuth issuer that MCP clients (ChatGPT, Claude, IDEs, CLIs) see.
+      # Canonical browser origin, used for passkeys, sign-in callbacks and as the
+      # MCP server URL/OAuth issuer that AI apps see. Optional: public hostnames
+      # already get https:// links; set it to pin one address or for an IP/LAN
+      # host behind an HTTPS proxy.
       # - PUBLIC_URL=https://indexer.example.com
       # Google OAuth client for one-click Google sign-in (Search Console, GA4,
       # Google Ads). Google Ads API access belongs to this client's Cloud project.

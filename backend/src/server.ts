@@ -118,6 +118,7 @@ import { analyseInternalLinks, listInventory } from './analytics/internal-links.
 import { pagePerformance, listSnippetChanges } from './analytics/page-performance.js';
 import { listPageVitals, refreshPageVitals } from './analytics/page-vitals.js';
 import { logSystem } from './utils/logger.js';
+import { publicOrigin, secureCookies } from './utils/origin.js';
 import { provisionGeminiKey } from './ai/provision.js';
 import {
   countUsers, getUserByEmail, createUser, verifyPassword, recordLogin,
@@ -445,15 +446,11 @@ app.addHook('preHandler', async (req, reply) => {
   }
 });
 
-// Cookie helpers — HttpOnly session cookie, Secure behind https/proxy.
-function requestOrigin(req: { protocol?: string; headers: Record<string, unknown> }): string {
-  if (PUBLIC_URL) return PUBLIC_URL.origin;
-  const protocol = req.protocol === 'https' ? 'https' : 'http';
-  const host = String(req.headers.host ?? 'localhost');
-  return `${protocol}://${host}`;
-}
+// Public origin (PUBLIC_URL, else https for any public hostname) — see utils/origin.ts.
+const requestOrigin = publicOrigin;
+// Cookie helpers — HttpOnly session cookie, Secure whenever the request came over https.
 function setSessionCookie(req: { protocol?: string; headers: Record<string, unknown> }, reply: { header: (k: string, v: string) => void }, token: string) {
-  const secure = requestOrigin(req).startsWith('https://');
+  const secure = secureCookies(req);
   reply.header('Set-Cookie',
     `sid=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 86400}${secure ? '; Secure' : ''}`);
 }
@@ -467,9 +464,9 @@ function rpInfo(req: { protocol?: string; headers: Record<string, unknown> }): {
   return { rpID: new URL(origin).hostname, origin };
 }
 // The setup screens tell people to register `${window.location.origin}/api/auth/google/callback`.
-// Behind a TLS-terminating proxy with neither PUBLIC_URL nor TRUST_PROXY set the
-// request itself looks like plain http, so follow the browser's https Origin
-// when it names this same host. It only shapes the caller's own redirect,
+// A LAN or IP host behind a TLS-terminating proxy that doesn't send
+// X-Forwarded-Proto still looks like plain http, so follow the browser's https
+// Origin when it names this same host. It only shapes the caller's own redirect,
 // which Google checks against the OAuth client's registered URIs.
 function browserOrigin(req: { protocol?: string; headers: Record<string, unknown> }): string {
   const origin = requestOrigin(req);
@@ -560,7 +557,7 @@ app.get('/api/status', async (req) => {
     accounts: ws ? getGoogleAccountsForWorkspace(ws).length : 0,
     version: process.env.APP_VERSION ?? 'dev',
     // The address the server builds callback and MCP URLs from, so the
-    // dashboard can flag an HTTPS proxy that PUBLIC_URL/TRUST_PROXY don't cover.
+    // dashboard can flag an HTTPS proxy in front of a LAN/IP host without PUBLIC_URL.
     publicOrigin: requestOrigin(req),
   };
 });
