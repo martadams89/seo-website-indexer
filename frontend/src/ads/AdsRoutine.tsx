@@ -103,7 +103,7 @@ export function AdsRoutine({ accounts, canManage, reload }: { accounts: AdsAccou
     <div className="ads-routine">
       <section className="ops-card">
         <div className="ops-card-head"><div><span className="eyebrow"><Wand2 size={13} /> AI routine</span><h2>Set up a recurring Google Ads review</h2></div></div>
-        <p className="card-intro">Answer a few questions and you'll get a prompt to paste into a scheduled task in Claude (or any AI tool connected to this app's MCP server). Each run reviews performance, researches the market and competitors, makes or proposes changes, and logs what it did here.</p>
+        <p className="card-intro">Answer a few questions and you'll get a prompt to schedule in any AI assistant or agent CLI connected to this app's MCP server. Each run reviews performance, researches the market and competitors, makes or proposes changes, and logs what it did here.</p>
 
         <h3 className="ads-form-heading">1. Which clients should it look after?</h3>
         <div className="ads-client-picks">
@@ -192,12 +192,29 @@ export function AdsRoutine({ accounts, canManage, reload }: { accounts: AdsAccou
             <button className="btn btn-primary btn-sm" onClick={() => copy(result.prompt)}><Copy size={13} /> Copy prompt</button>
           </div>
           <ol className="ads-guide-steps">
-            <li><strong>Connect the MCP server in Claude</strong> if you haven't: Setup tab → Connect Claude. Allow <b>Manage Google Ads</b> when you approve it{settings.mode === 'propose' ? ' (needed to propose changes)' : ''}.</li>
-            <li><strong>Create a scheduled task</strong> (Claude routine / scheduled task, or your AI tool's scheduler) that runs {result.schedule}. Where a cron expression is asked for, use <code>{result.cron}</code> in {settings.timezone}.</li>
-            <li><strong>Paste the prompt</strong> below and make sure the “{connectorName}” connector and web search are enabled for the task.</li>
+            <li><strong>Connect this app's MCP server</strong> to your AI app if you haven't (Setup tab → Connect an AI assistant). Allow <b>Manage Google Ads</b> when you approve it{settings.mode === 'propose' ? ' (needed to propose changes)' : ''}.</li>
+            <li><strong>Schedule it</strong> to run {result.schedule}: use your AI app's scheduled tasks or automations, or run an agent CLI from cron on a server (below). Where a cron expression is asked for, use <code>{result.cron}</code> in {settings.timezone}.</li>
+            <li><strong>Paste the prompt</strong> below and make sure the “{connectorName}” server and web search are enabled for the task.</li>
             <li><strong>Review</strong> the Approvals tab and the routine log below after each run.</li>
           </ol>
           <textarea className="ads-prompt-text" readOnly value={result.prompt} rows={18} aria-label="Routine prompt" onFocus={e => e.currentTarget.select()} />
+          <details className="ads-cli-schedule">
+            <summary>Run it from cron with an agent CLI instead</summary>
+            <p className="ads-hint">Save the prompt as <code>ads-routine.md</code> on a machine where your agent CLI has this MCP server added and signed in, and is allowed to call its tools and web search without asking (see your CLI's auto-approve option). Cron uses the machine's time zone unless you set <code>CRON_TZ</code>.</p>
+            {(() => {
+              const cron = `CRON_TZ=${settings.timezone}
+# pick one
+${result.cron}  claude -p "$(cat ads-routine.md)" --allowedTools "mcp__seo-indexer,WebSearch,WebFetch"
+${result.cron}  codex exec "$(cat ads-routine.md)"
+${result.cron}  gemini -p "$(cat ads-routine.md)"`;
+              return (
+                <div className="mcp-code">
+                  <pre>{cron}</pre>
+                  <button className="btn-icon btn-icon-ghost" aria-label="Copy cron example" onClick={() => copy(cron)}><Copy size={13} /></button>
+                </div>
+              );
+            })()}
+          </details>
         </section>
       )}
 

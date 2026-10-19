@@ -175,3 +175,64 @@ describe('MCP OAuth redirect allowlist', () => {
     expect(validRedirectUri('https://evil.example.com/cb')).toBe(true);
   });
 });
+
+describe('MCP OAuth compatibility with other clients', () => {
+  it('advertises issuer identification and client metadata documents', async () => {
+    const server = (await app.inject({ method: 'GET', url: '/.well-known/oauth-authorization-server' })).json();
+    expect(server.authorization_response_iss_parameter_supported).toBe(true);
+    expect(server.client_id_metadata_document_supported).toBe(true);
+  });
+
+  it('accepts loopback redirects on any port, as native apps and CLIs use', async () => {
+    const res = await app.inject({ method: 'POST', url: '/oauth/register', payload: { client_name: 'Visual Studio Code', redirect_uris: ['https://vscode.dev/redirect', 'http://127.0.0.1:33418/', 'http://127.0.0.1/'] } });
+    const { client_id } = res.json() as { client_id: string };
+    expect((await authorize(client_id, { redirect_uri: 'http://127.0.0.1:51234/' })).headers.location).toMatch(/^\/oauth\/consent\?request=/);
+    // Only the port may differ: another path or host is still rejected.
+    expect((await authorize(client_id, { redirect_uri: 'http://127.0.0.1:51234/other' })).statusCode).toBe(400);
+    expect((await authorize(client_id, { redirect_uri: 'http://localhost:51234/' })).statusCode).toBe(400);
+    expect((await authorize(client_id, { redirect_uri: 'https://vscode.dev:8443/redirect' })).statusCode).toBe(400);
+  });
+
+  it('identifies a client by its Client ID Metadata Document', async () => {
+    const clientId = 'https://app.example-ai.com/oauth/client.json';
+    let served: Record<string, unknown> = { client_id: clientId, client_name: 'Example AI', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' };
+    const fetched: string[] = [];
+    oauth.__setMetadataFetcherForTests(async url => {
+      fetched.push(url);
+      return new Response(JSON.stringify(served), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const code = await codeFor(clientId, ['mcp:read']);
+    const res = await tokenRequest({ grant_type: 'authorization_code', client_id: clientId, code, code_verifier: verifier, redirect_uri: REDIRECT });
+    expect(res.statusCode).toBe(200);
+    expect(oauth.listConnectedApps(userId).some(a => a.client_name === 'Example AI')).toBe(true);
+    // The document is cached rather than fetched on every sign-in.
+    await codeFor(clientId, ['mcp:read']);
+    expect(fetched.filter(u => u === clientId)).toHaveLength(1);
+
+    // A document whose client_id doesn't match its own URL is refused.
+    const other = 'https://evil.example-ai.com/client.json';
+    served = { client_id: clientId, redirect_uris: [REDIRECT] };
+    const bad = await app.inject({ method: 'GET', url: `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: other, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: 'S256' })}` });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.body).toContain('does not match its URL');
+  });
+
+  it('keeps clients a person registered on the dashboard when cleaning up', async () => {
+    const db = (await import('../db/database.js')).getDb();
+    const manual = oauth.registerClient({ client_name: 'Copilot Studio', redirect_uris: ['https://global.consent.azure-apim.net/redirect'], token_endpoint_auth_method: 'client_secret_post' }, null, userId);
+    const auto = oauth.registerClient({ client_name: 'Stale', redirect_uris: [REDIRECT] }, null);
+    db.prepare("UPDATE mcp_oauth_clients SET created_at = datetime('now', '-30 days') WHERE id IN (?, ?)").run(manual.body.client_id, auto.body.client_id);
+    oauth.registerClient({ client_name: 'Trigger cleanup', redirect_uris: [REDIRECT] }, null);
+    expect(oauth.listManualClients(userId).map(c => c.id)).toContain(manual.body.client_id);
+    expect(db.prepare('SELECT 1 FROM mcp_oauth_clients WHERE id=?').get(auto.body.client_id)).toBeUndefined();
+  });
+
+  it('lets browser-based clients call /mcp cross-origin with a bearer token', async () => {
+    const preflight = await app.inject({ method: 'OPTIONS', url: '/mcp', headers: { origin: 'https://inspector.example', 'access-control-request-method': 'POST' } });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe('*');
+    expect(String(preflight.headers['access-control-allow-headers'])).toContain('Mcp-Protocol-Version');
+    const unauth = await app.inject({ method: 'POST', url: '/mcp', payload: {} });
+    expect(unauth.headers['access-control-expose-headers']).toContain('WWW-Authenticate');
+  });
+});

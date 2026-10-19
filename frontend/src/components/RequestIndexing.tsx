@@ -82,8 +82,8 @@ export function RequestIndexingCard({ siteId, canManage }: { siteId: string; can
 
       <p className="card-intro">
         Search Console's <b>Request indexing</b> button has no API, and Google limits it to a handful of pages per property per day.
-        These are the pages most worth spending that on. Request them yourself with the links, or let a browser agent such as
-        Claude in Chrome do it in your own signed-in browser with the prompt below.
+        These are the pages most worth spending that on. Request them yourself with the links, or let an AI browser agent do it
+        in your own signed-in browser with the prompt below.
       </p>
 
       <div className="request-indexing-list">
@@ -115,8 +115,8 @@ export function RequestIndexingCard({ siteId, canManage }: { siteId: string; can
         <ol className="ads-guide-steps">
           <li><strong>Sign in yourself first.</strong> Open <a href="https://search.google.com/search-console" target="_blank" rel="noreferrer">Search Console</a> in the Chrome profile the agent will use, with a Google account that has Owner or Full permission on <code>{data?.property ?? 'this property'}</code>. Stay signed in — the prompt tells the agent to stop rather than type passwords or 2-step codes.</li>
           {variant === 'routine'
-            ? <li><strong>Connect this app's MCP server</strong> to Claude (Governance &amp; usage → Connect Claude) with SEO actions allowed, enable Claude in Chrome, then create a scheduled task (daily suits Google's quota) with this prompt. Each run fetches a fresh queue and records what it requested.</li>
-            : <li><strong>Paste the prompt</strong> into Claude in Chrome (or another browser agent). The page list is included, so no MCP connection is needed.</li>}
+            ? <li><strong>Connect this app's MCP server</strong> to an AI assistant that can also control your browser (Governance &amp; usage → Connect an AI assistant), with SEO actions allowed. Then create a scheduled task (daily suits Google's quota) with this prompt. Each run fetches a fresh queue and records what it requested.</li>
+            : <li><strong>Paste the prompt</strong> into any AI browser agent — a browser extension or AI browser that acts in your own signed-in session. The page list is included, so no MCP connection is needed.</li>}
         </ol>
         <textarea className="ads-prompt-text" readOnly rows={12} value={data?.prompts[variant] ?? ''} aria-label="Browser agent prompt" onFocus={e => e.currentTarget.select()} />
       </div>

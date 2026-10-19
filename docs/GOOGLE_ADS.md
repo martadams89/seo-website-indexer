@@ -1,12 +1,12 @@
 # Google Ads
 
-SEO Website Indexer can report on and manage the Google Ads accounts of the clients you look after. Each client is one workspace, so its ad accounts sit next to its websites, Search Console data and reports. You can work on the **Google Ads** page yourself, or connect Claude (or another MCP-capable assistant) and let an AI routine review and optimise the accounts on a schedule. Every change goes through the same monthly budgets and guardrails, whoever makes it.
+SEO Website Indexer can report on and manage the Google Ads accounts of the clients you look after. Each client is one workspace, so its ad accounts sit next to its websites, Search Console data and reports. You can work on the **Google Ads** page yourself, or connect any MCP-capable AI assistant (ChatGPT, Claude, Gemini, Cursor, VS Code, agent CLIs and others) and let an AI routine review and optimise the accounts on a schedule. Every change goes through the same monthly budgets and guardrails, whoever makes it.
 
 - [How it fits together](#how-it-fits-together)
 - [Set up](#set-up)
 - [Clients, budgets and guardrails](#clients-budgets-and-guardrails)
 - [How changes are made](#how-changes-are-made)
-- [Connect Claude](#connect-claude)
+- [Connect an AI assistant](#connect-an-ai-assistant)
 - [The AI routine](#the-ai-routine)
 - [MCP tools](#mcp-tools)
 - [Google's rules for API access](#googles-rules-for-api-access)
@@ -20,7 +20,7 @@ SEO Website Indexer can report on and manage the Google Ads accounts of the clie
 | Linked ad account | One Google Ads customer linked to one workspace, with the client's monthly budget, brief and guardrails. Accounts under a manager (MCC) account are reached through that manager. |
 | Change plan | Every change, from the dashboard or from an assistant, is first validated by Google (`validate_only`), then judged by the client's guardrails: ready to apply, needs approval, or blocked. The plans are also the change log. |
 | MCP server | `https://YOUR-HOST/mcp`. Read tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded write tools. |
-| AI routine | A prompt the app builds from your answers. You paste it into a scheduled task in Claude; each run reviews, researches, changes or proposes, and logs what it did. |
+| AI routine | A prompt the app builds from your answers. You schedule it in your AI assistant (or run it from cron with an agent CLI); each run reviews, researches, changes or proposes, and logs what it did. |
 
 The app talks to the Google Ads REST API (version `v26` by default; set `GOOGLE_ADS_API_VERSION` to move to a newer one). No extra service or container is needed.
 
@@ -117,26 +117,44 @@ Shared budgets are counted once. Cutting spend is always inside the limits.
 
 Plans expire after 24 hours if they aren't applied. Each applied change is recorded in the audit log (`google_ads.change_applied`) and in usage (`google_ads` / `mutate`, counted in operations), so workspace usage budgets can cap it.
 
-## Connect Claude
+## Connect an AI assistant
 
-Use **Governance & usage → API & webhooks → Connect Claude** or the card at the bottom of **Google Ads → Setup**.
+Any AI assistant that supports remote MCP servers can use the app: chat apps, IDEs and agent CLIs. Use **Governance & usage → API & webhooks → Connect an AI assistant** or the card at the bottom of **Google Ads → Setup**; it shows copyable setup for each client below.
 
-### Recommended: OAuth (no token to paste)
+### Recommended: OAuth sign-in
 
-1. In Claude (web, desktop or Cowork) open **Settings → Connectors → Add custom connector** and paste `https://YOUR-HOST/mcp`. Leave the OAuth client fields empty.
-2. Claude registers itself and sends you to this app. Sign in if needed, then choose what it may do:
-   - **Read your data** — always included;
-   - **Run SEO actions** (`mcp:write`);
-   - **Manage Google Ads** (`ads:write`) — needed for routines that make or propose changes.
-3. Approve. Claude receives a one-hour access token and a 30-day rotating refresh token. Revoke the app under *Connected apps* at any time.
+Add the server URL `https://YOUR-HOST/mcp` to your AI app. The app discovers this server's sign-in, opens it in your browser, and you sign in and choose what it may do:
 
-Claude Code: `claude mcp add --transport http seo-indexer https://YOUR-HOST/mcp`, then run `/mcp` to sign in.
+- **Read your data** — always included;
+- **Run SEO actions** (`mcp:write`);
+- **Manage Google Ads** (`ads:write`) — needed for routines that make or propose changes.
 
-The server implements OAuth 2.1 with protected-resource and authorisation-server metadata (RFC 9728/8414), dynamic client registration (RFC 7591), authorisation code with PKCE (S256 only), refresh-token rotation and revocation (RFC 7009). Set `PUBLIC_URL` so the advertised issuer and endpoints use your public HTTPS address, and consider `MCP_OAUTH_REDIRECT_ALLOWLIST=claude.ai,*.claude.com,localhost` so only the AI apps you use can register.
+The client then receives a one-hour access token and a 30-day rotating refresh token. Disconnect it under *Connected apps* at any time.
+
+| Client | How to add the server |
+| --- | --- |
+| ChatGPT | Turn on developer mode for apps and connectors (Settings → Apps & Connectors → Advanced settings), create an app/connector with the URL and choose OAuth. Availability depends on the plan. |
+| Claude (web, desktop, Cowork) | Settings → Connectors → Add custom connector, paste the URL, leave the OAuth client fields empty. |
+| Claude Code | `claude mcp add --transport http seo-indexer https://YOUR-HOST/mcp`, then `/mcp` to sign in. |
+| Codex CLI | `codex mcp add seo-indexer --url https://YOUR-HOST/mcp`, then `codex mcp login seo-indexer`. |
+| Cursor | Add `{"mcpServers": {"seo-indexer": {"url": "https://YOUR-HOST/mcp"}}}` to `~/.cursor/mcp.json`, enable it and sign in. |
+| Gemini CLI | `gemini mcp add --transport http seo-indexer https://YOUR-HOST/mcp`, then `/mcp auth seo-indexer`. |
+| VS Code | Add `{"servers": {"seo-indexer": {"type": "http", "url": "https://YOUR-HOST/mcp"}}}` to `.vscode/mcp.json`, start it and sign in. |
+| Anything else | Give it the URL. OAuth-capable clients find the sign-in automatically; others use a registered client or a personal token (below). |
+
+Menu names in hosted apps change from time to time; the server URL and OAuth flow stay the same.
+
+How clients identify themselves — all supported:
+
+- **Dynamic client registration** (RFC 7591) — most clients.
+- **Client ID Metadata Documents** — the client's `client_id` is an `https` URL to a JSON document listing its name and redirect URLs. The document is fetched through the app's outbound-URL guard and cached for an hour.
+- **A client you register on the dashboard** — for apps that ask for a client ID and secret (and sometimes the authorization and token URLs). Under *Apps that need a client ID*, enter the redirect URL the app shows you; the app gives you the client ID, secret, authorization URL and token URL.
+
+The server implements OAuth 2.1: protected-resource and authorisation-server metadata (RFC 9728/8414), authorisation code with PKCE (S256 only), issuer identification in the authorisation response (RFC 9207), refresh-token rotation and revocation (RFC 7009). Loopback redirects (`http://127.0.0.1`/`localhost`) may use any port, as native apps and CLIs pick a free port at sign-in (RFC 8252). `/mcp` also answers CORS requests, so browser-based MCP clients work; it never uses cookies. Set `PUBLIC_URL` so the advertised issuer and endpoints use your public HTTPS address, and consider `MCP_OAUTH_REDIRECT_ALLOWLIST` so only the AI apps you use can register (see [deployment](DEPLOYMENT.md)).
 
 ### Alternative: personal token
 
-Create a token with **SEO actions** and/or **Google Ads changes** ticked and send it as `Authorization: Bearer seomcp_…`. A `?token=` URL also works for clients that can't send headers, but the token can then appear in reverse-proxy access logs — prefer OAuth.
+For clients that can only send a fixed header (for example workflow tools), create a token with **SEO actions** and/or **Google Ads changes** ticked and send it as `Authorization: Bearer seomcp_…`. A `?token=` URL also works for clients that can't send headers, but the token can then appear in reverse-proxy access logs — prefer OAuth.
 
 ### What a token can do
 
@@ -153,9 +171,9 @@ Open **Google Ads → AI routine** and answer:
 
 **Save answers and build the prompt** produces the prompt, the schedule in words and as a cron expression. Then:
 
-1. Connect the MCP server in Claude (above) with **Manage Google Ads** allowed.
-2. Create a scheduled task (Claude routine/scheduled task, or your AI tool's scheduler) at the chosen cadence.
-3. Paste the prompt and make sure the connector and web search are enabled for the task.
+1. Connect the MCP server to your AI assistant (above) with **Manage Google Ads** allowed.
+2. Schedule the prompt at the chosen cadence — in the assistant's scheduled tasks or automations, or with cron on a server running an agent CLI. The page shows a crontab example for Claude Code (`claude -p`), Codex CLI (`codex exec`) and Gemini CLI (`gemini -p`); the CLI needs the server added and signed in, and permission to call its tools and web search without asking.
+3. Make sure the MCP server and web search are enabled for the task.
 
 Each run works client by client: brief and pacing → performance → audit and search terms → market and competitor research → changes through the change tools → `ads_record_routine_run`. Runs appear under **Routine log**, and anything outside the guardrails waits under **Approvals & history**.
 
@@ -217,4 +235,5 @@ Errors from Google are translated into a message and a next step.
 | Quota exceeded | Explorer allows 2,880 operations a day across all clients; apply for Basic. |
 | Keyword ideas fail on Explorer | Planning services need Basic access. |
 | Reconnect required | The refresh token was revoked or expired; reconnect the Google account. Publish the OAuth app so tokens don't expire after seven days. |
-| Claude says the connector failed to authenticate | Check `PUBLIC_URL`, that the reverse proxy forwards `/.well-known/*`, `/oauth/*` and `/mcp`, and remove and re-add the connector. |
+| The AI app says the server failed to authenticate | Check `PUBLIC_URL`, that the reverse proxy forwards `/.well-known/*`, `/oauth/*` and `/mcp`, that the app's redirect URL is in `MCP_OAUTH_REDIRECT_ALLOWLIST` if you set it, and remove and re-add the server. |
+| The AI app asks for a client ID and secret | Register a client under *Apps that need a client ID* with the redirect URL the app shows. |

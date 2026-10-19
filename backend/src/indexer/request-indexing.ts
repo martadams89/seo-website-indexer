@@ -2,10 +2,9 @@
  * indexer/request-indexing.ts — what Google lets software do about indexing,
  * and help for the one thing it doesn't: the Search Console "Request indexing"
  * button. There is no API for that button, so the app builds a prioritised
- * queue of pages worth requesting and a prompt for a browser agent (Claude in
- * Chrome or similar) that works through the queue in the person's own,
- * already signed-in browser, at a human pace and within Google's small daily
- * quota.
+ * queue of pages worth requesting and a prompt for any AI browser agent that
+ * works through the queue in the person's own, already signed-in browser, at a
+ * human pace and within Google's small daily quota.
  */
 import { getDb, getUrlsBySite, type Site, type UrlState } from '../db/database.js';
 import { changedSinceCrawl, isRecrawlable } from './google-indexing.js';
@@ -140,7 +139,7 @@ Finish with a table: page, result (requested / already indexed / quota exceeded 
 export function routinePrompt(input: { siteName: string; siteId: string; property: string; maxPerRun: number; connectorName: string; endpoint: string; schedule?: string }): string {
   return `You are my Search Console indexing assistant for ${input.siteName}${input.schedule ? `. This task runs ${input.schedule}` : ''}.
 
-Tools: the "${input.connectorName}" MCP connector (${input.endpoint}) and a browser you can control (for example Claude in Chrome). If either is missing, stop and tell me.
+Tools: the "${input.connectorName}" MCP server (${input.endpoint}) and control of my browser (a browser extension or AI browser that acts in my own signed-in session). If either is missing, stop and tell me.
 
 ${SIGN_IN(input.property)}
 

@@ -2746,11 +2746,12 @@ app.post('/api/ai/provision/gemini', async (req, reply) => {
 // capability gate (see SELF_ACCOUNT_EXEMPT_PREFIXES), still session-authenticated.
 app.get('/api/mcp/info', async (req) => {
   const endpoint = `${requestOrigin(req as never)}/mcp`;
+  const origin = requestOrigin(req as never);
   return {
     endpoint,
     transport: 'http',
     scopes: ['mcp:read', 'mcp:write', 'ads:write'],
-    oauth: true,
+    oauth: { issuer: origin, authorizationEndpoint: `${origin}/oauth/authorize`, tokenEndpoint: `${origin}/oauth/token`, registrationEndpoint: `${origin}/oauth/register` },
     headerName: 'Authorization',
     // The frontend fills <token> in from the freshly minted value at create time.
     claudeCodeCommand: `claude mcp add --transport http seo-indexer ${endpoint} --header "Authorization: Bearer <token>"`,

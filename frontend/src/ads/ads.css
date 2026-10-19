@@ -201,3 +201,19 @@
 
 .ads-page .ops-card-head { flex-wrap: wrap; }
 .ads-page .ops-card-head > .ops-tabs { max-width: 100%; overflow-x: auto; }
+
+/* MCP client picker */
+.mcp-connect > .mcp-copy-row { margin-bottom: 12px; }
+.mcp-clients { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.mcp-clients button { padding: 6px 11px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); background: var(--bg-input); font-size: 12px; font-weight: 650; cursor: pointer; }
+.mcp-clients button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.mcp-guide { padding: 12px 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-input); margin-bottom: 12px; }
+.mcp-guide .mcp-steps { margin-top: 0; }
+.mcp-code { position: relative; }
+.mcp-code pre { margin: 0; padding: 10px 40px 10px 12px; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); background: var(--bg-card); font: 12px/1.5 JetBrains Mono, ui-monospace, monospace; white-space: pre; }
+.mcp-code .btn-icon { position: absolute; top: 6px; right: 6px; }
+.mcp-step > strong { display: inline-flex; align-items: center; gap: 6px; }
+.mcp-redirect-input { flex: 2 1 260px !important; }
+.ads-cli-schedule { margin-top: 12px; }
+.ads-cli-schedule > summary { color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer; }
+.ads-cli-schedule .mcp-code { margin-top: 8px; }

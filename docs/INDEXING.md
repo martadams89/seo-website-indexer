@@ -131,8 +131,8 @@ Google gives software far fewer indexing levers than the Search Console website 
 Because "Request indexing" has no API, each site's **Indexing** tab includes **Ask Google to crawl specific pages**:
 
 - **The queue** — the pages most worth one of the few daily requests, best first: inspected and not indexed but fixable (not `noindex`, canonicalised, redirected or 404), then pages changed since Google's last crawl, then pages never inspected. Pages requested in the past seven days are left out unless they change again. Each has a direct URL Inspection link and a **mark as requested** button.
-- **One-off prompt** — includes the page list. Paste it into Claude in Chrome or another AI browser agent; no MCP connection is needed.
-- **Recurring routine prompt** — for a scheduled task. Each run calls the MCP tool `get_indexing_request_queue` for a fresh list, requests the pages, then calls `record_indexing_requests` (needs a connection with **SEO actions** allowed) so the queue stays honest.
+- **One-off prompt** — includes the page list. Paste it into any AI browser agent (a browser extension or AI browser that acts in your own signed-in session); no MCP connection is needed.
+- **Recurring routine prompt** — for a scheduled task in an assistant that can use this app's MCP server and control your browser. Each run calls the MCP tool `get_indexing_request_queue` for a fresh list, requests the pages, then calls `record_indexing_requests` (needs a connection with **SEO actions** allowed) so the queue stays honest.
 
 Before using either prompt, **sign in yourself**: open Search Console in the Chrome profile the agent uses, with a Google account that has Owner or Full permission on the property, and stay signed in. The prompts tell the agent never to type passwords or 2-step codes and to stop if it sees a sign-in page, the wrong account or no access. They also tell it to work one page at a time, skip pages that are already indexed, not request pages whose live test shows a problem (fix those on the site instead), and stop immediately when Search Console reports the quota is exceeded.
 

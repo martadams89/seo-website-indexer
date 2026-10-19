@@ -1,6 +1,6 @@
 /**
  * ads/routine-prompt.ts — turn the routine questionnaire into a copy-and-paste
- * prompt for a scheduled AI task (Claude or any MCP-capable assistant).
+ * prompt for a scheduled task in any MCP-capable AI assistant or agent CLI.
  *
  * The prompt carries the client briefs, budgets and cadence, and tells the
  * assistant exactly which MCP tools to call in which order. Guardrails are
@@ -134,7 +134,7 @@ export function buildRoutinePrompt(input: {
 
   const prompt = `You are my Google Ads optimisation agent${input.workspaceName ? ` for ${input.workspaceName}` : ''}. This task runs ${schedule}.
 
-Use the "${input.connectorName}" connector (MCP server ${input.endpoint}). Its Google Ads tools start with "ads_". If the connector is missing or its tools fail to authenticate, stop and tell me — do not try to work around it.
+Use the "${input.connectorName}" MCP server (${input.endpoint}). Its Google Ads tools start with "ads_". If the server isn't connected or its tools fail to authenticate, stop and tell me — do not try to work around it. Use your web search (and browsing, if available) for the market and competitor research.
 
 ## Clients in scope
 ${clients}

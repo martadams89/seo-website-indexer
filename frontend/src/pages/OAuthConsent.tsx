@@ -7,7 +7,7 @@ import '../ads/ads.css';
 type ConsentRequest = Awaited<ReturnType<typeof api.getOAuthRequest>>;
 
 /**
- * Consent screen for MCP connectors (Claude and other OAuth clients). The
+ * Consent screen for MCP clients (chat apps, IDEs, agent CLIs). The
  * person is already signed in (AuthGate), sees which app is asking and where
  * it will be sent back to, and chooses the permissions to grant.
  */
@@ -50,7 +50,7 @@ export default function OAuthConsentPage() {
           <>
             <h1 id="consent-title"><strong>{request.client_name}</strong> wants to access SEO Website Indexer</h1>
             <p className="consent-meta">
-              Signed in as <b>{request.user.email}</b>. After you decide you'll be sent back to <code>{request.redirect_host}</code>.
+              Signed in as <b>{request.user.email}</b>.{request.client_domain && <> This app is identified by <code>{request.client_domain}</code>.</>} After you decide you'll be sent back to <code>{request.redirect_host}</code>.
               Only continue if you just started this from your AI app.
             </p>
             <fieldset className="consent-scopes">

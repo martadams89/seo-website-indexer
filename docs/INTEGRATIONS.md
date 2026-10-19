@@ -325,7 +325,7 @@ Create tokens under **Governance & Usage → API & Webhooks**. Each token is sho
 
 Do not give a log shipper `events:write` or a rank exporter `logs:write` unless it genuinely uses both endpoints. Send tokens as `Authorization: Bearer oc_…`. See the [Automation API](AUTOMATION_API.md) for payloads and signed outbound-webhook verification.
 
-AI assistants use the MCP server at `/mcp` instead. Connect them with OAuth (paste the URL into the client and approve the permissions) or a personal token. MCP scopes are separate from service-token scopes:
+AI assistants (any MCP client) use the MCP server at `/mcp` instead. Connect them with OAuth (add the URL to the client and approve the permissions), a client registered on the dashboard, or a personal token. MCP scopes are separate from service-token scopes:
 
 | MCP scope | Allows |
 | --- | --- |
@@ -333,7 +333,7 @@ AI assistants use the MCP server at `/mcp` instead. Connect them with OAuth (pas
 | `mcp:write` | SEO actions: submit URLs, trigger runs, refresh snapshots, record Request indexing results. |
 | `ads:write` | Propose and apply Google Ads changes, always within each client's guardrails. |
 
-A token never exceeds its owner's role: viewers stay read-only and editors need the matching capability. See the [Google Ads guide](GOOGLE_ADS.md#connect-claude).
+A token never exceeds its owner's role: viewers stay read-only and editors need the matching capability. See the [Google Ads guide](GOOGLE_ADS.md#connect-an-ai-assistant).
 
 ## Troubleshooting order
 

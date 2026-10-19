@@ -1,8 +1,8 @@
 /**
- * mcp/oauth.ts — an OAuth 2.1 authorization server for the MCP endpoint, so a
- * connector (Claude web/desktop/Cowork, Claude Code, other MCP clients) can be
- * added with just the URL: the client discovers this server, registers itself,
- * sends the person to a consent screen in the dashboard, and receives
+ * mcp/oauth.ts — an OAuth 2.1 authorization server for the MCP endpoint, so
+ * any MCP client that supports remote servers (chat apps, IDEs, agent CLIs)
+ * can be added with just the URL: the client discovers this server, identifies
+ * itself, sends the person to a consent screen in the dashboard, and receives
  * short-lived access tokens plus a rotating refresh token.
  *
  *   /.well-known/oauth-protected-resource[/mcp]   RFC 9728 resource metadata
@@ -11,6 +11,12 @@
  *   GET  /oauth/authorize                          authorization code + PKCE (S256 only)
  *   POST /oauth/token                              code and refresh_token grants
  *   POST /oauth/revoke                             RFC 7009 revocation
+ *
+ * Clients can identify themselves three ways: dynamic registration, an https
+ * client_id that points at a Client ID Metadata Document, or a client a person
+ * registered on the dashboard (for apps that ask for a client ID and secret).
+ * Loopback redirect URIs match on any port (RFC 8252) and the authorization
+ * response carries `iss` (RFC 9207).
  *
  * Access tokens are ordinary MCP tokens (hashed in mcp_tokens, linked to the
  * grant), so the MCP route authenticates them exactly like personal tokens.
@@ -22,6 +28,7 @@ import { getDb } from '../db/database.js';
 import { getUserById, recordAuditEvent, type User } from '../auth/users.js';
 import { accessibleWorkspaces } from '../auth/workspaces.js';
 import { publicOrigin } from '../utils/origin.js';
+import { safeFetch } from '../security/outbound-url.js';
 import { MCP_SCOPES, type McpScope } from './tokens.js';
 
 const ACCESS_TOKEN_TTL_S = 3600;
@@ -57,7 +64,7 @@ function protectedResource(origin: string) {
     scopes_supported: [...MCP_SCOPES],
     bearer_methods_supported: ['header'],
     resource_name: 'SEO Website Indexer',
-    resource_documentation: 'https://github.com/martadams89/seo-website-indexer#mcp-server-connect-claude--ai-assistants',
+    resource_documentation: 'https://github.com/martadams89/seo-website-indexer#mcp-server-connect-an-ai-assistant',
   };
 }
 
@@ -75,6 +82,8 @@ function authorizationServer(origin: string) {
     revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post', 'client_secret_basic'],
     code_challenge_methods_supported: ['S256'],
     scopes_supported: [...MCP_SCOPES],
+    authorization_response_iss_parameter_supported: true,
+    client_id_metadata_document_supported: true,
     service_documentation: 'https://github.com/martadams89/seo-website-indexer/blob/main/docs/GOOGLE_ADS.md',
   };
 }
@@ -122,7 +131,75 @@ function clientRedirects(client: ClientRow): string[] {
   try { return JSON.parse(client.redirect_uris) as string[]; } catch { return []; }
 }
 
-export function registerClient(body: Record<string, unknown>, ip: string | null): { status: number; body: Record<string, unknown> } {
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/**
+ * Exact match, except that loopback http redirects may use any port: native
+ * apps and CLIs (VS Code, agent CLIs) pick a free port at sign-in time.
+ */
+export function redirectMatches(registered: string[], requested: string): boolean {
+  if (registered.includes(requested)) return true;
+  let req: URL;
+  try { req = new URL(requested); } catch { return false; }
+  if (req.protocol !== 'http:' || !LOOPBACK.has(req.hostname)) return false;
+  return registered.some(raw => {
+    try {
+      const reg = new URL(raw);
+      return reg.protocol === 'http:' && reg.hostname === req.hostname && reg.pathname === req.pathname && reg.search === req.search;
+    } catch { return false; }
+  });
+}
+
+// ── Client ID Metadata Documents ─────────────────────────────────────────────
+
+const METADATA_TTL_MS = 3_600_000;
+const METADATA_MAX_BYTES = 64 * 1024;
+type MetadataFetcher = (url: string) => Promise<Response>;
+let metadataFetcher: MetadataFetcher = url => safeFetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+export function __setMetadataFetcherForTests(fetcher: MetadataFetcher): void { metadataFetcher = fetcher; }
+
+/** An https client_id with a path (no fragment or credentials) is a metadata document URL. */
+export function isMetadataClientId(id: string): boolean {
+  try {
+    const url = new URL(id);
+    return url.protocol === 'https:' && url.pathname.length > 1 && !url.hash && !url.username && !url.password;
+  } catch { return false; }
+}
+
+/**
+ * Fetch (or reuse, for an hour) a Client ID Metadata Document and store it as
+ * a public client whose id is the document URL. The fetch goes through the
+ * outbound-URL guard, so it can't be pointed at private addresses.
+ */
+async function resolveMetadataClient(id: string): Promise<ClientRow | { error: string }> {
+  const db = getDb();
+  const cached = db.prepare('SELECT metadata_fetched_at FROM mcp_oauth_clients WHERE id=?').get(id) as { metadata_fetched_at: string | null } | undefined;
+  if (cached?.metadata_fetched_at && Date.now() - Date.parse(cached.metadata_fetched_at) < METADATA_TTL_MS) return getClient(id)!;
+  let doc: Record<string, unknown>;
+  try {
+    const res = await metadataFetcher(id);
+    if (!res.ok) return { error: `The client's metadata document returned HTTP ${res.status}.` };
+    const text = await res.text();
+    if (text.length > METADATA_MAX_BYTES) return { error: 'The client\'s metadata document is too large.' };
+    doc = JSON.parse(text) as Record<string, unknown>;
+  } catch (e) {
+    return { error: `Couldn't read the client's metadata document: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (doc.client_id !== id) return { error: 'The metadata document\'s client_id does not match its URL.' };
+  const method = String(doc.token_endpoint_auth_method ?? 'none');
+  if (method !== 'none') return { error: `Unsupported token_endpoint_auth_method ${method} for a metadata-document client.` };
+  const redirects = Array.isArray(doc.redirect_uris) ? doc.redirect_uris.map(String) : [];
+  if (!redirects.length || redirects.length > 20 || !redirects.every(validRedirectUri)) {
+    return { error: 'The metadata document must list allowed redirect_uris (https, localhost http, or an app scheme).' };
+  }
+  const name = String(doc.client_name ?? new URL(id).host).replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100) || new URL(id).host;
+  db.prepare(`INSERT INTO mcp_oauth_clients(id,name,redirect_uris,token_endpoint_auth_method,metadata_fetched_at) VALUES(?,?,?,'none',?)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, redirect_uris=excluded.redirect_uris, metadata_fetched_at=excluded.metadata_fetched_at`)
+    .run(id, name, JSON.stringify(redirects), new Date().toISOString());
+  return getClient(id)!;
+}
+
+export function registerClient(body: Record<string, unknown>, ip: string | null, registeredBy: string | null = null): { status: number; body: Record<string, unknown> } {
   const redirects = Array.isArray(body.redirect_uris) ? body.redirect_uris.map(String) : [];
   if (!redirects.length || redirects.length > 10 || !redirects.every(validRedirectUri)) {
     return { status: 400, body: { error: 'invalid_redirect_uri', error_description: 'redirect_uris must list 1–10 https URLs (http only for localhost, or an app-specific scheme).' } };
@@ -138,14 +215,14 @@ export function registerClient(body: Record<string, unknown>, ip: string | null)
   const name = String(body.client_name ?? 'MCP client').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100) || 'MCP client';
   const db = getDb();
   // Registration is open by design (RFC 7591); keep it bounded.
-  db.prepare(`DELETE FROM mcp_oauth_clients WHERE last_used_at IS NULL AND julianday(created_at) < julianday('now') - 7
+  db.prepare(`DELETE FROM mcp_oauth_clients WHERE last_used_at IS NULL AND registered_by IS NULL AND julianday(created_at) < julianday('now') - 7
     AND id NOT IN (SELECT client_id FROM mcp_oauth_grants)`).run();
   const count = (db.prepare('SELECT COUNT(*) AS n FROM mcp_oauth_clients').get() as { n: number }).n;
   if (count >= MAX_CLIENTS) return { status: 503, body: { error: 'temporarily_unavailable', error_description: 'Too many registered clients. Try again later.' } };
   const id = `mcpc_${token(18)}`;
   const secret = method === 'none' ? null : `mcps_${token(32)}`;
-  db.prepare('INSERT INTO mcp_oauth_clients(id,name,redirect_uris,secret_hash,token_endpoint_auth_method,created_ip) VALUES(?,?,?,?,?,?)')
-    .run(id, name, JSON.stringify(redirects), secret ? sha256(secret) : null, method, ip);
+  db.prepare('INSERT INTO mcp_oauth_clients(id,name,redirect_uris,secret_hash,token_endpoint_auth_method,created_ip,registered_by) VALUES(?,?,?,?,?,?,?)')
+    .run(id, name, JSON.stringify(redirects), secret ? sha256(secret) : null, method, ip, registeredBy);
   return {
     status: 201,
     body: {
@@ -225,12 +302,19 @@ export function decideRequest(requestId: string, user: User, approve: boolean, c
   return { redirect: withParams(request.redirect_uri, { code, state: request.state, iss: origin }) };
 }
 
-export function createAuthorizationRequest(q: Record<string, string | undefined>): { ok: true; requestId: string } | { ok: false; status: number; message: string; redirect?: string } {
-  const client = q.client_id ? getClient(q.client_id) : null;
-  if (!client) return { ok: false, status: 400, message: 'Unknown client. Remove the connector and add it again so it can register.' };
+export async function createAuthorizationRequest(q: Record<string, string | undefined>): Promise<{ ok: true; requestId: string } | { ok: false; status: number; message: string; redirect?: string }> {
+  let client: ClientRow | null = null;
+  if (q.client_id && isMetadataClientId(q.client_id)) {
+    const resolved = await resolveMetadataClient(q.client_id);
+    if ('error' in resolved) return { ok: false, status: 400, message: resolved.error };
+    client = resolved;
+  } else if (q.client_id) {
+    client = getClient(q.client_id);
+  }
+  if (!client) return { ok: false, status: 400, message: 'Unknown client. Remove the server from your AI app and add it again so it can register.' };
   const registered = clientRedirects(client);
   const redirect = q.redirect_uri ?? (registered.length === 1 ? registered[0] : undefined);
-  if (!redirect || !registered.includes(redirect)) return { ok: false, status: 400, message: 'The redirect URI does not match the one this client registered.' };
+  if (!redirect || !redirectMatches(registered, redirect)) return { ok: false, status: 400, message: 'The redirect URI does not match the one this client registered.' };
   const fail = (error: string, description: string) => ({ ok: false as const, status: 302, message: description, redirect: withParams(redirect, { error, error_description: description, state: q.state }) });
   if (q.response_type !== 'code') return fail('unsupported_response_type', 'Only response_type=code is supported.');
   if (!q.code_challenge || !/^[A-Za-z0-9_-]{43,128}$/.test(q.code_challenge)) return fail('invalid_request', 'PKCE code_challenge is required.');
@@ -335,6 +419,12 @@ export function listConnectedApps(userId: string): ConnectedApp[] {
     .map(r => ({ id: r.id, client_name: r.client_name, scopes: JSON.parse(r.scopes) as string[], created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
 }
 
+export function listManualClients(userId: string): Array<{ id: string; name: string; redirect_uris: string[]; token_endpoint_auth_method: string; created_at: string; last_used_at: string | null }> {
+  return (getDb().prepare(`SELECT id, name, redirect_uris, token_endpoint_auth_method, created_at, last_used_at FROM mcp_oauth_clients
+    WHERE registered_by=? ORDER BY created_at DESC`).all(userId) as Array<Record<string, string>>)
+    .map(r => ({ id: r.id, name: r.name, redirect_uris: JSON.parse(r.redirect_uris) as string[], token_endpoint_auth_method: r.token_endpoint_auth_method, created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
+}
+
 export function revokeConnectedApp(userId: string, grantId: string): boolean {
   const row = getDb().prepare('SELECT id FROM mcp_oauth_grants WHERE id=? AND user_id=? AND revoked_at IS NULL').get(grantId, userId);
   if (!row) return false;
@@ -387,7 +477,7 @@ export function registerMcpOAuthRoutes(app: FastifyInstance): void {
   });
 
   app.get('/oauth/authorize', async (req, reply) => {
-    const result = createAuthorizationRequest(req.query as Record<string, string | undefined>);
+    const result = await createAuthorizationRequest(req.query as Record<string, string | undefined>);
     if (!result.ok) {
       if (result.redirect) return reply.redirect(result.redirect, 302);
       return htmlError(reply, result.status, result.message);
@@ -426,6 +516,8 @@ export function registerMcpOAuthApiRoutes(app: FastifyInstance, currentUser: (re
     return {
       id: request.id,
       client_name: request.client_name,
+      // For metadata-document clients the identity is the domain that published it.
+      client_domain: isMetadataClientId(request.client_id) ? new URL(request.client_id).host : null,
       redirect_host: host,
       requested_scopes: normalizeRequestedScopes(request.scope),
       scopes: MCP_SCOPES.map(id => ({ id, ...SCOPE_INFO[id] })),
@@ -442,6 +534,34 @@ export function registerMcpOAuthApiRoutes(app: FastifyInstance, currentUser: (re
   });
 
   app.get('/api/oauth/apps', async (req) => listConnectedApps(currentUser(req).id));
+
+  // Clients registered by hand, for AI apps that ask for a client ID and secret
+  // instead of registering themselves.
+  app.get('/api/oauth/clients', async (req) => listManualClients(currentUser(req).id));
+
+  app.post('/api/oauth/clients', async (req, reply) => {
+    const user = currentUser(req);
+    const body = (req.body ?? {}) as { name?: string; redirect_uris?: string[] | string; confidential?: boolean };
+    const redirects = Array.isArray(body.redirect_uris) ? body.redirect_uris : String(body.redirect_uris ?? '').split(/[\s,]+/);
+    const result = registerClient({
+      client_name: body.name,
+      redirect_uris: redirects.map(r => r.trim()).filter(Boolean),
+      token_endpoint_auth_method: body.confidential === false ? 'none' : 'client_secret_post',
+    }, req.ip ?? null, user.id);
+    if (result.status !== 201) return reply.status(400).send({ error: String(result.body.error_description ?? result.body.error) });
+    recordAuditEvent({ actorUserId: user.id, action: 'mcp.oauth.client_registered', detail: { clientId: result.body.client_id, name: result.body.client_name } });
+    const origin = publicOrigin(req);
+    return { ...result.body, authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${origin}/oauth/token`, issuer: origin };
+  });
+
+  app.delete('/api/oauth/clients/:id', async (req, reply) => {
+    const user = currentUser(req);
+    const id = (req.params as { id: string }).id;
+    const removed = getDb().prepare('DELETE FROM mcp_oauth_clients WHERE id=? AND registered_by=?').run(id, user.id).changes > 0;
+    if (!removed) return reply.status(404).send({ error: 'OAuth client not found.' });
+    recordAuditEvent({ actorUserId: user.id, action: 'mcp.oauth.client_deleted', detail: { clientId: id } });
+    return { ok: true };
+  });
 
   app.delete('/api/oauth/apps/:id', async (req, reply) => {
     const user = currentUser(req);

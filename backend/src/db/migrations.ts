@@ -91,7 +91,7 @@ const migrations: Migration[] = [
   },
   {
     id: '20261019_02_mcp_oauth',
-    description: 'OAuth 2.1 authorization for MCP connectors (dynamic client registration, PKCE, refresh tokens)',
+    description: 'OAuth 2.1 authorization for MCP clients (dynamic registration, client metadata documents, PKCE, refresh tokens)',
     up(db) {
       db.exec(`
         CREATE TABLE mcp_oauth_clients (
@@ -101,6 +101,10 @@ const migrations: Migration[] = [
           secret_hash TEXT,
           token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
           created_ip TEXT,
+          -- Set for clients a person registered on the dashboard (kept until deleted).
+          registered_by TEXT REFERENCES users(id) ON DELETE CASCADE,
+          -- Set for Client ID Metadata Document clients (client_id is this https URL).
+          metadata_fetched_at TEXT,
           last_used_at TEXT,
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );

@@ -20,8 +20,8 @@ import { resourceMetadataUrl } from './oauth.js';
 /**
  * Extract the token from either the `Authorization: Bearer …` header (preferred)
  * or a `?token=`/`?key=` query parameter. The query form lets clients whose
- * connector UI is URL-only (e.g. Claude Desktop) bake auth straight into the URL;
- * the token is scrubbed from request logs (see the logger's req serializer).
+ * connector UI is URL-only bake auth straight into the URL; the token is
+ * scrubbed from the app's request logs (see the logger's req serializer).
  */
 function bearer(req: FastifyRequest): string | null {
   const header = req.headers['authorization'];
@@ -39,9 +39,23 @@ function bearer(req: FastifyRequest): string | null {
  * 401 with the RFC 9728 pointer to this server's OAuth metadata, which is how
  * MCP clients discover they can sign in instead of needing a pasted token.
  */
+/**
+ * Browser-based MCP clients call /mcp cross-origin. Allowing any origin is safe
+ * here because the endpoint never uses cookies: every request carries its own
+ * bearer token, which a third-party page can't obtain.
+ */
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id, Last-Event-ID',
+  'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id',
+  'Access-Control-Max-Age': '86400',
+};
+
 function unauthorized(req: FastifyRequest, reply: FastifyReply, message: string, tokenSent: boolean) {
   const metadata = `resource_metadata="${resourceMetadataUrl(publicOrigin(req))}"`;
   return reply
+    .headers(CORS_HEADERS)
     .code(401)
     .header('WWW-Authenticate', tokenSent ? `Bearer realm="mcp", error="invalid_token", ${metadata}` : `Bearer realm="mcp", ${metadata}`)
     .send({ jsonrpc: '2.0', error: { code: -32001, message }, id: null });
@@ -50,7 +64,7 @@ function unauthorized(req: FastifyRequest, reply: FastifyReply, message: string,
 export function registerMcpProtocolRoute(app: FastifyInstance): void {
   app.post('/mcp', async (req, reply) => {
     const raw = bearer(req);
-    if (!raw) return unauthorized(req, reply, 'Sign in with OAuth, or send a token created under Governance & Usage → API & Webhooks.', false);
+    if (!raw) return unauthorized(req, reply, 'Sign in with OAuth, or send a personal token created under Governance & Usage → API & Webhooks.', false);
     const auth = authenticateMcpToken(raw);
     if (!auth) return unauthorized(req, reply, 'Invalid, expired or revoked MCP token.', true);
     const ctx = buildContext(auth, publicOrigin(req));
@@ -61,6 +75,7 @@ export function registerMcpProtocolRoute(app: FastifyInstance): void {
     const server = buildMcpServer(ctx);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     reply.hijack();
+    for (const [name, value] of Object.entries(CORS_HEADERS)) reply.raw.setHeader(name, value);
     reply.raw.on('close', () => { void transport.close(); void server.close(); });
     try {
       await server.connect(transport);
@@ -77,9 +92,11 @@ export function registerMcpProtocolRoute(app: FastifyInstance): void {
   // The Streamable HTTP spec also defines GET (server→client SSE stream) and
   // DELETE (session teardown). This server is stateless and tools-only, so it
   // advertises neither — reply 405 with the allowed method.
+  app.options('/mcp', async (_req, reply) => reply.headers(CORS_HEADERS).code(204).send());
+
   for (const method of ['get', 'delete'] as const) {
     app[method]('/mcp', async (_req, reply) =>
-      reply.code(405).header('Allow', 'POST').send({
+      reply.headers(CORS_HEADERS).code(405).header('Allow', 'POST').send({
         jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This MCP server is stateless; use POST.' }, id: null,
       }));
   }

@@ -20,14 +20,14 @@ services:
       # - APP_SECRET=please-change-me
       # Canonical browser origin (recommended behind a reverse proxy). This is
       # used for passkeys, SSO callbacks, Secure cookie detection and as the
-      # OAuth issuer that Claude/MCP connectors see.
+      # OAuth issuer that MCP clients (ChatGPT, Claude, IDEs, CLIs) see.
       # - PUBLIC_URL=https://indexer.example.com
       # Google OAuth client for one-click Google sign-in (Search Console, GA4,
       # Google Ads). Google Ads API access belongs to this client's Cloud project.
       # - GOOGLE_OAUTH_CLIENT_ID=
       # - GOOGLE_OAUTH_CLIENT_SECRET=
-      # Only let these AI apps register as MCP connectors.
-      # - MCP_OAUTH_REDIRECT_ALLOWLIST=claude.ai,*.claude.com,localhost
+      # Only let these AI apps sign in as MCP clients (see docs/DEPLOYMENT.md).
+      # - MCP_OAUTH_REDIRECT_ALLOWLIST=chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1
       # Trust forwarded IP/protocol headers only when your proxy overwrites them.
       # - TRUST_PROXY=true
       # CORS is disabled by default because the bundled dashboard is same-origin.
