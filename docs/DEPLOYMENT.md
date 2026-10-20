@@ -31,7 +31,7 @@ Before exposing the application to the internet:
 2. Set a stable, random `APP_SECRET` and keep a separate copy in your secrets manager.
 3. Keep `/data` on persistent storage and copy its backups to another machine or storage service.
 4. Set `CORS_ORIGIN` if the dashboard is served from a different origin.
-5. Set `PUBLIC_URL` to the canonical HTTPS origin and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers. `PUBLIC_URL` is also the OAuth issuer that MCP clients (ChatGPT, Claude, IDEs, agent CLIs) see, so it must be the public `https://` address.
+5. Serve the app over HTTPS. The site, MCP server URL, OAuth issuer and Google/Bing/SSO callbacks use `https://` for any public hostname automatically, even when your reverse proxy forwards plain http. Set `PUBLIC_URL` to pin the canonical origin (for example when the app is reached by several names), and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers.
 6. Make sure the reverse proxy forwards `/mcp`, `/oauth/*` and `/.well-known/oauth-*` to the container as well as the dashboard. MCP clients discover sign-in through these paths.
 7. Configure SMTP if users need invitations and self-service password resets.
 8. Decide whether local passwords, SSO or both should be available.
@@ -54,7 +54,7 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `HOST` | `0.0.0.0` | Address the server binds to. |
 | `DATA_DIR` | `/data` | Directory containing the database, generated encryption key and backups. |
 | `APP_SECRET` | generated in `/data/.key` | Encrypts OAuth tokens and delivery credentials. Set it explicitly for portable restores. |
-| `PUBLIC_URL` | request origin | Canonical HTTPS origin for cookies, passkeys, SSO and Google/Bing sign-in callbacks, and the MCP OAuth issuer. Set it behind any reverse proxy that terminates TLS: otherwise the app sees plain http and builds `http://` callbacks that Google and AI apps reject (the dashboard warns when this happens). |
+| `PUBLIC_URL` | request host, `https://` | Canonical origin for passkeys, SSO and Google/Bing sign-in callbacks, the MCP server URL and OAuth issuer, and links back to the dashboard. Without it the host comes from the request and the scheme is `https` for any public hostname; `localhost`, IP addresses and LAN names (`nas`, `*.local`, `*.lan`) stay `http` unless the proxy sends `X-Forwarded-Proto: https`. Set `PUBLIC_URL=http://…` only to serve plain http on a public name. |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-*` values. Enable only behind a proxy that overwrites them. |
 | `CORS_ORIGIN` | disabled | Comma-separated browser origins allowed to call the API when the frontend is separate. |
 | `OUTBOUND_HOST_ALLOWLIST` | unset | Exact trusted hostnames that may resolve to private/reserved addresses. |

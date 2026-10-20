@@ -78,6 +78,17 @@ const CLIENTS: ClientGuide[] = [
  * registered OAuth clients and personal tokens cover clients that can't
  * register themselves or can only send a static header.
  */
+/** Whether hosted AI apps can reach this URL: https on a public (non-local) hostname. */
+function publicHttps(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const local = h === 'localhost' || h.endsWith('.localhost') || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')
+      || !h.includes('.') || /\.(local|lan|internal|home\.arpa|test)$/.test(h);
+    return protocol === 'https:' && !local;
+  } catch { return false; }
+}
+
 export function McpConnect({ compact = false }: { compact?: boolean }) {
   const toast = useToast();
   const [info, setInfo] = useState<Awaited<ReturnType<typeof api.getMcpInfo>> | null>(null);
@@ -181,8 +192,11 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
         )}
         <p className="mcp-note">
           Tick <b>Manage Google Ads</b> on the sign-in screen if routines should make or propose Google Ads changes. Access tokens last an
-          hour and renew automatically; disconnect an app below to cut it off. Hosted AI apps need this server on a public HTTPS address.
+          hour and renew automatically; disconnect an app below to cut it off.
         </p>
+        {!publicHttps(endpoint) && (
+          <p className="mcp-warning"><AlertTriangle size={12} /> Hosted AI apps such as ChatGPT and Claude on the web can only reach a public HTTPS address. Apps and CLIs on this machine or network can still use this one.</p>
+        )}
       </div>
 
       <div className="automation-list">

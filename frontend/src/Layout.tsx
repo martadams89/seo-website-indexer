@@ -91,8 +91,9 @@ export default function Layout() {
   // it anyway.
   const isViewer = active?.role === 'viewer' && !user.is_super_admin;
   const needsSetup = !!status && !status.auth.authenticated && sites.length === 0 && !isViewer;
-  // Behind an HTTPS reverse proxy without PUBLIC_URL/TRUST_PROXY the server
-  // builds http:// callback and MCP URLs, which Google and AI apps reject.
+  // Public hostnames always get https links; a LAN/IP host behind an HTTPS
+  // proxy that doesn't send X-Forwarded-Proto still gets http:// ones, which
+  // Google and AI apps reject.
   const insecureOrigin = !isViewer && window.location.protocol === 'https:' && !!status?.publicOrigin?.startsWith('http://')
     ? `https://${window.location.host}` : null;
 
@@ -367,8 +368,8 @@ export default function Layout() {
             <div className="alert-content">
               <div className="alert-title">This server thinks its address is {status?.publicOrigin}</div>
               Google sign-in callbacks and the MCP server URL are built from it, and Google and AI apps reject plain http.
-              Set <code>PUBLIC_URL={insecureOrigin}</code> in the server's environment (or <code>TRUST_PROXY=true</code> if your
-              reverse proxy sends <code>X-Forwarded-Proto</code>) and restart the app.
+              Set <code>PUBLIC_URL={insecureOrigin}</code> in the server's environment and restart the app, or have your reverse
+              proxy send <code>X-Forwarded-Proto: https</code>.
             </div>
           </div>
         )}

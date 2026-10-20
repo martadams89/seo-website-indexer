@@ -163,7 +163,7 @@ Most settings live in the dashboard. These environment variables control the con
 | `HOST` | `0.0.0.0` | Bind address. |
 | `DATA_DIR` | `/data` | SQLite database, encryption key and backup directory. |
 | `APP_SECRET` | generated | Encrypts OAuth tokens and delivery credentials. Set a stable value in production so restores remain portable. |
-| `PUBLIC_URL` | request origin | Canonical HTTPS origin used by passkeys, SSO callbacks and Secure cookie detection. Recommended behind a proxy. |
+| `PUBLIC_URL` | request host, `https://` | Canonical origin for passkeys, sign-in callbacks, the MCP server URL and dashboard links. Public hostnames get `https://` automatically; set this to pin one address or for an IP/LAN host behind an HTTPS proxy. |
 | `TRUST_PROXY` | `false` | Trust proxy-supplied client/protocol headers. Enable only behind a proxy that overwrites them. |
 | `CORS_ORIGIN` | disabled | Explicit comma-separated browser origins when the frontend is hosted separately. The bundled UI is same-origin. |
 | `OUTBOUND_HOST_ALLOWLIST` | unset | Exact comma-separated hostnames allowed to bypass public-address checks for trusted internal services. |
@@ -230,7 +230,7 @@ The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.i
 
 Apps that ask for an OAuth client ID and secret can use a client you register on the same card (*Apps that need a client ID*). Clients that can only send a fixed header can use a personal token (tick *SEO actions* and/or *Google Ads changes*) sent as `Authorization: Bearer seomcp_…`; a `?token=` URL also works but may appear in reverse-proxy logs.
 
-Tokens reach every workspace their owner can access and never exceed the owner's role. The Google Ads tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded change tools; see the [Google Ads guide](docs/GOOGLE_ADS.md#connect-an-ai-assistant). Hosted AI apps need the endpoint on public HTTPS; set `PUBLIC_URL` and, ideally, `MCP_OAUTH_REDIRECT_ALLOWLIST`.
+Tokens reach every workspace their owner can access and never exceed the owner's role. The Google Ads tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded change tools; see the [Google Ads guide](docs/GOOGLE_ADS.md#connect-an-ai-assistant). Hosted AI apps need the endpoint on public HTTPS, which the app advertises automatically on a public hostname; consider setting `MCP_OAUTH_REDIRECT_ALLOWLIST` too.
 
 ## Updating and backups
 
