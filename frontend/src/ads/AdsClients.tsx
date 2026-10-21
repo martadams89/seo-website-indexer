@@ -39,7 +39,13 @@ export function AdsClients({ accounts, canManage, reload, onOpen }: {
                     {a.test_account && <span className="badge badge-info">Test</span>}
                     {a.is_manager && <span className="badge badge-info">Manager</span>}
                     {!a.enabled && <span className="badge badge-warn">Paused in app</span>}
-                    {a.last_error && <small className="ads-error-line">{a.last_error}</small>}
+                    {a.connection_lost && (
+                      <small className="ads-error-line">
+                        Its Google connection was disconnected.{' '}
+                        <button className="link-button" disabled={!canManage} onClick={() => setLinking(true)}>Relink it</button> by selecting it under the Google login that has access.
+                      </small>
+                    )}
+                    {a.last_error && !a.connection_lost && <small className="ads-error-line">{a.last_error}</small>}
                   </td>
                   <td><code>{a.customer_id_formatted}</code>{a.login_customer_id && <small className="text-dim"> via manager</small>}</td>
                   <td>{a.monthly_budget === null ? <span className="badge badge-warn">Not set</span> : money(a.monthly_budget, a.currency, 0)}</td>
@@ -110,7 +116,7 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
           <h3>{conn.email ?? conn.google_account_id}</h3>
           {conn.errors.map(err => <p key={err} className="ads-hint">{err}{conn.hint ? ` — ${conn.hint}` : ''}</p>)}
           {conn.customers.map(c => {
-            const linked = !!c.linked_account_id;
+            const linked = !!c.linked_account_id && !c.needs_relink;
             const checked = !!selected[c.customer_id];
             return (
               <label key={c.customer_id} className={`ads-discovery-row ${linked ? 'linked' : ''}`} style={{ paddingLeft: 10 + c.level * 18 }}>
@@ -124,7 +130,7 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
                 }} />
                 <span>
                   <strong>{c.name ?? c.customer_id}</strong>
-                  <small>{c.customer_id.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3')}{c.currency ? ` · ${c.currency}` : ''}{c.manager ? ' · manager account' : ''}{c.test_account ? ' · test account' : ''}{c.status && c.status !== 'ENABLED' ? ` · ${c.status.toLowerCase()}` : ''}{linked ? ' · already linked' : ''}</small>
+                  <small>{c.customer_id.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3')}{c.currency ? ` · ${c.currency}` : ''}{c.manager ? ' · manager account' : ''}{c.test_account ? ' · test account' : ''}{c.status && c.status !== 'ENABLED' ? ` · ${c.status.toLowerCase()}` : ''}{linked ? ' · already linked' : ''}{c.needs_relink ? ' · connection lost, select to relink' : ''}</small>
                   {c.error && <small className="ads-error-line">{c.error}</small>}
                 </span>
               </label>

@@ -16,7 +16,7 @@ import {
 } from './client.js';
 import { emptyState, evaluateChange, inspectOperations, stateNeeds, type AccountState, type InspectedOperation } from './guardrails.js';
 import {
-  createChange, getAdsAccount, getChange, transitionChange, updateChange,
+  createChange, getAdsAccount, getChange, healOrphanedAdsAccount, isOrphanedAdsAccount, transitionChange, updateChange,
   type AdsAccount, type AdsChange, type GuardrailFinding,
 } from './store.js';
 import { operationTypeFor, removeOperation, updateOperation, type Operation } from './operations.js';
@@ -25,8 +25,17 @@ import { recordUsage } from '../platform/store.js';
 import { logSystem } from '../utils/logger.js';
 
 export function callContext(account: AdsAccount): AdsCallContext {
-  if (!account.google_account_id) {
-    throw new AdsApiError(`No Google connection is linked to ${account.name ?? account.customer_id}. Relink it from the Google Ads page.`, 'NEEDS_REAUTH');
+  if (isOrphanedAdsAccount(account)) {
+    // Its Google connection was disconnected; re-attach it to the workspace's
+    // Google Ads connection when that is unambiguous.
+    const healed = healOrphanedAdsAccount(account.id);
+    if (healed?.google_account_id) account.google_account_id = healed.google_account_id;
+  }
+  if (!account.google_account_id || isOrphanedAdsAccount(account)) {
+    throw new AdsApiError(
+      `${account.name ?? account.customer_id} has lost its Google connection (it was disconnected). On the Google Ads page, open "Find and link client accounts" and select it to relink.`,
+      'NEEDS_REAUTH',
+    );
   }
   return { googleAccountId: account.google_account_id, loginCustomerId: account.login_customer_id };
 }

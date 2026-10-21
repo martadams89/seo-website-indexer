@@ -15,8 +15,8 @@ import { accountOverview, auditAccount, listRecommendations, searchTerms } from 
 import { buildRoutinePrompt, DEFAULT_ROUTINE, FOCUS_AREAS, normalizeRoutine } from './routine-prompt.js';
 import { enableAdsApi, setupStatus, verifyAndLinkAccount } from './setup.js';
 import {
-  getAdsAccount, getChange, listAdsAccounts, listChanges, listRoutineRuns, unlinkAdsAccount, updateAdsAccount,
-  type AdsAccount, type ChangeStatus,
+  getAdsAccount, getChange, healOrphanedAdsAccounts, isOrphanedAdsAccount, listAdsAccounts, listChanges, listRoutineRuns,
+  unlinkAdsAccount, updateAdsAccount, type AdsAccount, type ChangeStatus,
 } from './store.js';
 
 interface RequestContext { ctx: { user: User; impersonator: User | null; workspaceId: string | null } }
@@ -63,6 +63,7 @@ export function registerAdsRoutes(app: FastifyInstance): void {
   // ── Setup ──────────────────────────────────────────────────────────────────
   app.get('/api/ads/setup', handle(async (req) => {
     const { fresh } = req.query as { fresh?: string };
+    healOrphanedAdsAccounts(workspace(req));
     return setupStatus(workspace(req), { fresh: fresh === '1' || fresh === 'true' });
   }));
 
@@ -85,7 +86,12 @@ export function registerAdsRoutes(app: FastifyInstance): void {
         const { customers, errors } = await discoverCustomers(conn.id);
         results.push({
           google_account_id: conn.id, email: conn.email, errors,
-          customers: customers.map(c => ({ ...c, linked_account_id: linked.find(l => l.customer_id === c.customer_id)?.id ?? null })),
+          customers: customers.map(c => {
+            const existing = linked.find(l => l.customer_id === c.customer_id);
+            // A linked account whose Google connection was disconnected must
+            // stay selectable so it can be relinked to this connection.
+            return { ...c, linked_account_id: existing?.id ?? null, needs_relink: !!existing && isOrphanedAdsAccount(existing) };
+          }),
         });
       } catch (e) {
         const err = e as AdsApiError;
@@ -96,10 +102,13 @@ export function registerAdsRoutes(app: FastifyInstance): void {
   }));
 
   // ── Client accounts ────────────────────────────────────────────────────────
-  app.get('/api/ads/accounts', handle(async (req) => listAdsAccounts(workspace(req)).map(a => ({
-    ...a, customer_id_formatted: formatCustomerId(a.customer_id),
-    pending_approvals: listChanges({ workspaceIds: [a.workspace_id], adsAccountId: a.id, status: 'needs_approval', limit: 100 }).length,
-  }))));
+  app.get('/api/ads/accounts', handle(async (req) => {
+    healOrphanedAdsAccounts(workspace(req));
+    return listAdsAccounts(workspace(req)).map(a => ({
+      ...a, customer_id_formatted: formatCustomerId(a.customer_id), connection_lost: isOrphanedAdsAccount(a),
+      pending_approvals: listChanges({ workspaceIds: [a.workspace_id], adsAccountId: a.id, status: 'needs_approval', limit: 100 }).length,
+    }));
+  }));
 
   app.post('/api/ads/accounts', handle(async (req) => {
     const ws = workspace(req);

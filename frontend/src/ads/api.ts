@@ -46,6 +46,8 @@ export interface AdsAccount {
   enabled: boolean;
   last_error: string | null;
   pending_approvals: number;
+  /** Its Google connection was disconnected; relink it from "Find and link client accounts". */
+  connection_lost?: boolean;
 }
 
 export type ApiState = 'ok' | 'no_scope' | 'api_disabled' | 'access_level' | 'needs_reauth' | 'error' | 'unchecked';
@@ -87,6 +89,8 @@ export interface DiscoveredCustomer {
   level: number;
   error?: string;
   linked_account_id: string | null;
+  /** Already linked, but its Google connection was disconnected: selectable to relink. */
+  needs_relink?: boolean;
 }
 
 export interface DiscoveryResult {

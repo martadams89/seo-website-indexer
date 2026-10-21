@@ -7,7 +7,8 @@
  * also the audit log.
  */
 import { randomUUID } from 'crypto';
-import { getDb } from '../db/database.js';
+import { getDb, getGoogleAccountsForWorkspace } from '../db/database.js';
+import { GOOGLE_ADS_SCOPE } from '../auth/google-oauth.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -290,6 +291,48 @@ export function recordAccountCheck(id: string, error: string | null): void {
 
 export function unlinkAdsAccount(id: string): boolean {
   return getDb().prepare('DELETE FROM ads_accounts WHERE id=?').run(id).changes > 0;
+}
+
+/**
+ * Disconnecting a Google connection nulls ads_accounts.google_account_id
+ * (ON DELETE SET NULL). Reconnecting the same Google login creates a fresh
+ * connection row, but nothing points the Ads account back at it, so every
+ * Ads call then fails with "No Google connection is linked". Re-attach an
+ * orphaned Ads account to its workspace's Google connection with Google Ads
+ * access, but only when there is exactly one such connection, so we never
+ * guess between logins (the link modal offers a manual relink otherwise).
+ * Returns the healed account, or null when it isn't orphaned or can't be
+ * decided.
+ */
+export function healOrphanedAdsAccount(id: string): AdsAccount | null {
+  const db = getDb();
+  const orphan = db.prepare(`
+    SELECT a.workspace_id FROM ads_accounts a
+    LEFT JOIN google_accounts g ON g.id = a.google_account_id
+    WHERE a.id = ? AND g.id IS NULL
+  `).get(id) as { workspace_id: string } | undefined;
+  if (!orphan) return null;
+  const candidates = getGoogleAccountsForWorkspace(orphan.workspace_id)
+    .filter(a => (a.granted_scopes ?? '').split(' ').includes(GOOGLE_ADS_SCOPE));
+  if (candidates.length !== 1) return null;
+  db.prepare("UPDATE ads_accounts SET google_account_id=?, last_error=NULL, updated_at=datetime('now') WHERE id=?")
+    .run(candidates[0].id, id);
+  return getAdsAccount(id);
+}
+
+/** True when the Ads account's Google connection is missing (disconnected). */
+export function isOrphanedAdsAccount(account: AdsAccount): boolean {
+  if (!account.google_account_id) return true;
+  return !getDb().prepare('SELECT 1 FROM google_accounts WHERE id=?').get(account.google_account_id);
+}
+
+/** Heal every orphaned Ads account in these workspaces; returns how many were re-attached. */
+export function healOrphanedAdsAccounts(workspaceIds: string | string[]): number {
+  let healed = 0;
+  for (const account of listAdsAccounts(workspaceIds)) {
+    if (isOrphanedAdsAccount(account) && healOrphanedAdsAccount(account.id)) healed++;
+  }
+  return healed;
 }
 
 // ── Change plans ─────────────────────────────────────────────────────────────
