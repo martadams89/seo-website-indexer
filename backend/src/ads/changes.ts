@@ -14,7 +14,7 @@ import {
   AdsApiError, applyRecommendations, cleanCustomerId, dismissRecommendations, mutate, searchGaql,
   type AdsCallContext, type MutateResult,
 } from './client.js';
-import { emptyState, evaluateChange, inspectOperations, stateNeeds, type AccountState, type InspectedOperation } from './guardrails.js';
+import { emptyState, evaluateChange, inspectOperations, PER_LEAD_CHANNELS, stateNeeds, type AccountState, type InspectedOperation } from './guardrails.js';
 import {
   createChange, getAdsAccount, getChange, healOrphanedAdsAccount, isOrphanedAdsAccount, transitionChange, updateChange,
   type AdsAccount, type AdsChange, type GuardrailFinding,
@@ -50,7 +50,7 @@ export async function fetchAccountState(account: AdsAccount, ops: InspectedOpera
   const needs = stateNeeds(ops);
 
   const { rows: campaigns } = await searchGaql(ctx, cid, `
-    SELECT campaign.resource_name, campaign.status, campaign_budget.resource_name, campaign_budget.amount_micros
+    SELECT campaign.resource_name, campaign.status, campaign.advertising_channel_type, campaign_budget.resource_name, campaign_budget.amount_micros
     FROM campaign WHERE campaign.status != 'REMOVED'`, 10_000);
   for (const row of campaigns) {
     const c = row.campaign as Record<string, unknown> | undefined;
@@ -58,7 +58,8 @@ export async function fetchAccountState(account: AdsAccount, ops: InspectedOpera
     if (!c?.resourceName) continue;
     const budgetName = (b?.resourceName as string) ?? null;
     const micros = Number(b?.amountMicros ?? 0);
-    state.campaigns[String(c.resourceName)] = { status: String(c.status ?? ''), budget: budgetName, budgetMicros: micros };
+    const channel = (c.advertisingChannelType as string | undefined) ?? null;
+    state.campaigns[String(c.resourceName)] = { status: String(c.status ?? ''), budget: budgetName, budgetMicros: micros, channel };
     if (budgetName) state.budgets[budgetName] = micros;
   }
 
@@ -89,7 +90,21 @@ export async function fetchAccountState(account: AdsAccount, ops: InspectedOpera
   }
   const { rows: spend } = await searchGaql(ctx, cid, 'SELECT metrics.cost_micros FROM customer WHERE segments.date DURING THIS_MONTH');
   state.monthToDateMicros = spend.reduce((sum, row) => sum + Number((row.metrics as Record<string, unknown> | undefined)?.costMicros ?? 0), 0);
+  state.perLeadMonthToDateMicros = await perLeadMonthToDateMicros(ctx, cid, Object.values(state.campaigns).map(c => c.channel));
   return state;
+}
+
+/**
+ * Month-to-date spend of per-lead campaigns (Local Services). Their budget is a
+ * placeholder, so the guardrails project them at this run rate instead. Skips
+ * the query when the account has no such campaign.
+ */
+export async function perLeadMonthToDateMicros(ctx: AdsCallContext, cid: string, channels: Array<string | null | undefined>): Promise<number> {
+  const present = [...PER_LEAD_CHANNELS].filter(ch => channels.includes(ch));
+  if (!present.length) return 0;
+  const { rows } = await searchGaql(ctx, cid, `SELECT campaign.advertising_channel_type, metrics.cost_micros FROM campaign
+    WHERE segments.date DURING THIS_MONTH AND campaign.advertising_channel_type IN (${quote(present)})`, 5000);
+  return rows.reduce((sum, row) => sum + Number((row.metrics as Record<string, unknown> | undefined)?.costMicros ?? 0), 0);
 }
 
 /** Values to restore if the change is reverted later. */

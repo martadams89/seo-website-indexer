@@ -4,8 +4,8 @@
  * monthly budget pacing, a structured audit and search-term waste.
  */
 import { microsToUnits, searchGaql, type AdsRow } from './client.js';
-import { callContext } from './changes.js';
-import { monthPosition } from './guardrails.js';
+import { callContext, perLeadMonthToDateMicros } from './changes.js';
+import { isPerLeadChannel, monthPosition, perLeadDailyRunRate } from './guardrails.js';
 import type { AdsAccount } from './store.js';
 
 // ── Dates ────────────────────────────────────────────────────────────────────
@@ -145,21 +145,27 @@ export async function budgetPacing(account: AdsAccount, now = new Date()) {
   const [mtd, last7, enabled] = await Promise.all([
     searchGaql(ctx, cid, 'SELECT metrics.cost_micros FROM customer WHERE segments.date DURING THIS_MONTH'),
     searchGaql(ctx, cid, 'SELECT metrics.cost_micros FROM customer WHERE segments.date DURING LAST_7_DAYS'),
-    searchGaql(ctx, cid, `SELECT campaign.resource_name, campaign_budget.resource_name, campaign_budget.amount_micros
+    searchGaql(ctx, cid, `SELECT campaign.resource_name, campaign.advertising_channel_type, campaign_budget.resource_name, campaign_budget.amount_micros
       FROM campaign WHERE campaign.status = 'ENABLED'`, 5000),
   ]);
   const budgets = new Map<string, number>();
+  const channels: string[] = [];
   for (const row of enabled.rows) {
     const b = (row.campaignBudget ?? {}) as Record<string, unknown>;
     const c = (row.campaign ?? {}) as Record<string, unknown>;
+    const channel = (c.advertisingChannelType as string | undefined) ?? '';
+    channels.push(channel);
+    // Local Services' budget is a placeholder, not a commitment (see guardrails).
+    if (isPerLeadChannel(channel)) continue;
     budgets.set(String(b.resourceName ?? c.resourceName), num(b.amountMicros));
   }
   const pos = monthPosition(now, account.time_zone);
   const spent = microsToUnits(sumMetrics(mtd.rows).costMicros);
   const dailyBudgets = microsToUnits([...budgets.values()].reduce((a, b) => a + b, 0));
-  const projected = round(spent + dailyBudgets * pos.remainingDays);
+  const perLeadDaily = microsToUnits(perLeadDailyRunRate(await perLeadMonthToDateMicros(ctx, cid, channels), pos.day));
+  const projected = round(spent + (dailyBudgets + perLeadDaily) * pos.remainingDays);
   const monthly = account.monthly_budget;
-  const recommendedDaily = monthly === null ? null : round(Math.max(0, monthly - spent) / Math.max(1, pos.remainingDays));
+  const recommendedDaily = monthly === null ? null : round(Math.max(0, monthly - spent - perLeadDaily * pos.remainingDays) / Math.max(1, pos.remainingDays));
   const expectedByNow = monthly === null ? null : round((monthly * (pos.day - 1)) / pos.daysInMonth);
   let status: 'no_budget' | 'under' | 'on_track' | 'over' = 'no_budget';
   if (monthly !== null) {
@@ -175,11 +181,12 @@ export async function budgetPacing(account: AdsAccount, now = new Date()) {
     days_in_month: pos.daysInMonth,
     remaining_days_including_today: pos.remainingDays,
     enabled_daily_budgets: dailyBudgets,
+    per_lead_daily_spend: perLeadDaily,
     average_daily_spend_last_7_days: round(microsToUnits(sumMetrics(last7.rows).costMicros) / 7),
     projected_month_spend: projected,
     recommended_daily_budget_total: recommendedDaily,
     status,
-    note: 'Google may spend up to twice a campaign\'s daily budget on a single day but never charges more than 30.4× the daily budget in a month. Projection = month-to-date spend + enabled daily budgets × remaining days.',
+    note: 'Google may spend up to twice a campaign\'s daily budget on a single day but never charges more than 30.4× the daily budget in a month. Projection = month-to-date spend + (enabled daily budgets + per-lead run rate) × remaining days. Local Services budgets are Google placeholders, so they are excluded from daily budgets and projected at their actual daily spend this month instead.',
   };
 }
 

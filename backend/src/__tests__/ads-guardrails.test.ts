@@ -93,6 +93,57 @@ describe('evaluateChange', () => {
     expect(evaluate([op], { monthlyBudget: 4000, guardrails: { allow_enable_campaigns: false } }).findings.map(f => f.code)).toContain('enable_campaign');
   });
 
+  it('excludes a Local Services placeholder budget and projects it at its real run rate', () => {
+    // Mirrors a real account: a Search campaign moving 375 → 425 a day next to
+    // an enabled Local Services campaign whose budget Google reports as 16,000.
+    const withLsa = state({
+      campaigns: {
+        [`${C}/campaigns/1`]: { status: 'ENABLED', budget: `${C}/campaignBudgets/10`, budgetMicros: 375_000_000, channel: 'SEARCH' },
+        [`${C}/campaigns/9`]: { status: 'ENABLED', budget: `${C}/campaignBudgets/90`, budgetMicros: 16_000_000_000, channel: 'LOCAL_SERVICES' },
+      },
+      budgets: { [`${C}/campaignBudgets/10`]: 375_000_000, [`${C}/campaignBudgets/90`]: 16_000_000_000 },
+      monthToDateMicros: 4_000_000_000,       // 4,000 spent so far this month…
+      perLeadMonthToDateMicros: 1_100_000_000, // …1,100 of it by Local Services over 11 days → 100/day
+    });
+    const result = evaluate([budgetOp(10, 425_000_000)], { state: withLsa, monthlyBudget: 20_000 });
+    expect(result.impact.daily_budget_before).toBe(375);
+    expect(result.impact.daily_budget_after).toBe(425);
+    expect(result.impact.per_lead_daily_spend).toBe(100);
+    // 4,000 + (425 + 100) × 21 remaining days — not 4,000 + 16,425 × 21.
+    expect(result.impact.projected_month_spend).toBe(15_025);
+    expect(result.findings.map(f => f.code)).not.toContain('over_monthly_budget');
+  });
+
+  it('still holds a change whose real projection breaks the monthly budget', () => {
+    const withLsa = state({
+      campaigns: {
+        [`${C}/campaigns/1`]: { status: 'ENABLED', budget: `${C}/campaignBudgets/10`, budgetMicros: 375_000_000, channel: 'SEARCH' },
+        [`${C}/campaigns/9`]: { status: 'ENABLED', budget: `${C}/campaignBudgets/90`, budgetMicros: 16_000_000_000, channel: 'LOCAL_SERVICES' },
+      },
+      budgets: { [`${C}/campaignBudgets/10`]: 375_000_000, [`${C}/campaignBudgets/90`]: 16_000_000_000 },
+      monthToDateMicros: 4_000_000_000,
+      perLeadMonthToDateMicros: 1_100_000_000,
+    });
+    const result = evaluate([budgetOp(10, 425_000_000)], { state: withLsa, monthlyBudget: 15_000 });
+    expect(result.impact.projected_month_spend).toBe(15_025);
+    expect(result.findings.find(f => f.code === 'over_monthly_budget')?.message).toContain('15025.00');
+  });
+
+  it('adds no Local Services run rate once that campaign is paused', () => {
+    const paused = state({
+      campaigns: {
+        [`${C}/campaigns/1`]: { status: 'ENABLED', budget: `${C}/campaignBudgets/10`, budgetMicros: 375_000_000, channel: 'SEARCH' },
+        [`${C}/campaigns/9`]: { status: 'PAUSED', budget: `${C}/campaignBudgets/90`, budgetMicros: 16_000_000_000, channel: 'LOCAL_SERVICES' },
+      },
+      budgets: { [`${C}/campaignBudgets/10`]: 375_000_000, [`${C}/campaignBudgets/90`]: 16_000_000_000 },
+      monthToDateMicros: 4_000_000_000,
+      perLeadMonthToDateMicros: 1_100_000_000,
+    });
+    const result = evaluate([budgetOp(10, 425_000_000)], { state: paused, monthlyBudget: 20_000 });
+    expect(result.impact.per_lead_daily_spend).toBe(0);
+    expect(result.impact.projected_month_spend).toBe(4_000 + 425 * 21);
+  });
+
   it('counts a shared budget only once', () => {
     const shared = state({
       campaigns: {
