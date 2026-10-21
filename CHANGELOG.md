@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.43.0](https://github.com/martadams89/seo-website-indexer/compare/v1.42.2...v1.43.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **auth:** proactively keep Google tokens alive and explain Workspace reauth expiry ([#495](https://github.com/martadams89/seo-website-indexer/issues/495)) ([9b67f3d](https://github.com/martadams89/seo-website-indexer/commit/9b67f3dc0123bee9ccb29915337842b2b11a0995))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.61.0 ([#493](https://github.com/martadams89/seo-website-indexer/issues/493)) ([eec9b15](https://github.com/martadams89/seo-website-indexer/commit/eec9b15ea4a5914a54fca0f6bf3cf3687827cf9b))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vite to ^8.3.5 ([#492](https://github.com/martadams89/seo-website-indexer/issues/492)) ([bb81bb9](https://github.com/martadams89/seo-website-indexer/commit/bb81bb910a91f402d2239ee244c416bc1a405db0))
+
 ## [1.42.2](https://github.com/martadams89/seo-website-indexer/compare/v1.42.1...v1.42.2) (2026-10-20)
 
 
