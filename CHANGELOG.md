@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.3](https://github.com/martadams89/seo-website-indexer/compare/v1.43.2...v1.43.3) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **ads:** stop Local Services placeholder budgets inflating spend projections ([#500](https://github.com/martadams89/seo-website-indexer/issues/500)) ([3ce725f](https://github.com/martadams89/seo-website-indexer/commit/3ce725f8fb8006cffa26316fbdbcb1d95209eb43))
+
 ## [1.43.2](https://github.com/martadams89/seo-website-indexer/compare/v1.43.1...v1.43.2) (2026-10-21)
 
 
