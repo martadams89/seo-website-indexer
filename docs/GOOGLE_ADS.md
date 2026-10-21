@@ -8,6 +8,7 @@ SEO Website Indexer can report on and manage the Google Ads accounts of the clie
 - [How changes are made](#how-changes-are-made)
 - [Connect an AI assistant](#connect-an-ai-assistant)
 - [The AI routine](#the-ai-routine)
+- [GA4 alongside Google Ads](#ga4-alongside-google-ads)
 - [MCP tools](#mcp-tools)
 - [Google's rules for API access](#googles-rules-for-api-access)
 - [Troubleshooting](#troubleshooting)
@@ -175,7 +176,19 @@ Open **Google Ads → AI routine** and answer:
 2. Schedule the prompt at the chosen cadence — in the assistant's scheduled tasks or automations, or with cron on a server running an agent CLI. The page shows a crontab example for Claude Code (`claude -p`), Codex CLI (`codex exec`) and Gemini CLI (`gemini -p`); the CLI needs the server added and signed in, and permission to call its tools and web search without asking.
 3. Make sure the MCP server and web search are enabled for the task.
 
-Each run works client by client: brief and pacing → performance → audit and search terms → market and competitor research → changes through the change tools → `ads_record_routine_run`. Runs appear under **Routine log**, and anything outside the guardrails waits under **Approvals & history**.
+Each run works client by client: brief and pacing → performance (plus GA4, when the client has a linked property) → audit and search terms → market and competitor research → changes through the change tools → `ads_record_routine_run`. Runs appear under **Routine log**, and anything outside the guardrails waits under **Approvals & history**.
+
+## GA4 alongside Google Ads
+
+Link a GA4 property to a client, and the AI routine reads GA4 on every run next to the Google Ads numbers.
+
+1. Give a connected Google login read access to the property. In GA4, open **Admin → Property access management** and add the login with the **Viewer** role. Any login connected on the Accounts page works; the client's Google Ads login is tried first.
+2. Enable the **Google Analytics Data API** and **Google Analytics Admin API** in the Google Cloud project that owns your OAuth client. Ticking **Auto-configure Google APIs** when you connect enables both.
+3. On the **Google Ads** page, edit the client and enter the property ID under **Google Analytics 4**. It's the number in GA4 → Admin → Property details, for example `449058214`, and the picker lists the properties your logins can read. Saving runs a one-row report, so a wrong ID or a login without access fails at once. An assistant can do the same with `ads_link_ga4_property`.
+
+Each run then calls `ga4_ads_performance`. It returns GA4 sessions, engagement, key events and revenue from `google / cpc` traffic, by campaign and landing page, against the previous period. The routine compares them with Google Ads clicks and conversions and flags two problems: campaigns with clicks but no GA4 sessions (usually broken auto-tagging), and traffic that doesn't engage (usually the landing page). GA4 key events and Google Ads conversions are counted differently, so they won't match exactly. Watch for large gaps and diverging trends.
+
+Only the property ID is stored. The login that reads it is picked on each request from the logins shared with the client's workspace, so disconnecting and reconnecting a login doesn't break the link.
 
 ## MCP tools
 
@@ -211,6 +224,11 @@ Read tools need `mcp:read`; change tools need `ads:write`. `account` accepts the
 | `ads_recommendations` | Apply or dismiss recommendations. |
 | `ads_apply_change`, `ads_revert_change` | Apply a pending plan; propose a revert. |
 | `ads_record_routine_run` | Log a routine run for the dashboard and the next run. |
+| `ga4_list_properties` | GA4 properties each connected Google login can read, and the clients they're linked to. |
+| `ga4_get_metadata` | A property's dimensions and metrics, including custom definitions. |
+| `ga4_run_report` | Any GA4 report for a property ID or a client's linked property: dates, dimensions, metrics, filters, ordering. |
+| `ga4_ads_performance` | A client's paid-search traffic in GA4 by campaign and landing page, against the previous period. |
+| `ads_link_ga4_property` | Link or unlink a client's GA4 property after checking a login can read it. Needs `ads:write`. |
 
 ## Google's rules for API access
 

@@ -45,6 +45,9 @@ export interface AdsAccount {
   guardrails: AdsGuardrails;
   enabled: boolean;
   last_error: string | null;
+  /** Linked GA4 property the AI reads alongside this client. */
+  ga4_property_id?: string | null;
+  ga4_property_name?: string | null;
   pending_approvals: number;
   /** Its Google connection was disconnected; relink it from "Find and link client accounts". */
   connection_lost?: boolean;
@@ -75,6 +78,15 @@ export interface AdsSetup {
   clients_without_budget: number;
   steps: { google_connected: boolean; ads_scope: boolean; api_enabled: boolean; production_access: boolean; accounts_linked: boolean; budgets_set: boolean };
   ready: boolean;
+}
+
+export interface Ga4PropertiesResult {
+  logins: Array<{
+    google_login: string;
+    properties: Array<{ property_id: string; property_name: string; account_id: string; account_name: string }>;
+    error: string | null;
+    hint: string | null;
+  }>;
 }
 
 export interface DiscoveredCustomer {
@@ -214,11 +226,12 @@ const json = (body: unknown) => ({ body: JSON.stringify(body) });
 export const adsApi = {
   setup: (fresh = false) => apiFetch<AdsSetup>(`/api/ads/setup${fresh ? '?fresh=1' : ''}`),
   enableApi: (googleAccountId: string) => apiFetch<{ ok: boolean; project: string | null; message: string }>('/api/ads/setup/enable-api', { method: 'POST', ...json({ googleAccountId }) }),
+  ga4Properties: () => apiFetch<Ga4PropertiesResult>('/api/ads/ga4/properties'),
   discover: (googleAccountId?: string) => apiFetch<DiscoveryResult>(`/api/ads/discover${googleAccountId ? `?googleAccountId=${encodeURIComponent(googleAccountId)}` : ''}`),
   accounts: () => apiFetch<AdsAccount[]>('/api/ads/accounts'),
   link: (data: { googleAccountId: string; customerId: string; loginCustomerId?: string | null; monthlyBudget?: number | null }) =>
     apiFetch<AdsAccount>('/api/ads/accounts', { method: 'POST', ...json(data) }),
-  update: (id: string, data: { monthlyBudget?: number | null; brief?: AdsBrief; guardrails?: Partial<AdsGuardrails>; enabled?: boolean }) =>
+  update: (id: string, data: { monthlyBudget?: number | null; brief?: AdsBrief; guardrails?: Partial<AdsGuardrails>; enabled?: boolean; ga4PropertyId?: string | null }) =>
     apiFetch<AdsAccount>(`/api/ads/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', ...json(data) }),
   unlink: (id: string) => apiFetch<{ ok: boolean }>(`/api/ads/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   overview: (id: string, days: number, fresh = false) => apiFetch<AdsOverview>(`/api/ads/accounts/${encodeURIComponent(id)}/overview?days=${days}${fresh ? '&fresh=1' : ''}`),

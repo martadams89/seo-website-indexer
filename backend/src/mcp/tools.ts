@@ -28,6 +28,7 @@ import { getResults } from '../ai/citations.js';
 import { runIndexing, isRunning } from '../scheduler.js';
 import { type McpScope, type McpTokenAuth } from './tokens.js';
 import { ADS_TOOLS } from './ads-tools.js';
+import { GA4_TOOLS } from './ga4-tools.js';
 
 export interface McpContext {
   user: User;
@@ -349,7 +350,7 @@ export const TOOLS: ToolDef[] = [
 ];
 
 /** Every tool: the SEO tools above plus the Google Ads tools. */
-export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS];
+export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS, ...GA4_TOOLS];
 
 /** Tools this context is allowed to use, by scope. */
 export function toolsForContext(ctx: McpContext): ToolDef[] {

@@ -106,6 +106,9 @@ function clientBlock(account: AdsAccount, index: number): string {
   if (b.brand_voice) lines.push(`   - Brand voice: ${b.brand_voice}`);
   if (b.never_do) lines.push(`   - Never do: ${b.never_do}`);
   if (b.notes) lines.push(`   - Notes: ${b.notes}`);
+  lines.push(account.ga4_property_id
+    ? `   - GA4 property: ${account.ga4_property_id}${account.ga4_property_name ? ` (${account.ga4_property_name})` : ''}, read it with ga4_ads_performance`
+    : '   - GA4 property: not linked (if you can identify it with ga4_list_properties, link it with ads_link_ga4_property)');
   lines.push(`   - Guardrails (enforced by the server): ${account.guardrails.mode === 'read_only' ? 'read-only' : account.guardrails.mode === 'review' ? 'every change needs my approval' : `budget increases up to ${account.guardrails.max_budget_increase_pct}% and bid changes up to ±${account.guardrails.max_bid_change_pct}% per change apply automatically; projected spend may not exceed the monthly budget${account.guardrails.budget_tolerance_pct ? ` + ${account.guardrails.budget_tolerance_pct}%` : ''}`}`);
   return lines.join('\n');
 }
@@ -141,7 +144,7 @@ ${clients}
 
 ## Each run, for every client above
 1. Context: call ads_get_client_brief, then ads_budget_pacing. Read the last routine notes in the brief so you continue from where you left off, and check whether earlier changes that were waiting for approval have been decided (ads_list_changes).
-2. Performance: call ads_account_overview with days=${s.lookback_days} (and days=7 for the recent trend). Note what changed versus the previous period and why.
+2. Performance: call ads_account_overview with days=${s.lookback_days} (and days=7 for the recent trend). Note what changed versus the previous period and why. If the client has a GA4 property, call ga4_ads_performance with days=${s.lookback_days}: compare GA4 paid-search sessions, engagement and key events with Google Ads clicks and conversions per campaign, and flag campaigns with clicks but no GA4 sessions (tracking/auto-tagging problems) or high traffic with poor engagement (landing-page problems). Use ga4_run_report for anything deeper.
 3. Health: call ads_audit_account and ads_search_terms (withoutConversionsOnly=true). Use ads_search / ads_query (GAQL) for anything else you need — look up fields with ads_get_resource_metadata instead of guessing them.
 4. Market and competitors: ${RESEARCH_TEXT[s.research]}
 5. Decide on changes. Priorities for this client:

@@ -80,6 +80,9 @@ function publicAccount(acc: AdsAccount) {
     manager_customer_id: acc.login_customer_id ? formatCustomerId(acc.login_customer_id) : null,
     currency: acc.currency, time_zone: acc.time_zone, is_manager: acc.is_manager, test_account: acc.test_account,
     enabled: acc.enabled, monthly_budget: acc.monthly_budget, brief: acc.brief, guardrails: acc.guardrails,
+    ga4_property: acc.ga4_property_id
+      ? { property_id: acc.ga4_property_id, name: acc.ga4_property_name, read_with: 'ga4_ads_performance or ga4_run_report (account=…)' }
+      : null,
     last_error: acc.last_error,
   };
 }

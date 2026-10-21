@@ -8,6 +8,16 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261021_01_ads_ga4_property',
+    description: 'Link a GA4 property to each Google Ads client so the AI routine can read its analytics',
+    up(db) {
+      db.exec(`
+        ALTER TABLE ads_accounts ADD COLUMN ga4_property_id TEXT;
+        ALTER TABLE ads_accounts ADD COLUMN ga4_property_name TEXT;
+      `);
+    },
+  },
+  {
     id: '20261019_03_manual_index_requests',
     description: 'Track Search Console "Request indexing" clicks made by a person or a browser agent',
     up(db) {
