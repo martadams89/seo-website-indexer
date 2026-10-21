@@ -44,11 +44,14 @@ import { encrypt, decrypt } from '../utils/crypto.js';
 
 // ── OAuth Scopes ──────────────────────────────────────────────────────────────
 
+// Read-only GA4 access: reports (Data API) and property discovery (Admin API).
+export const GOOGLE_ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly';
+
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/webmasters',
   // Opt-in per site: Indexing API recrawl notifications for inspected pages.
   'https://www.googleapis.com/auth/indexing',
-  'https://www.googleapis.com/auth/analytics.readonly',
+  GOOGLE_ANALYTICS_SCOPE,
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
@@ -321,7 +324,7 @@ function projectFromClientId(clientId: string): string | null {
   return m ? m[1] : null;
 }
 
-const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'indexing.googleapis.com', 'analyticsdata.googleapis.com'];
+const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'indexing.googleapis.com', 'analyticsdata.googleapis.com', 'analyticsadmin.googleapis.com'];
 export const GOOGLE_ADS_SERVICE = 'googleads.googleapis.com';
 
 /**

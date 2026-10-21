@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Link2, Pencil, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { useToast } from '../AppContext';
-import { adsApi, errorMessage, money, type AdsAccount, type AdsBrief, type AdsGuardrails, type DiscoveryResult } from './api';
+import { adsApi, errorMessage, money, type AdsAccount, type AdsBrief, type AdsGuardrails, type DiscoveryResult, type Ga4PropertiesResult } from './api';
 import { GOALS, MODE_LABEL } from './constants';
 
 export function AdsClients({ accounts, canManage, reload, onOpen }: {
@@ -38,6 +38,7 @@ export function AdsClients({ accounts, canManage, reload, onOpen }: {
                     <strong>{a.name ?? 'Unnamed account'}</strong>
                     {a.test_account && <span className="badge badge-info">Test</span>}
                     {a.is_manager && <span className="badge badge-info">Manager</span>}
+                    {a.ga4_property_id && <span className="badge badge-ok" title={`GA4 ${a.ga4_property_id}${a.ga4_property_name ? ` · ${a.ga4_property_name}` : ''}`}>GA4</span>}
                     {!a.enabled && <span className="badge badge-warn">Paused in app</span>}
                     {a.connection_lost && (
                       <small className="ads-error-line">
@@ -151,7 +152,17 @@ export function EditClientModal({ account, canManage, onClose, onSaved }: { acco
   const [brief, setBrief] = useState<AdsBrief & { competitorsText: string }>({ ...account.brief, competitorsText: (account.brief.competitors ?? []).join('\n') });
   const [guard, setGuard] = useState<AdsGuardrails>(account.guardrails);
   const [enabled, setEnabled] = useState(account.enabled);
+  const [ga4, setGa4] = useState(account.ga4_property_id ?? '');
+  const [ga4Options, setGa4Options] = useState<Ga4PropertiesResult | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    adsApi.ga4Properties().then(r => { if (live) setGa4Options(r); }).catch(() => { if (live) setGa4Options({ logins: [] }); });
+    return () => { live = false; };
+  }, []);
+  const ga4Properties = (ga4Options?.logins ?? []).flatMap(l => l.properties);
+  const ga4Problems = (ga4Options?.logins ?? []).filter(l => l.error);
 
   async function save() {
     setBusy(true);
@@ -161,6 +172,7 @@ export function EditClientModal({ account, canManage, onClose, onSaved }: { acco
         monthlyBudget: num(budget),
         brief: { ...rest, competitors: competitorsText.split(/[\n,]/).map(s => s.trim()).filter(Boolean) },
         guardrails: guard, enabled,
+        ...(ga4.trim() !== (account.ga4_property_id ?? '') ? { ga4PropertyId: ga4.trim() || null } : {}),
       });
       toast('success', 'Client saved');
       await onSaved();
@@ -195,6 +207,25 @@ export function EditClientModal({ account, canManage, onClose, onSaved }: { acco
         <label>Brand voice<textarea rows={2} {...field('brand_voice')} /></label>
         <label>Never do<textarea rows={2} {...field('never_do')} placeholder="e.g. never bid on competitor brand names; no discount messaging" /></label>
         <label className="full">Notes<textarea rows={2} {...field('notes')} /></label>
+      </div>
+      <h3 className="ads-form-heading">Google Analytics 4</h3>
+      <div className="form-grid">
+        <label>GA4 property
+          <input className="input" list={`ga4-${account.id}`} value={ga4} disabled={!canManage} onChange={e => setGa4(e.target.value.replace(/^properties\//, ''))} placeholder="e.g. 449058214" />
+          <datalist id={`ga4-${account.id}`}>
+            {ga4Properties.map(p => <option key={p.property_id} value={p.property_id}>{`${p.property_name} · ${p.account_name}`}</option>)}
+          </datalist>
+          <small>
+            {account.ga4_property_name && ga4 === account.ga4_property_id ? `Linked: ${account.ga4_property_name}. ` : ''}
+            The AI reads this property's paid-search traffic on every routine run. A connected Google login needs Viewer access to it; it's checked when you save.
+          </small>
+        </label>
+        <div className="ads-hint">
+          {ga4Options === null ? 'Looking up the GA4 properties your Google logins can read…'
+            : ga4Properties.length ? `${ga4Properties.length} GA4 propert${ga4Properties.length === 1 ? 'y' : 'ies'} available. Start typing a name or ID.`
+              : 'No GA4 properties found for your connected Google logins. Enter the property ID from GA4 → Admin → Property details.'}
+          {ga4Problems.map(l => <div key={l.google_login} className="ads-error-line">{l.google_login}: {l.error}{l.hint ? ` ${l.hint}` : ''}</div>)}
+        </div>
       </div>
       <h3 className="ads-form-heading">Guardrails</h3>
       <div className="form-grid">

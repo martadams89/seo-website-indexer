@@ -14,6 +14,8 @@ import { applyChange, proposeRecommendations, rejectChange, revertChange } from 
 import { accountOverview, auditAccount, listRecommendations, searchTerms } from './insights.js';
 import { buildRoutinePrompt, DEFAULT_ROUTINE, FOCUS_AREAS, normalizeRoutine } from './routine-prompt.js';
 import { enableAdsApi, setupStatus, verifyAndLinkAccount } from './setup.js';
+import { analyticsLogins, Ga4Error, listGa4Properties } from '../analytics/ga4.js';
+import { linkGa4Property } from './ga4-link.js';
 import {
   getAdsAccount, getChange, healOrphanedAdsAccounts, isOrphanedAdsAccount, listAdsAccounts, listChanges, listRoutineRuns,
   unlinkAdsAccount, updateAdsAccount, type AdsAccount, type ChangeStatus,
@@ -41,7 +43,11 @@ const STATUS_BY_KIND: Record<string, number> = {
   NO_ADS_SCOPE: 409, NEEDS_REAUTH: 409, API_DISABLED: 409, ACCESS_LEVEL: 409, QUOTA: 429,
 };
 
-/** Wrap a handler so Google Ads errors come back as { error, kind, hint }. */
+const GA4_STATUS_BY_KIND: Record<string, number> = {
+  INVALID: 400, PERMISSION: 403, NOT_FOUND: 404, NO_LOGIN: 409, SCOPE: 409, API_DISABLED: 409, QUOTA: 429,
+};
+
+/** Wrap a handler so Google Ads and GA4 errors come back as { error, kind, hint }. */
 function handle<T>(fn: (req: FastifyRequest, reply: FastifyReply) => Promise<T> | T) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -49,6 +55,9 @@ function handle<T>(fn: (req: FastifyRequest, reply: FastifyReply) => Promise<T> 
     } catch (e) {
       if (e instanceof AdsApiError) {
         return reply.status(STATUS_BY_KIND[e.kind] ?? 502).send({ error: e.message, kind: e.kind, hint: e.hint ?? null, requestId: e.requestId ?? null });
+      }
+      if (e instanceof Ga4Error) {
+        return reply.status(GA4_STATUS_BY_KIND[e.kind] ?? 502).send({ error: e.message, kind: e.kind, hint: e.hint ?? null });
       }
       const status = (e as { statusCode?: number }).statusCode;
       if (status) return reply.status(status).send({ error: (e as Error).message });
@@ -101,6 +110,20 @@ export function registerAdsRoutes(app: FastifyInstance): void {
     return { connections: results };
   }));
 
+  // GA4 properties the workspace's Google logins can read (for the client's GA4 picker).
+  app.get('/api/ads/ga4/properties', handle(async (req) => {
+    const results = [];
+    for (const login of analyticsLogins([workspace(req)])) {
+      try {
+        results.push({ google_login: login.email ?? login.id, properties: await listGa4Properties(login), error: null, hint: null });
+      } catch (e) {
+        const err = e as Ga4Error;
+        results.push({ google_login: login.email ?? login.id, properties: [], error: err.message, hint: err.hint ?? null });
+      }
+    }
+    return { logins: results };
+  }));
+
   // ── Client accounts ────────────────────────────────────────────────────────
   app.get('/api/ads/accounts', handle(async (req) => {
     healOrphanedAdsAccounts(workspace(req));
@@ -127,9 +150,16 @@ export function registerAdsRoutes(app: FastifyInstance): void {
   app.patch('/api/ads/accounts/:id', handle(async (req) => {
     const acc = accountInWorkspace(req, (req.params as { id: string }).id);
     assertCanChangeAds(user(req), acc.workspace_id);
-    const body = (req.body ?? {}) as { monthlyBudget?: number | null; brief?: unknown; guardrails?: unknown; enabled?: boolean };
+    const body = (req.body ?? {}) as { monthlyBudget?: number | null; brief?: unknown; guardrails?: unknown; enabled?: boolean; ga4PropertyId?: string | null };
     const monthlyBudget = body.monthlyBudget === undefined ? undefined : body.monthlyBudget === null ? null : Number(body.monthlyBudget);
+    // Link the GA4 property first: it is verified against Google and may fail,
+    // and nothing else should be saved if it does.
+    const ga4Changed = body.ga4PropertyId !== undefined && (body.ga4PropertyId || null) !== acc.ga4_property_id;
+    if (ga4Changed) await linkGa4Property(acc, body.ga4PropertyId);
     const updated = updateAdsAccount(acc.id, { monthlyBudget, brief: body.brief, guardrails: body.guardrails, enabled: body.enabled });
+    if (ga4Changed) {
+      recordAuditEvent({ actorUserId: actor(req).id, workspaceId: acc.workspace_id, action: 'google_ads.ga4_linked', detail: { accountId: acc.id, ga4PropertyId: updated?.ga4_property_id ?? null } });
+    }
     if (body.guardrails !== undefined || monthlyBudget !== undefined) {
       recordAuditEvent({ actorUserId: actor(req).id, workspaceId: acc.workspace_id, action: 'google_ads.guardrails_updated', detail: { accountId: acc.id, monthlyBudget: updated?.monthly_budget, guardrails: updated?.guardrails } });
     }

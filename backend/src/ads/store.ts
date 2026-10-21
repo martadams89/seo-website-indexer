@@ -75,6 +75,9 @@ export interface AdsAccount {
   enabled: boolean;
   last_checked_at: string | null;
   last_error: string | null;
+  /** Linked GA4 property (numeric ID) the AI reads alongside this Ads account. */
+  ga4_property_id: string | null;
+  ga4_property_name: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -199,6 +202,8 @@ function rowToAccount(row: Record<string, unknown>): AdsAccount {
     enabled: !!row.enabled,
     last_checked_at: (row.last_checked_at as string) ?? null,
     last_error: (row.last_error as string) ?? null,
+    ga4_property_id: (row.ga4_property_id as string) ?? null,
+    ga4_property_name: (row.ga4_property_name as string) ?? null,
     created_by: (row.created_by as string) ?? null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -282,6 +287,13 @@ export function updateAdsAccount(id: string, patch: {
   getDb().prepare(`UPDATE ads_accounts SET monthly_budget=?, brief=?, guardrails=?, enabled=?, name=?, updated_at=datetime('now') WHERE id=?`)
     .run(monthly, JSON.stringify(brief), JSON.stringify(guardrails), (patch.enabled ?? current.enabled) ? 1 : 0,
       patch.name === undefined ? current.name : patch.name, id);
+  return getAdsAccount(id);
+}
+
+/** Link (or with null, unlink) the GA4 property this Ads client reads. Validation is the caller's job. */
+export function setAdsGa4Property(id: string, propertyId: string | null, propertyName: string | null = null): AdsAccount | null {
+  getDb().prepare("UPDATE ads_accounts SET ga4_property_id=?, ga4_property_name=?, updated_at=datetime('now') WHERE id=?")
+    .run(propertyId, propertyId ? propertyName : null, id);
   return getAdsAccount(id);
 }
 
