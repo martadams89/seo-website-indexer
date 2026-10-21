@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.2](https://github.com/martadams89/seo-website-indexer/compare/v1.43.1...v1.43.2) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **ads:** relink Ads accounts whose Google connection was disconnected ([#498](https://github.com/martadams89/seo-website-indexer/issues/498)) ([f44633e](https://github.com/martadams89/seo-website-indexer/commit/f44633ee2b11e255a55f04020771ca592c0b0190))
+
 ## [1.43.1](https://github.com/martadams89/seo-website-indexer/compare/v1.43.0...v1.43.1) (2026-10-21)
 
 
