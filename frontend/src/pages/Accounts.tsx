@@ -334,8 +334,11 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                   </div>
                   {acc.refresh_token_expiry && (
                     <div style={{ fontSize: 12, color: 'var(--warn)', marginTop: 4 }}>
-                      Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}.
-                      Publish the OAuth app or make it Internal/Trusted before reconnecting.
+                      Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}, so this
+                      connection will stop working then. This comes from your OAuth app, not Auto-configure: its consent screen is still in
+                      Testing. In Google Cloud Console → <strong>Google Auth Platform → Audience</strong>, set the user type to
+                      <strong> Internal</strong> (Google Workspace) or click <strong>Publish app</strong>, then Reconnect.
+                      Reconnecting alone won't remove this.
                     </div>
                   )}
                   {acc.last_refreshed_at && !acc.needs_reauth && (
@@ -348,8 +351,9 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                       This grant includes broad Google Cloud access, so a Workspace Google Cloud session-control policy can force
                       reauthentication every few hours. To keep it connected <strong>and</strong> keep the Cloud scope: in Google Admin →
                       Security → Access and data control → <strong>Google Cloud session control</strong>, lengthen the reauthentication
-                      frequency or add this app to Trusted apps and enable <strong>“Exempt trusted apps”</strong>. Otherwise reconnect with
-                      Auto-configure disabled to drop the Cloud scope entirely.
+                      frequency or add this app to Trusted apps and enable <strong>“Exempt trusted apps”</strong>. Otherwise click
+                      <strong> Reconnect</strong> with Auto-configure unticked to drop the Cloud scope. If it is still listed afterwards,
+                      remove this app at myaccount.google.com/connections and connect again.
                     </div>
                   )}
                   {!!acc.needs_reauth && (

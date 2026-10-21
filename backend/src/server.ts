@@ -82,6 +82,7 @@ import {
   disconnectGoogleAccount,
   createGoogleOAuthAuthorization,
   consumeGoogleOAuthState,
+  GOOGLE_ADS_SCOPE,
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -1409,7 +1410,9 @@ app.post('/api/auth/google/start', async (req, reply) => {
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
-      ads: !!ads,
+      // A reconnect must never silently drop Google Ads: carry it forward when
+      // the existing grant has it (the URL no longer uses incremental auth).
+      ads: !!ads || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_ADS_SCOPE),
       clientId: reconnect?.client_id ?? clientId,
       clientSecret: reconnect?.client_secret ?? clientSecret,
       loginHint: reconnect?.email ?? null,

@@ -150,9 +150,12 @@ export function createGoogleOAuthAuthorization(opts: {
     scope: scopes,
     access_type: 'offline',
     prompt: 'select_account consent',
-    // Incremental authorization: re-consenting an existing connection (for
-    // example to add Google Ads) keeps everything it already granted.
-    include_granted_scopes: 'true',
+    // No include_granted_scopes: every scope the app needs is requested
+    // explicitly above (reconnects carry Ads forward), so incremental auth
+    // would only add scopes the user did NOT ask for this time. In particular
+    // it re-attached a previously granted cloud-platform scope even with
+    // Auto-configure unticked, keeping the grant under Workspace Google Cloud
+    // session control (forced reauth every few hours).
     state,
   });
   if (opts.loginHint) params.set('login_hint', opts.loginHint);
