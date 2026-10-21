@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.1](https://github.com/martadams89/seo-website-indexer/compare/v1.43.0...v1.43.1) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** stop reconnects re-attaching an old Google Cloud scope ([#496](https://github.com/martadams89/seo-website-indexer/issues/496)) ([6bca2b2](https://github.com/martadams89/seo-website-indexer/commit/6bca2b248654b5f8745b5e4cc1ceb19abc21ac19))
+
 ## [1.43.0](https://github.com/martadams89/seo-website-indexer/compare/v1.42.2...v1.43.0) (2026-10-21)
 
 
