@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.0](https://github.com/martadams89/seo-website-indexer/compare/v1.43.3...v1.44.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **ga4:** GA4 reporting tools and GA4 linked to Google Ads clients ([#502](https://github.com/martadams89/seo-website-indexer/issues/502)) ([70b36d9](https://github.com/martadams89/seo-website-indexer/commit/70b36d91ac324b9a964acfe61bb0525ff230ea6d))
+
 ## [1.43.3](https://github.com/martadams89/seo-website-indexer/compare/v1.43.2...v1.43.3) (2026-10-21)
 
 
