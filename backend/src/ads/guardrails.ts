@@ -66,7 +66,28 @@ export function inspectOperations(operations: unknown[]): { inspected: Inspected
 
 // ── Account state the rules need ─────────────────────────────────────────────
 
-export interface CampaignState { status: string; budget: string | null; budgetMicros: number }
+export interface CampaignState {
+  status: string;
+  budget: string | null;
+  budgetMicros: number;
+  /** campaign.advertising_channel_type (SEARCH, LOCAL_SERVICES, …) when known. */
+  channel?: string | null;
+}
+
+/**
+ * Channels billed per lead whose campaign budget is a Google placeholder rather
+ * than a spending commitment. Local Services campaigns report a large system
+ * budget (e.g. 16,000/day) while spending a small fraction of it, so their
+ * budget must never be added to daily totals or projected across the month.
+ * Their real cost is in month-to-date spend and is projected at its run rate.
+ */
+export const PER_LEAD_CHANNELS = new Set(['LOCAL_SERVICES']);
+export const isPerLeadChannel = (channel?: string | null) => !!channel && PER_LEAD_CHANNELS.has(channel);
+
+/** Average daily spend so far this month (micros), with today counted as a day. */
+export function perLeadDailyRunRate(monthToDateMicros: number, dayOfMonth: number): number {
+  return monthToDateMicros > 0 ? monthToDateMicros / Math.max(1, dayOfMonth) : 0;
+}
 
 export interface AccountState {
   /** campaign resource name → status + budget. */
@@ -79,10 +100,12 @@ export interface AccountState {
   adGroupBids: Record<string, number>;
   /** Spend so far this calendar month in the account's time zone (micros). */
   monthToDateMicros: number;
+  /** The part of monthToDateMicros spent by per-lead campaigns (Local Services). */
+  perLeadMonthToDateMicros?: number;
 }
 
 export function emptyState(): AccountState {
-  return { campaigns: {}, budgets: {}, criterionBids: {}, adGroupBids: {}, monthToDateMicros: 0 };
+  return { campaigns: {}, budgets: {}, criterionBids: {}, adGroupBids: {}, monthToDateMicros: 0, perLeadMonthToDateMicros: 0 };
 }
 
 /** Which resources the analyser needs current values for. */
@@ -130,6 +153,8 @@ export interface ChangeImpact {
   month_to_date_spend: number;
   monthly_budget: number | null;
   remaining_days: number;
+  /** Run-rate daily spend of enabled per-lead campaigns (Local Services), included in the projection. */
+  per_lead_daily_spend: number;
   projected_month_spend: number;
   budget_changes: Array<{ resource: string; before: number | null; after: number }>;
   bid_changes: Array<{ resource: string; before: number | null; after: number }>;
@@ -151,7 +176,9 @@ const pct = (before: number, after: number) => before > 0 ? ((after - before) / 
  *   • guarded lets a change through only if every rule passes.
  * Projected spend uses Google's monthly charging limit (daily budget × days):
  * month-to-date spend plus the enabled campaigns' daily budgets for every
- * remaining day, today included.
+ * remaining day, today included. Per-lead campaigns (Local Services) are the
+ * exception: their budget is a placeholder, so they are projected at their
+ * actual daily run rate this month instead.
  */
 export function evaluateChange(input: {
   operations: InspectedOperation[];
@@ -167,13 +194,13 @@ export function evaluateChange(input: {
   const add = (severity: GuardrailFinding['severity'], code: string, message: string) => {
     if (!findings.some(f => f.code === code && f.message === message)) findings.push({ severity, code, message });
   };
-  const { remainingDays } = monthPosition(input.now ?? new Date(), input.timeZone);
+  const { day, remainingDays } = monthPosition(input.now ?? new Date(), input.timeZone);
 
   // Daily budget currently committed by enabled campaigns (shared budgets counted once).
   const enabledBudgets = (campaigns: Record<string, CampaignState>, budgets: Record<string, number>) => {
     const seen = new Map<string, number>();
     for (const [name, c] of Object.entries(campaigns)) {
-      if (c.status !== 'ENABLED') continue;
+      if (c.status !== 'ENABLED' || isPerLeadChannel(c.channel)) continue;
       const key = c.budget ?? `campaign:${name}`;
       seen.set(key, c.budget && budgets[c.budget] !== undefined ? budgets[c.budget] : c.budgetMicros);
     }
@@ -190,6 +217,7 @@ export function evaluateChange(input: {
     month_to_date_spend: units(state.monthToDateMicros),
     monthly_budget: input.monthlyBudget,
     remaining_days: remainingDays,
+    per_lead_daily_spend: 0,
     projected_month_spend: 0,
     budget_changes: [], bid_changes: [], status_changes: [],
   };
@@ -273,7 +301,9 @@ export function evaluateChange(input: {
 
   impact.daily_budget_before = units(enabledBudgets(state.campaigns, beforeBudgets));
   impact.daily_budget_after = units(enabledBudgets(afterCampaigns, afterBudgets));
-  impact.projected_month_spend = Math.round((impact.month_to_date_spend + impact.daily_budget_after * remainingDays) * 100) / 100;
+  const perLeadEnabled = Object.values(afterCampaigns).some(c => c.status === 'ENABLED' && isPerLeadChannel(c.channel));
+  impact.per_lead_daily_spend = perLeadEnabled ? units(perLeadDailyRunRate(state.perLeadMonthToDateMicros ?? 0, day)) : 0;
+  impact.projected_month_spend = Math.round((impact.month_to_date_spend + (impact.daily_budget_after + impact.per_lead_daily_spend) * remainingDays) * 100) / 100;
 
   const increasesSpend = impact.daily_budget_after > impact.daily_budget_before + 0.001;
   if (increasesSpend) {

@@ -68,7 +68,7 @@ export function AdsChanges({ accounts, canManage, highlight, reload }: { account
                 <ul className="ads-reasons">{change.findings.filter(f => f.severity !== 'info').map(f => <li key={f.code + f.message} className={f.severity}>{f.message}</li>)}</ul>
               )}
               {(impact.daily_budget_before !== undefined && impact.daily_budget_before !== impact.daily_budget_after) && (
-                <p className="ads-impact">Daily budgets {money(impact.daily_budget_before, cur)} → <b>{money(impact.daily_budget_after, cur)}</b> · projected month {money(impact.projected_month_spend, cur)}{impact.monthly_budget ? ` of ${money(impact.monthly_budget, cur)}` : ''}</p>
+                <p className="ads-impact">Daily budgets {money(impact.daily_budget_before, cur)} → <b>{money(impact.daily_budget_after, cur)}</b>{impact.per_lead_daily_spend ? ` · Local Services ~${money(impact.per_lead_daily_spend, cur)}/day (per lead)` : ''} · projected month {money(impact.projected_month_spend, cur)}{impact.monthly_budget ? ` of ${money(impact.monthly_budget, cur)}` : ''}</p>
               )}
               {change.error && <p className="ads-error-line">{change.error}</p>}
               <details><summary><Code2 size={13} /> {change.operations.length} operation{change.operations.length === 1 ? '' : 's'}</summary><pre>{JSON.stringify(change.operations, null, 2)}</pre></details>

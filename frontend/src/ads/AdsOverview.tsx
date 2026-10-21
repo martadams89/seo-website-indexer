@@ -77,7 +77,7 @@ export function AdsOverviewView({ account }: { account: AdsAccount }) {
                     <tr key={row.id}>
                       <td><strong>{row.name}</strong><small className="text-dim">{[row.channel, row.bidding].filter(Boolean).join(' · ').toLowerCase().replaceAll('_', ' ')}</small></td>
                       <td><span className={`badge badge-${row.status === 'ENABLED' ? 'ok' : 'info'}`}>{row.status.toLowerCase()}</span></td>
-                      <td>{money(row.daily_budget, c)}{row.budget_shared && <small className="text-dim"> shared</small>}</td>
+                      <td>{row.channel === 'LOCAL_SERVICES' ? <span className="text-dim" title="Google sets a placeholder budget for Local Services; it is billed per lead.">Per lead</span> : money(row.daily_budget, c)}{row.budget_shared && <small className="text-dim"> shared</small>}</td>
                       <td>{money(row.kpis.cost, c)}</td>
                       <td>{row.kpis.conversions}</td>
                       <td>{money(row.kpis.cpa, c)}</td>
@@ -174,6 +174,7 @@ export function PacingCard({ pacing, currency }: { pacing: Pacing; currency: str
         <div><dt>Monthly budget</dt><dd>{money(budget, currency)}</dd></div>
         <div><dt>Projected</dt><dd>{money(pacing.projected_month_spend, currency)}</dd></div>
         <div><dt>Daily budgets now</dt><dd>{money(pacing.enabled_daily_budgets, currency)}</dd></div>
+        {!!pacing.per_lead_daily_spend && <div><dt>Local Services (per lead)</dt><dd>~{money(pacing.per_lead_daily_spend, currency)}/day</dd></div>}
         <div><dt>Suggested daily total</dt><dd>{money(pacing.recommended_daily_budget_total, currency)}</dd></div>
         <div><dt>Days left</dt><dd>{pacing.remaining_days_including_today}</dd></div>
       </dl>

@@ -111,6 +111,8 @@ export interface Pacing {
   days_in_month: number;
   remaining_days_including_today: number;
   enabled_daily_budgets: number;
+  /** Local Services run rate (billed per lead); its budget is excluded from enabled_daily_budgets. */
+  per_lead_daily_spend?: number;
   average_daily_spend_last_7_days: number;
   projected_month_spend: number;
   recommended_daily_budget_total: number | null;
@@ -163,7 +165,7 @@ export interface AdsChange {
   impact: {
     currency?: string | null;
     daily_budget_before?: number; daily_budget_after?: number; month_to_date_spend?: number; monthly_budget?: number | null;
-    remaining_days?: number; projected_month_spend?: number;
+    remaining_days?: number; projected_month_spend?: number; per_lead_daily_spend?: number;
     budget_changes?: Array<{ resource: string; before: number | null; after: number }>;
     bid_changes?: Array<{ resource: string; before: number | null; after: number }>;
     status_changes?: Array<{ resource: string; before: string | null; after: string }>;
