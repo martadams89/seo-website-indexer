@@ -153,6 +153,7 @@ import { registerDiscoveryRoutes } from './platform/discovery-routes.js';
 import { registerPlatformRoutes } from './platform/routes.js';
 import { registerPlaybookRoutes } from './platform/playbook-routes.js';
 import { registerMcpProtocolRoute } from './mcp/http.js';
+import { healOrphanedAdsAccounts } from './ads/store.js';
 import { registerMcpOAuthRoutes, registerMcpOAuthApiRoutes } from './mcp/oauth.js';
 import { registerAdsRoutes } from './ads/routes.js';
 import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
@@ -1460,6 +1461,9 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   try {
     await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
       { clientId: pending.clientId, clientSecret: pending.clientSecret });
+    // Reconnecting after a Disconnect leaves Ads accounts pointing at nothing;
+    // re-attach them to this login straight away when that's unambiguous.
+    try { healOrphanedAdsAccounts(pending.workspaceId); } catch (e) { req.log.warn({ err: e }, 'Ads relink after Google connect failed'); }
     const openerOrigin = new URL(pending.redirectUri).origin;
     return reply.type('text/html').send(`
       <!DOCTYPE html>
