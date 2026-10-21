@@ -57,6 +57,7 @@ import {
 import { emitLog, subscribeToLogs } from './utils/logger.js';
 import { fetchAllSitemaps, filterChangedEntries, isNonHtmlUrl, type SitemapEntry } from './indexer/sitemap.js';
 import { submitSitemapToGSC, inspectGoogleUrl, listGSCSitemaps } from './indexer/google.js';
+import { proactivelyRefreshGoogleTokens } from './auth/google-oauth.js';
 import {
   inspectionFinding,
   INSPECTION_FINDING_CODES,
@@ -133,6 +134,7 @@ interface ActiveRun { runId: string; workspaceId: string; stopRequested: boolean
 const _activeRuns = new Map<string, ActiveRun>(); // keyed by workspaceId
 let _scheduledTask: ReturnType<typeof cron.schedule> | null = null;
 let _platformTask: ReturnType<typeof cron.schedule> | null = null;
+let _tokenKeepAliveTask: ReturnType<typeof cron.schedule> | null = null;
 
 /** Is a run active? For a specific workspace, or (no arg) anywhere. */
 export function isRunning(workspaceId?: string | null): boolean {
@@ -1439,6 +1441,20 @@ export function startScheduler(): void {
     catch (error) { console.error('[platform] Automation cycle failed:', error instanceof Error ? error.message : error); }
   });
 
+  // Proactively keep Google access tokens warm so API calls never block on a
+  // refresh and a dead grant is surfaced (needs_reauth) within minutes instead
+  // of at the next indexing run. Only refreshes tokens near expiry; skips
+  // accounts already flagged for reconnection.
+  if (_tokenKeepAliveTask) _tokenKeepAliveTask.stop();
+  _tokenKeepAliveTask = cron.schedule('*/15 * * * *', async () => {
+    try {
+      const r = await proactivelyRefreshGoogleTokens();
+      if (r.refreshed || r.failed) console.log(`[tokens] keep-alive: refreshed ${r.refreshed}, failed ${r.failed}, skipped ${r.skipped}`);
+    } catch (error) {
+      console.error('[tokens] keep-alive cycle failed:', error instanceof Error ? error.message : error);
+    }
+  });
+
   console.log(`[scheduler] Started — schedule: "${cronExpr}"`);
 }
 
@@ -1451,6 +1467,10 @@ export function stopScheduler(): void {
   if (_platformTask) {
     _platformTask.stop();
     _platformTask = null;
+  }
+  if (_tokenKeepAliveTask) {
+    _tokenKeepAliveTask.stop();
+    _tokenKeepAliveTask = null;
   }
 }
 

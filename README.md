@@ -134,6 +134,17 @@ Workspace-specific API keys override any platform default set by a super-admin. 
 
 See the [integration permission and setup guide](docs/INTEGRATIONS.md) for the exact OAuth scopes, provider roles, token permissions, callback URLs, value locations and troubleshooting steps for every service in this table. The same minimum-access guide is available from each connection modal in the dashboard.
 
+### Why does my Google connection keep expiring?
+
+Once connected, the app keeps a Google account signed in indefinitely: it stores an offline refresh token, refreshes the access token automatically, and a background keep-alive task refreshes tokens shortly before they expire. You should only ever OAuth once. If Google **forces you to reconnect every few hours or days**, Google itself is expiring the grant — no app setting can override that. There are two causes:
+
+- **Google Workspace (business) account — reauthentication every few hours** (the refresh fails with `invalid_grant` / `invalid_rapt`). Your Workspace's **Google Cloud session control** policy is expiring the session, and the connection is subject to it only because it carries a Google Cloud scope (the optional "Auto-configure Google APIs" box, which requests `cloud-platform`). Fix it one of two ways:
+  - **Keep the Cloud scope:** in [Google Admin console](https://admin.google.com) → **Security → Access and data control → Google Cloud session control**, set the reauthentication frequency longer (max 24h) or to never, **or** add this app under **Apps access control → Trusted apps** and tick **"Exempt trusted apps"** in the Cloud session control setting. ([Google's guide](https://support.google.com/a/answer/9368756).)
+  - **Drop the Cloud scope:** reconnect the account on the Accounts page with **"Auto-configure Google APIs" unchecked**. Search Console, Analytics and the Indexing API all work without it, and the connection then leaves Cloud session control entirely.
+- **Personal Gmail — reconnect every 7 days:** your OAuth consent screen in Google Cloud Console is still in **"Testing"**, so Google issues refresh tokens that expire after 7 days. Set the consent screen to **"In production"** (publish it), or for a Workspace-owned client make it **Internal**.
+
+The Accounts page shows the exact Google error and the matching fix on any account that needs reconnecting.
+
 ## How indexing works
 
 Each scheduled run reads a site's configured sitemap and any additional `Sitemap:` entries in `robots.txt`. It compares the current URLs and `lastmod` values with the previous run, then submits only new or changed content where the receiving service supports it.

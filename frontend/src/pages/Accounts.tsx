@@ -345,14 +345,20 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                   )}
                   {acc.granted_scopes?.split(' ').includes('https://www.googleapis.com/auth/cloud-platform') && (
                     <div style={{ fontSize: 12, color: 'var(--warn)', marginTop: 3 }}>
-                      This grant includes broad Google Cloud access and may be subject to your Workspace session-control policy.
-                      Revoke the app in Google Account connections, then reconnect with Auto-configure disabled if periodic reauthentication continues.
+                      This grant includes broad Google Cloud access, so a Workspace Google Cloud session-control policy can force
+                      reauthentication every few hours. To keep it connected <strong>and</strong> keep the Cloud scope: in Google Admin →
+                      Security → Access and data control → <strong>Google Cloud session control</strong>, lengthen the reauthentication
+                      frequency or add this app to Trusted apps and enable <strong>“Exempt trusted apps”</strong>. Otherwise reconnect with
+                      Auto-configure disabled to drop the Cloud scope entirely.
                     </div>
                   )}
                   {!!acc.needs_reauth && (
                     <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 4 }}>
                       Its Google token can no longer be refreshed (revoked or a Workspace reauth policy). Click <strong>Reconnect</strong> to re-authorise — it reuses this account's credentials, so no need to disconnect or re-enter your client ID/secret.
                       {acc.last_refresh_error && <><br />Google response: <code>{acc.last_refresh_error}</code></>}
+                      {/rapt|reauth/i.test(acc.last_refresh_error ?? '') && (
+                        <><br />This is your Workspace’s Google Cloud session-control policy. To stop it recurring, lengthen the reauth window or exempt this app in Google Admin → Security → Access and data control → <strong>Google Cloud session control</strong> — or reconnect with Auto-configure disabled.</>
+                      )}
                     </div>
                   )}
                 </div>

@@ -409,7 +409,7 @@ async function refreshAccountToken(account: GoogleAccount): Promise<string> {
     throw new Error(
       `Token refresh failed for ${account.email || 'account'} (${data.error ?? 'unknown'}${data.error_subtype ? `/${data.error_subtype}` : ''}${data.error_description ? `: ${data.error_description}` : ''}). ` +
       (isReauth
-        ? 'Your Google Workspace requires periodic re-authentication (reauth policy). Please reconnect this account on the Accounts page — leaving "Auto-configure Google APIs" unchecked avoids this recurring for managed accounts.'
+        ? 'Your Google Workspace enforces a Google Cloud session-control reauthentication policy, so Google expires this connection every few hours. Please reconnect this account on the Accounts page. To stop it recurring, in Google Admin → Security → Access and data control → Google Cloud session control, lengthen the reauthentication frequency or add this app to Trusted apps and enable "Exempt trusted apps" — or reconnect with "Auto-configure Google APIs" unchecked so the connection no longer carries a Google Cloud scope.'
         : isInvalidGrant
           ? 'Refresh token has been revoked or expired. Please reconnect this account on the Accounts page.'
           : 'Please re-connect this account on the Google Accounts tab.')
@@ -483,6 +483,37 @@ async function refreshAccountTokenWithLock(account: GoogleAccount): Promise<stri
   } finally {
     if (acquired) releaseGoogleTokenLock(account.id, holder);
   }
+}
+
+// ── Proactive keep-alive ──────────────────────────────────────────────────────
+
+/**
+ * Refresh every healthy account whose access token is at (or within `windowMs`
+ * of) expiry, ahead of demand. Run on a timer by the scheduler so:
+ *   • API calls always find a warm token (no refresh latency mid-request), and
+ *   • the refresh token is exercised regularly (it can never lapse from the
+ *     ~6-month inactivity rule), and a grant Google has killed is detected and
+ *     flagged needs_reauth immediately — the connection self-heals or surfaces
+ *     a precise reconnect prompt without waiting for the next indexing run.
+ * Accounts already flagged needs_reauth are skipped (their token is dead until
+ * the user reconnects — re-POSTing it would just hammer Google).
+ */
+export async function proactivelyRefreshGoogleTokens(windowMs = 15 * 60_000): Promise<{ refreshed: number; failed: number; skipped: number }> {
+  const now = Date.now();
+  let refreshed = 0, failed = 0, skipped = 0;
+  for (const account of getAllGoogleAccounts()) {
+    if (account.needs_reauth) { skipped++; continue; }
+    const expiresAt = account.token_expiry ? new Date(account.token_expiry).getTime() : 0;
+    if (expiresAt > now + windowMs) { skipped++; continue; } // still comfortably valid
+    try {
+      await refreshAccountTokenWithLock(account);
+      refreshed++;
+    } catch {
+      // refreshAccountToken already persisted last_refresh_error / needs_reauth.
+      failed++;
+    }
+  }
+  return { refreshed, failed, skipped };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
