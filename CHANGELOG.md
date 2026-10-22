@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.44.1](https://github.com/martadams89/seo-website-indexer/compare/v1.44.0...v1.44.1) (2026-10-22)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.7 ([#505](https://github.com/martadams89/seo-website-indexer/issues/505)) ([bf44de4](https://github.com/martadams89/seo-website-indexer/commit/bf44de443ec43d5dab1a6424f969acc13fbbca32))
+* **deps:** update dependency nodemailer to ^10.2.0 ([#506](https://github.com/martadams89/seo-website-indexer/issues/506)) ([fd25629](https://github.com/martadams89/seo-website-indexer/commit/fd256290d3157b12a32fee29bc1090f58b458c16))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v24.22.1 ([#504](https://github.com/martadams89/seo-website-indexer/issues/504)) ([eeb7c89](https://github.com/martadams89/seo-website-indexer/commit/eeb7c892c2964fb5a0d003478ed5cd6161e408d8))
+
 ## [1.44.0](https://github.com/martadams89/seo-website-indexer/compare/v1.43.3...v1.44.0) (2026-10-21)
 
 
