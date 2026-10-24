@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.3](https://github.com/martadams89/seo-website-indexer/compare/v1.44.2...v1.44.3) (2026-10-24)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @modelcontextprotocol/sdk to ^1.32.2 ([#510](https://github.com/martadams89/seo-website-indexer/issues/510)) ([717f605](https://github.com/martadams89/seo-website-indexer/commit/717f605e1ff43ba45cbb07134ea94acf8db0a8d5))
+
 ## [1.44.2](https://github.com/martadams89/seo-website-indexer/compare/v1.44.1...v1.44.2) (2026-10-23)
 
 
