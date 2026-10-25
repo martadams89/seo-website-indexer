@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.45.1](https://github.com/martadams89/seo-website-indexer/compare/v1.45.0...v1.45.1) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* let a new workspace skip Google setup or reuse an existing Google account ([#514](https://github.com/martadams89/seo-website-indexer/issues/514)) ([d47f4cb](https://github.com/martadams89/seo-website-indexer/commit/d47f4cb0170d90e5fadca63e2f40dfa0d28694e1))
+
 ## [1.45.0](https://github.com/martadams89/seo-website-indexer/compare/v1.44.3...v1.45.0) (2026-10-25)
 
 
