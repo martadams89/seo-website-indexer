@@ -84,6 +84,7 @@ import {
   consumeGoogleOAuthState,
   GOOGLE_ADS_SCOPE,
   GOOGLE_BUSINESS_SCOPE,
+  WEBMASTERS_SCOPE,
   createApiEnableAuthorization,
   exchangeCodeForAccessToken,
   enableRequiredApis,
@@ -1413,8 +1414,10 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads, business } = (req.body ?? {}) as {
+  const { clientId, clientSecret, autoSetup, accountId, ads, business, businessOnly } = (req.body ?? {}) as {
     clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
+    /** true: ask only for Business Profile. false: full scopes. Omitted: a reconnect keeps what the connection had. */
+    businessOnly?: boolean;
   };
   let reconnect: ReturnType<typeof getGoogleAccountById> = null;
   if (accountId) {
@@ -1424,12 +1427,15 @@ app.post('/api/auth/google/start', async (req, reply) => {
     }
   }
   const origin = browserOrigin(req);
+  const granted = reconnect?.granted_scopes?.split(' ').filter(Boolean) ?? [];
+  const keepBusinessOnly = granted.length > 0 && granted.includes(GOOGLE_BUSINESS_SCOPE) && !granted.includes(WEBMASTERS_SCOPE);
   try {
     const authorizationUrl = createGoogleOAuthAuthorization({
       userId: user.id,
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
+      businessOnly: businessOnly ?? (!!reconnect && keepBusinessOnly),
       // A reconnect must never silently drop Google Ads or Business Profile:
       // carry them forward when the existing grant has them (the URL no
       // longer uses incremental auth).

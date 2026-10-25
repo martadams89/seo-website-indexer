@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import { getDb, getGoogleAccountsForWorkspace } from '../db/database.js';
 import { normalizeReviewBrief, normalizeRules, type ReplyFinding, type ReplyRules, type ReviewBrief } from './rules.js';
+import { normalizeProfileRules, type ProfileRules } from './profile-rules.js';
 
 // ── Locations ────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,11 @@ export interface ReviewLocation {
   site_id: string | null;
   brief: ReviewBrief;
   rules: ReplyRules;
+  /** What AI assistants may change on the profile, posts and photos. */
+  profile_rules: ProfileRules;
+  /** The last check of fields Google (or the public) changed or suggested. */
+  google_updates: GoogleUpdates | null;
+  google_updates_checked_at: string | null;
   enabled: boolean;
   average_rating: number | null;
   total_reviews: number | null;
@@ -36,14 +42,28 @@ export interface ReviewLocation {
   updated_at: string;
 }
 
-type LocationRow = Omit<ReviewLocation, 'brief' | 'rules' | 'enabled'> & { brief: string; rules: string; enabled: number };
+export interface GoogleUpdates {
+  /** Fields where Google's version differs from what the business set, in plain words. */
+  fields: string[];
+  /** Fields with edits that Google hasn't published yet. */
+  pending: string[];
+  /** Google's values for the fields the app can edit, to accept or overwrite. */
+  google: { description?: string; primary_phone?: string | null; website?: string | null; regular_hours?: unknown; special_hours?: unknown };
+  /** Google's raw diff mask, to tell one change from the next. */
+  mask: string;
+}
+
+type LocationRow = Omit<ReviewLocation, 'brief' | 'rules' | 'profile_rules' | 'google_updates' | 'enabled'> & { brief: string; rules: string; profile_rules: string | null; google_updates: string | null; enabled: number };
 
 function parse<T>(value: string | null | undefined, fallback: T): T {
   try { return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
 }
 
 function toLocation(row: LocationRow): ReviewLocation {
-  return { ...row, brief: normalizeReviewBrief(parse(row.brief, {})), rules: normalizeRules(parse(row.rules, {})), enabled: !!row.enabled };
+  return {
+    ...row, brief: normalizeReviewBrief(parse(row.brief, {})), rules: normalizeRules(parse(row.rules, {})),
+    profile_rules: normalizeProfileRules(parse(row.profile_rules, {})), google_updates: parse<GoogleUpdates | null>(row.google_updates, null), enabled: !!row.enabled,
+  };
 }
 
 export function getLocation(id: string): ReviewLocation | null {
@@ -82,13 +102,17 @@ export function findLocation(workspaceId: string, locationName: string): ReviewL
   return row ? toLocation(row) : null;
 }
 
-export function updateLocation(id: string, patch: Partial<Pick<ReviewLocation, 'brief' | 'rules' | 'enabled' | 'site_id' | 'title' | 'average_rating' | 'total_reviews' | 'last_synced_at' | 'last_full_sync_at' | 'last_error' | 'google_account_id' | 'website' | 'address' | 'maps_uri' | 'new_review_uri' | 'place_id'>>): ReviewLocation | null {
+export function updateLocation(id: string, patch: Partial<Pick<ReviewLocation, 'brief' | 'rules' | 'profile_rules' | 'google_updates' | 'google_updates_checked_at' | 'enabled' | 'site_id' | 'title' | 'average_rating' | 'total_reviews' | 'last_synced_at' | 'last_full_sync_at' | 'last_error' | 'google_account_id' | 'account_name' | 'website' | 'address' | 'maps_uri' | 'new_review_uri' | 'place_id'>>): ReviewLocation | null {
   const sets: string[] = [];
   const values: unknown[] = [];
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
     sets.push(`${key}=?`);
-    values.push(key === 'brief' ? JSON.stringify(normalizeReviewBrief(value)) : key === 'rules' ? JSON.stringify(normalizeRules(value)) : key === 'enabled' ? (value ? 1 : 0) : value);
+    values.push(key === 'brief' ? JSON.stringify(normalizeReviewBrief(value))
+      : key === 'rules' ? JSON.stringify(normalizeRules(value))
+        : key === 'profile_rules' ? JSON.stringify(normalizeProfileRules(value))
+          : key === 'google_updates' ? (value === null ? null : JSON.stringify(value))
+            : key === 'enabled' ? (value ? 1 : 0) : value);
   }
   if (sets.length) getDb().prepare(`UPDATE gbp_locations SET ${sets.join(', ')}, updated_at=datetime('now') WHERE id=?`).run(...values, id);
   return getLocation(id);
@@ -217,6 +241,8 @@ export interface LocationStats {
   unreplied_negative: number;
   reply_rejected: number;
   awaiting_approval: number;
+  /** Profile edits, posts and photos waiting for approval. */
+  changes_awaiting_approval: number;
   last_30_days: { reviews: number; average: number | null };
   previous_30_days: { reviews: number; average: number | null };
   response_rate_90d: number | null;
@@ -252,6 +278,7 @@ export function locationStats(locationId: string): LocationStats {
     unreplied_negative: one<{ n: number }>("SELECT COUNT(*) AS n FROM gbp_reviews WHERE location_id=? AND (reply_comment IS NULL OR reply_comment='' OR reply_state='REJECTED') AND rating BETWEEN 1 AND 3").n,
     reply_rejected: one<{ n: number }>("SELECT COUNT(*) AS n FROM gbp_reviews WHERE location_id=? AND reply_state='REJECTED'").n,
     awaiting_approval: one<{ n: number }>("SELECT COUNT(*) AS n FROM gbp_replies WHERE location_id=? AND status='needs_approval'").n,
+    changes_awaiting_approval: countChanges(locationId, 'needs_approval'),
     last_30_days: { reviews: last.n, average: round(last.avg) },
     previous_30_days: { reviews: prev.n, average: round(prev.avg) },
     response_rate_90d: recent.length ? Math.round((replied.length / recent.length) * 100) : null,
@@ -329,4 +356,80 @@ export function transitionReplyPlan(id: string, from: ReplyStatus[], to: ReplySt
 /** Older drafts for the same review stop waiting once a newer reply is published or proposed. */
 export function supersedeOpenPlans(reviewId: string, exceptId: string): void {
   getDb().prepare("UPDATE gbp_replies SET status='superseded' WHERE review_id=? AND id<>? AND status='needs_approval'").run(reviewId, exceptId);
+}
+
+// ── Profile, post and photo changes ──────────────────────────────────────────
+
+export type ChangeKind = 'profile' | 'post' | 'post_delete' | 'photo' | 'photo_delete';
+export type ChangeStatus = 'needs_approval' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
+
+/**
+ * A change to a Business Profile made through the app: profile fields, a new
+ * post or photo, or a deletion. Like reply plans, every change (by a person or
+ * an assistant) is recorded, so this is also the audit log.
+ */
+export interface ProfileChange {
+  id: string;
+  workspace_id: string;
+  location_id: string;
+  kind: ChangeKind;
+  payload: Record<string, unknown>;
+  summary: string;
+  rationale: string | null;
+  source: 'dashboard' | 'mcp';
+  created_by: string | null;
+  status: ChangeStatus;
+  findings: ReplyFinding[];
+  decided_by: string | null;
+  decided_at: string | null;
+  published_at: string | null;
+  error: string | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+}
+
+type ChangeRow = Omit<ProfileChange, 'payload' | 'findings' | 'result'> & { payload: string; findings: string; result: string | null };
+const toChange = (row: ChangeRow): ProfileChange => ({ ...row, payload: parse(row.payload, {}), findings: parse(row.findings, []), result: parse(row.result, null) });
+
+export function insertChange(input: Pick<ProfileChange, 'workspace_id' | 'location_id' | 'kind' | 'payload' | 'summary' | 'rationale' | 'source' | 'created_by' | 'status' | 'findings'>): ProfileChange {
+  const id = randomUUID();
+  getDb().prepare(`INSERT INTO gbp_changes(id, workspace_id, location_id, kind, payload, summary, rationale, source, created_by, status, findings)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id, input.workspace_id, input.location_id, input.kind, JSON.stringify(input.payload), input.summary, input.rationale, input.source, input.created_by,
+    input.status, JSON.stringify(input.findings));
+  return getChange(id)!;
+}
+
+export function getChange(id: string): ProfileChange | null {
+  const row = getDb().prepare('SELECT * FROM gbp_changes WHERE id=?').get(id) as ChangeRow | undefined;
+  return row ? toChange(row) : null;
+}
+
+export function listChanges(opts: { workspaceIds: string[]; locationId?: string; status?: ChangeStatus; kind?: ChangeKind; limit?: number }): ProfileChange[] {
+  if (!opts.workspaceIds.length) return [];
+  const where = [`workspace_id IN (${opts.workspaceIds.map(() => '?').join(',')})`];
+  const values: unknown[] = [...opts.workspaceIds];
+  if (opts.locationId) { where.push('location_id=?'); values.push(opts.locationId); }
+  if (opts.status) { where.push('status=?'); values.push(opts.status); }
+  if (opts.kind) { where.push('kind=?'); values.push(opts.kind); }
+  const rows = getDb().prepare(`SELECT * FROM gbp_changes WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+    .all(...values, Math.max(1, Math.min(500, opts.limit ?? 100))) as ChangeRow[];
+  return rows.map(toChange);
+}
+
+/** Move a change between states, only from the expected ones. Returns false if it was no longer in them. */
+export function transitionChange(id: string, from: ChangeStatus[], to: ChangeStatus, patch: { payload?: Record<string, unknown>; summary?: string; decided_by?: string | null; error?: string | null; result?: Record<string, unknown> | null; published?: boolean } = {}): boolean {
+  const sets = ['status=?'];
+  const values: unknown[] = [to];
+  if (patch.payload !== undefined) { sets.push('payload=?'); values.push(JSON.stringify(patch.payload)); }
+  if (patch.summary !== undefined) { sets.push('summary=?'); values.push(patch.summary); }
+  if (patch.decided_by !== undefined) { sets.push("decided_by=?, decided_at=datetime('now')"); values.push(patch.decided_by); }
+  if (patch.error !== undefined) { sets.push('error=?'); values.push(patch.error); }
+  if (patch.result !== undefined) { sets.push('result=?'); values.push(patch.result === null ? null : JSON.stringify(patch.result)); }
+  if (patch.published) sets.push("published_at=datetime('now')");
+  return getDb().prepare(`UPDATE gbp_changes SET ${sets.join(', ')} WHERE id=? AND status IN (${from.map(() => '?').join(',')})`).run(...values, id, ...from).changes > 0;
+}
+
+export function countChanges(locationId: string, status: ChangeStatus): number {
+  return (getDb().prepare('SELECT COUNT(*) AS n FROM gbp_changes WHERE location_id=? AND status=?').get(locationId, status) as { n: number }).n;
 }

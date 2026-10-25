@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bot, Check, CheckCheck, History, X } from 'lucide-react';
+import { Bot, Check, CheckCheck, History, Store, X } from 'lucide-react';
 import { useToast } from '../AppContext';
 import { errorMessage } from '../ads/api';
-import { reviewsApi, type ReplyPlan, type Review } from './api';
+import { reviewsApi, type ProfileChange, type ReplyPlan, type Review } from './api';
 import { Stars } from './ReviewsInbox';
 
 type Row = ReplyPlan & { review: Review | null; location_title: string | null };
@@ -20,15 +20,19 @@ const STATUS: Record<ReplyPlan['status'], { label: string; tone: string }> = {
 export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; reload: () => Promise<void> }) {
   const [waiting, setWaiting] = useState<Row[]>([]);
   const [history, setHistory] = useState<Row[]>([]);
+  const [changes, setChanges] = useState<ProfileChange[]>([]);
   const [error, setError] = useState('');
 
-  const load = useCallback(() => Promise.all([reviewsApi.replies('needs_approval'), reviewsApi.replies()])
-    .then(([w, all]) => {
+  const load = useCallback(() => Promise.all([reviewsApi.replies('needs_approval'), reviewsApi.replies(), reviewsApi.changes()])
+    .then(([w, all, c]) => {
       setWaiting(w);
       setHistory(all.filter(r => r.status !== 'needs_approval').slice(0, 50));
+      setChanges(c);
       setError('');
     })
     .catch(e => setError(errorMessage(e))), []);
+  const waitingChanges = changes.filter(c => c.status === 'needs_approval');
+  const changeHistory = changes.filter(c => c.status !== 'needs_approval').slice(0, 50);
   useEffect(() => { void load(); }, [load]);
   const changed = async () => { await Promise.all([load(), reload()]); };
 
@@ -43,6 +47,13 @@ export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; re
         </div>
       </section>
       <section className="ops-card">
+        <div className="ops-card-head"><div><span className="eyebrow">Business Profile</span><h2>Profile edits, posts and photos waiting for you</h2></div><Store size={18} /></div>
+        <div className="review-list">
+          {waitingChanges.map(change => <ChangeCard key={change.id} change={change} canManage={canManage} onDone={changed} />)}
+          {!waitingChanges.length && <div className="ops-empty compact"><Check /><strong>Nothing waiting</strong><span>Profile changes an AI assistant can't publish on its own appear here.</span></div>}
+        </div>
+      </section>
+      <section className="ops-card">
         <div className="ops-card-head"><div><span className="eyebrow">History</span><h2>Recent replies made through the app</h2></div><History size={18} /></div>
         <div className="table-wrap">
           <table className="table">
@@ -50,7 +61,7 @@ export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; re
             <tbody>
               {history.map(row => (
                 <tr key={row.id}>
-                  <td><small>{new Date(row.created_at.replace(' ', 'T') + (row.created_at.includes('Z') ? '' : 'Z')).toLocaleString()}</small></td>
+                  <td><small>{when(row.created_at)}</small></td>
                   <td><small>{row.location_title ?? '—'}</small></td>
                   <td>{row.review && <Stars rating={row.review.rating} />}</td>
                   <td className="reviews-history-text"><small>{row.action === 'delete' ? 'Delete reply' : row.text}</small>{row.error && <small className="ads-error-line">{row.error}</small>}</td>
@@ -63,7 +74,64 @@ export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; re
           </table>
         </div>
       </section>
+      <section className="ops-card">
+        <div className="ops-card-head"><div><span className="eyebrow">History</span><h2>Recent profile changes</h2></div><History size={18} /></div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>When</th><th>Location</th><th>Change</th><th>By</th><th>Status</th></tr></thead>
+            <tbody>
+              {changeHistory.map(c => (
+                <tr key={c.id}>
+                  <td><small>{when(c.created_at)}</small></td>
+                  <td><small>{c.location_title ?? '—'}</small></td>
+                  <td className="reviews-history-text"><small>{c.summary}</small>{c.error && <small className="ads-error-line">{c.error}</small>}</td>
+                  <td><small>{c.source === 'mcp' ? 'AI assistant' : 'Dashboard'}</small></td>
+                  <td><span className={`badge badge-${STATUS[c.status].tone}`}>{STATUS[c.status].label}</span></td>
+                </tr>
+              ))}
+              {!changeHistory.length && <tr><td colSpan={5}><small className="text-dim">No profile changes yet.</small></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
+  );
+}
+
+// SQLite timestamps are UTC without a zone marker.
+const when = (value: string) => new Date(value.replace(' ', 'T') + (value.includes('Z') ? '' : 'Z')).toLocaleString();
+
+const KIND_LABEL: Record<ProfileChange['kind'], string> = { profile: 'Profile edit', post: 'New post', post_delete: 'Delete post', photo: 'New photo', photo_delete: 'Delete photo' };
+
+function ChangeCard({ change, canManage, onDone }: { change: ProfileChange; canManage: boolean; onDone: () => Promise<void> }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const photo = change.kind === 'photo' ? (change.payload.photo as { sourceUrl?: string } | undefined)?.sourceUrl : undefined;
+  const postPhoto = change.kind === 'post' ? (change.payload.post as { media?: Array<{ sourceUrl?: string }> } | undefined)?.media?.[0]?.sourceUrl : undefined;
+  const postText = change.kind === 'post' ? (change.payload.post as { summary?: string } | undefined)?.summary : undefined;
+
+  async function decide(approve: boolean) {
+    setBusy(true);
+    try {
+      if (approve) { const result = await reviewsApi.approveChange(change.id); toast(result.status === 'published' ? 'success' : 'error', result.status === 'published' ? 'Published to Google' : result.error ?? 'Google refused it'); }
+      else { await reviewsApi.rejectChange(change.id); toast('success', 'Rejected'); }
+      await onDone();
+    } catch (e) { toast('error', errorMessage(e)); }
+    setBusy(false);
+  }
+
+  return (
+    <article className="review-card">
+      <header><span className="badge badge-info">{KIND_LABEL[change.kind]}</span><small>{change.location_title ?? ''} · {when(change.created_at)}</small></header>
+      <p>{change.summary}</p>
+      {postText && postText.length > 120 && <p className="muted">{postText}</p>}
+      {(photo || postPhoto) && <img className="gbp-change-photo" src={photo ?? postPhoto} alt="Proposed" loading="lazy" />}
+      <div className="review-draft"><Bot size={13} /> {change.source === 'mcp' ? 'AI assistant' : 'Draft'}: {change.findings.map(f => f.message).join(' ') || 'Waiting for approval.'}{change.rationale ? ` Rationale: ${change.rationale}` : ''}</div>
+      <div className="ads-row-actions">
+        <button className="btn btn-ghost btn-sm" disabled={!canManage || busy} onClick={() => decide(false)}><X size={13} /> Reject</button>
+        <button className="btn btn-primary btn-sm" disabled={!canManage || busy} onClick={() => decide(true)}><Check size={13} /> Approve and publish</button>
+      </div>
+    </article>
   );
 }
 

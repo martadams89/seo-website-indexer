@@ -5,7 +5,7 @@
  * reply rules.
  */
 import {
-  CLOUD_PLATFORM_SCOPE, enableRequiredApis, getAccessTokenForAccount, GOOGLE_BUSINESS_SERVICES, hasBuiltinCredentials,
+  CLOUD_PLATFORM_SCOPE, enableRequiredApis, getAccessTokenForAccount, GOOGLE_BUSINESS_SERVICES, hasBuiltinCredentials, WEBMASTERS_SCOPE,
 } from '../auth/google-oauth.js';
 import { getGoogleAccountsForWorkspace, getSitesForWorkspace, type GoogleAccount } from '../db/database.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
@@ -50,7 +50,13 @@ export function consoleLinks(project: string | null) {
 type ApiState = 'ok' | 'api_disabled' | 'not_approved' | 'no_scope' | 'needs_reauth' | 'error' | 'unchecked';
 interface ConnectionStatus {
   id: string; email: string | null; project: string | null; has_business_scope: boolean; has_cloud_scope: boolean; needs_reauth: boolean;
+  /** Asked Google for Business Profile only (no Search Console or Analytics). */
+  business_only: boolean;
+  /** Linked locations that use this connection. */
+  locations: number;
   api: ApiState; accounts: number | null; message: string | null; hint: string | null;
+  /** Approval form, quota page and API library for this connection's own Cloud project. */
+  links: ReturnType<typeof consoleLinks>;
 }
 
 const probeCache = new Map<string, { at: number; value: ConnectionStatus }>();
@@ -60,10 +66,14 @@ async function probe(account: GoogleAccount, fresh: boolean): Promise<Connection
   const hit = probeCache.get(account.id);
   if (!fresh && hit && Date.now() - hit.at < PROBE_TTL_MS) return hit.value;
   const scopes = (account.granted_scopes ?? '').split(' ');
+  const project = projectFromClientId(account.client_id);
   const status: ConnectionStatus = {
-    id: account.id, email: account.email, project: projectFromClientId(account.client_id),
+    id: account.id, email: account.email, project,
     has_business_scope: scopes.includes(BUSINESS_SCOPE), has_cloud_scope: scopes.includes(CLOUD_PLATFORM_SCOPE),
+    business_only: scopes.includes(BUSINESS_SCOPE) && !scopes.includes(WEBMASTERS_SCOPE),
+    locations: 0,
     needs_reauth: !!account.needs_reauth, api: 'unchecked', accounts: null, message: null, hint: null,
+    links: consoleLinks(project),
   };
   if (status.needs_reauth) status.api = 'needs_reauth';
   else if (!status.has_business_scope) status.api = 'no_scope';
@@ -83,8 +93,9 @@ async function probe(account: GoogleAccount, fresh: boolean): Promise<Connection
 
 export async function setupStatus(workspaceId: string, opts: { fresh?: boolean } = {}) {
   const accounts = getGoogleAccountsForWorkspace(workspaceId);
-  const connections = await Promise.all(accounts.map(a => probe(a, !!opts.fresh)));
   const linked = listLocations(workspaceId);
+  const connections = (await Promise.all(accounts.map(a => probe(a, !!opts.fresh))))
+    .map(c => ({ ...c, locations: linked.filter(l => l.google_account_id === c.id).length }));
   const project = connections.find(c => c.has_business_scope)?.project ?? connections[0]?.project ?? null;
   return {
     builtin_oauth_client: hasBuiltinCredentials(),
@@ -143,7 +154,7 @@ export function matchingSite(workspaceId: string, website: string | null): strin
 export async function discoverLocations(workspaceId: string, googleAccountId?: string) {
   const connections = businessConnections(workspaceId).filter(c => !googleAccountId || c.id === googleAccountId);
   if (!connections.length) {
-    throw new ReviewsApiError('No Google connection in this workspace has Business Profile access yet.', 'NO_SCOPE', { hint: 'Use "Add Business Profile access" on the Reviews page, or connect a Google account with Business Profile ticked.' });
+    throw new ReviewsApiError('No Google connection in this workspace has Business Profile access yet.', 'NO_SCOPE', { hint: 'Use "Add Business Profile access" on the Business Profile page, or connect a Google account with Business Profile ticked.' });
   }
   const linked = listLocations(workspaceId);
   const results = [];
@@ -161,6 +172,8 @@ export async function discoverLocations(workspaceId: string, googleAccountId?: s
               place_id: l.metadata?.placeId ?? null, maps_uri: l.metadata?.mapsUri ?? null,
               verified: l.metadata?.hasVoiceOfMerchant ?? null,
               linked_location_id: linked.find(x => x.location_name === l.name)?.id ?? null,
+              /** The connection the linked location currently uses (another login or project when it differs). */
+              linked_via: linked.find(x => x.location_name === l.name)?.google_account_id ?? null,
             })),
           });
         } catch (e) {
@@ -199,6 +212,31 @@ export async function linkLocation(input: { workspaceId: string; googleAccountId
   });
   await syncLocation(location, { full: true }).catch(() => null);
   return getLocation(location.id)!;
+}
+
+/**
+ * Point a linked location at another Google connection: a different Google
+ * user, or the same user through another Cloud project (for example the one
+ * Google approved for Business Profile). The new connection must be able to
+ * see the location and read its reviews; history, rules and brief stay.
+ */
+export async function moveLocation(location: ReviewLocation, googleAccountId: string): Promise<ReviewLocation> {
+  const conn = businessConnections(location.workspace_id).find(c => c.id === googleAccountId);
+  if (!conn) throw new ReviewsApiError('That Google connection is not shared with this workspace or has no Business Profile access.', 'NO_SCOPE');
+  if (conn.id === location.google_account_id) return location;
+  const accounts = await listBusinessAccounts(conn.id);
+  // The same Business Profile account is usually reachable from the other connection too; try it first.
+  const ordered = [...accounts.filter(a => a.name === location.account_name), ...accounts.filter(a => a.name !== location.account_name)].slice(0, 50);
+  for (const acc of ordered) {
+    let found = false;
+    try { found = (await listGoogleLocations(conn.id, acc.name)).some(l => l.name === location.location_name); } catch { continue; }
+    if (!found) continue;
+    await listReviewsPage(conn.id, `${acc.name}/${location.location_name}`);
+    return updateLocation(location.id, { google_account_id: conn.id, account_name: acc.name, last_error: null })!;
+  }
+  throw new ReviewsApiError(`${conn.email ?? conn.id} can't see ${location.title ?? location.location_name} in any Business Profile account it manages.`, 'NOT_FOUND', {
+    hint: 'Add that Google user as an owner or manager of the profile (Business Profile → Settings → People and access), then try again.',
+  });
 }
 
 // ── Sync ─────────────────────────────────────────────────────────────────────
@@ -249,7 +287,7 @@ async function alert(location: ReviewLocation, fresh: StoredReview[], rejected: 
  * Google's later pages occasionally miss reviews.
  */
 export async function syncLocation(location: ReviewLocation, opts: { full?: boolean } = {}): Promise<{ fetched: number; created: number; alerts: number }> {
-  if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again from the Reviews page.', 'NEEDS_REAUTH');
+  if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again, or pick another connection, under Business Profile → Locations & rules.', 'NEEDS_REAUTH');
   const full = !!opts.full || !location.last_full_sync_at || Date.now() - Date.parse(location.last_full_sync_at) > FULL_SYNC_HOURS * 3_600_000;
   const latest = latestReviewUpdate(location.id);
   const known = latest !== null;
@@ -309,7 +347,7 @@ export async function syncDueLocations(limit = 20): Promise<number> {
 
 async function publishPlan(plan: ReplyPlan, location: ReviewLocation, review: StoredReview): Promise<ReplyPlan> {
   try {
-    if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again from the Reviews page.', 'NEEDS_REAUTH');
+    if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again, or pick another connection, under Business Profile → Locations & rules.', 'NEEDS_REAUTH');
     if (plan.action === 'delete') {
       await deleteReply(location.google_account_id, review.review_name);
       setReviewReply(review.id, { comment: null, update_time: null, state: null });
@@ -418,7 +456,7 @@ export async function businessPerformance(location: ReviewLocation, days = 28, o
 }
 
 async function computePerformance(location: ReviewLocation, span: number) {
-  if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again from the Reviews page.', 'NEEDS_REAUTH');
+  if (!location.google_account_id) throw new ReviewsApiError('This location has no Google connection. Link it again, or pick another connection, under Business Profile → Locations & rules.', 'NEEDS_REAUTH');
   const DAY = 86_400_000;
   const end = new Date(Date.now() - 2 * DAY);
   const start = new Date(end.getTime() - (2 * span - 1) * DAY);

@@ -38,7 +38,7 @@ export function resolveLocation(workspaceIds: string[], ref: unknown): ReviewLoc
   const matches = all.filter(l => l.location_name === value || l.location_name === `locations/${value}` || (l.title ?? '').toLowerCase() === value.toLowerCase());
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) throw new ReviewsApiError(`"${value}" matches ${matches.length} linked locations; pass one of these ids: ${matches.map(m => `${m.id} (${m.title ?? m.location_name})`).join(', ')}`, 'INVALID_REQUEST');
-  throw new ReviewsApiError(`Location "${value}" is not linked to any workspace you can access. Link it on the Reviews page (or with reviews_link_location).`, 'NOT_FOUND');
+  throw new ReviewsApiError(`Location "${value}" is not linked to any workspace you can access. Link it on the Business Profile page (or with reviews_link_location).`, 'NOT_FOUND');
 }
 
 /** Resolve a review by the app's id within the given workspaces. */

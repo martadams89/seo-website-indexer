@@ -7,6 +7,12 @@ import { GoogleHealth } from '../components/GoogleHealth';
 
 const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 const hasAds = (acc: GoogleAccount) => !!acc.granted_scopes?.split(' ').includes(ADS_SCOPE);
+// Connected for Business Profile only: no Search Console scope on the grant.
+const isBusinessOnly = (acc: GoogleAccount) => {
+  const scopes = acc.granted_scopes?.split(' ') ?? [];
+  return scopes.includes('https://www.googleapis.com/auth/business.manage') && !scopes.includes('https://www.googleapis.com/auth/webmasters');
+};
+const projectOf = (clientId: string) => /^(\d{6,})-/.exec(clientId)?.[1] ?? null;
 
 export default function AccountsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { status, refresh } = useApp();
@@ -326,9 +332,10 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     {acc.email || 'Google Account'}
                     {!!acc.needs_reauth && <span className="badge badge-error">Reconnect required</span>}
                     {hasAds(acc) && <span className="badge badge-accent">Google Ads</span>}
+                    {isBusinessOnly(acc) && <span className="badge badge-info" title="Connected for Google Business Profile only">Business Profile only</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></span>
+                    <span>{projectOf(acc.client_id) ? <>Cloud project <code>{projectOf(acc.client_id)}</code></> : <>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></>}</span>
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>

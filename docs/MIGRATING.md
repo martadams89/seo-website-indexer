@@ -24,7 +24,7 @@ Not carried over on purpose: OpenGSC's private indexing network, PBN, expired-do
 ## Move over
 
 1. **Add your sites.** Under **Sites**, add each site with its sitemap URL, then connect the Google account that owns them in Search Console. Search Console history (Google keeps about 16 months) and GA4 come from Google directly, so nothing needs exporting from OpenGSC. Add Bing Webmaster on each site if you used it.
-2. **Add Business Profile.** Open **Reviews → Setup**, add Business Profile access to the same Google connection, apply once for Google's Business Profile API approval (the page walks you through it), then link your locations.
+2. **Add Business Profile.** Open **Business Profile → Setup**, add Business Profile access to the same Google connection, apply once for Google's Business Profile API approval (the page walks you through it), then link your locations.
 3. **Copy your OpenGSC setup with an assistant.** Connect both MCP servers — OpenGSC and this app — to the same AI assistant and paste the prompt below. It copies content groups and tracked keywords and checks the numbers match. Give this app's server SEO actions (`mcp:write`) when you connect it.
 4. **Build your report.** Under **Reports**, create a template with the sections you want (for example Search momentum and Google reviews and Business Profile), set the schedule and recipients, and generate one to check it.
 5. **Run both side by side** for a week or two. When you're happy, retire OpenGSC and disconnect the Google Business Profile source in Porter Metrics (and cancel its plan if you have one).

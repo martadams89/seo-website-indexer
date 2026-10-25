@@ -25,6 +25,7 @@ export function getDb(): Database.Database {
     // throwing SQLITE_BUSY.
     _db.pragma('busy_timeout = 5000');
     initSchema(_db);
+    allowGoogleAccountPerProject(_db);
     runMigrations(_db);
     migrateSettingsToAccounts(_db);
     migrateGoogleAccountWorkspaceShares(_db);
@@ -33,11 +34,54 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+/**
+ * One Google user can be connected once per OAuth client (Cloud project): a
+ * Business Profile project that Google approved separately can sit beside the
+ * project used for Search Console. Older databases made `email` UNIQUE; SQLite
+ * can only drop that by rebuilding the table, which must happen with foreign
+ * keys off so the DROP doesn't cascade into sites, Ads accounts and shares.
+ */
+export function allowGoogleAccountPerProject(db: Database.Database): void {
+  const uniqueEmail = (db.prepare("PRAGMA index_list('google_accounts')").all() as Array<{ name: string; unique: number; origin: string }>)
+    .filter(i => i.unique && i.origin === 'u')
+    .some(i => (db.prepare(`PRAGMA index_info('${i.name.replace(/'/g, "''")}')`).all() as Array<{ name: string }>).map(c => c.name).join(',') === 'email');
+  if (uniqueEmail) {
+    const table = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='google_accounts'").get() as { sql: string };
+    const extras = (db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='google_accounts' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>).map(r => r.sql);
+    const rebuilt = table.sql
+      .replace(/\bemail(\s+)TEXT\s+UNIQUE\b/i, 'email$1TEXT')
+      .replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["`]?google_accounts["`]?/i, 'CREATE TABLE google_accounts_rebuild');
+    if (rebuilt === table.sql || /\bemail\s+TEXT\s+UNIQUE\b/i.test(rebuilt)) {
+      console.error('[migration] Could not rewrite google_accounts to allow one Google user per project; leaving it unchanged.');
+    } else {
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.transaction(() => {
+          db.exec(rebuilt);
+          db.exec('INSERT INTO google_accounts_rebuild SELECT * FROM google_accounts');
+          db.exec('DROP TABLE google_accounts');
+          db.exec('ALTER TABLE google_accounts_rebuild RENAME TO google_accounts');
+          for (const sql of extras) db.exec(sql);
+          const broken = db.prepare('PRAGMA foreign_key_check').all();
+          if (broken.length) throw new Error(`foreign key check failed for ${broken.length} row(s)`);
+        })();
+        console.log('[migration] Google accounts can now be connected once per Cloud project.');
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+    }
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_google_accounts_email ON google_accounts(email);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_google_accounts_email_client ON google_accounts(email, client_id);
+  `);
+}
+
 function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS google_accounts (
       id            TEXT PRIMARY KEY,
-      email         TEXT UNIQUE,
+      email         TEXT,
       client_id     TEXT NOT NULL,
       client_secret TEXT NOT NULL,
       access_token  TEXT,
@@ -1067,12 +1111,14 @@ function backfillSiteAccounts(db: Database.Database): void {
 
     if (orphans.length === 0) return;
 
+    // Business-Profile-only connections can't read Search Console, so never hand one to a site.
+    const canSearchConsole = "(ga.granted_scopes IS NULL OR instr(ga.granted_scopes, 'auth/webmasters') > 0)";
     const available = db.prepare(`
       SELECT ga.id FROM google_account_workspaces gaw
       JOIN google_accounts ga ON ga.id = gaw.account_id
-      WHERE gaw.workspace_id = ? ORDER BY ga.created_at DESC LIMIT 1
+      WHERE gaw.workspace_id = ? AND ${canSearchConsole} ORDER BY ga.created_at DESC LIMIT 1
     `);
-    const legacyFallback = db.prepare('SELECT id FROM google_accounts ORDER BY created_at DESC LIMIT 1');
+    const legacyFallback = db.prepare(`SELECT ga.id FROM google_accounts ga WHERE ${canSearchConsole} ORDER BY ga.created_at DESC LIMIT 1`);
     const upd = db.prepare('UPDATE sites SET google_account_id = ? WHERE id = ?');
     let linked = 0;
     const tx = db.transaction((rows: typeof orphans) => {

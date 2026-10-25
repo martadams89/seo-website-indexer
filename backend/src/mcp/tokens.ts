@@ -13,8 +13,8 @@ import { getDb } from '../db/database.js';
  * Scopes an MCP token can carry. `mcp:read` = read data (including Google Ads
  * reporting and Google reviews); `mcp:write` = safe SEO actions; `ads:write` =
  * propose and apply Google Ads changes, always subject to each client's
- * guardrails; `reviews:write` = reply to Google reviews within each location's
- * reply rules.
+ * guardrails; `reviews:write` = manage Google Business Profile (reply to
+ * reviews, posts, photos and profile edits) within each location's rules.
  */
 export const MCP_SCOPES = ['mcp:read', 'mcp:write', 'ads:write', 'reviews:write'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];

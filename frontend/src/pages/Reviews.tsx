@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BarChart3, Bot, CheckCheck, Inbox, MapPin, RefreshCw, Settings2, Star } from 'lucide-react';
+import { BarChart3, Bot, CheckCheck, Images, Inbox, MapPin, Megaphone, RefreshCw, Settings2, Star, Store } from 'lucide-react';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { errorMessage } from '../ads/api';
 import { reviewsApi, type ReviewLocation, type ReviewsSetup } from '../reviews/api';
@@ -10,15 +10,21 @@ import { ReviewsLocations } from '../reviews/ReviewsLocations';
 import { ReviewsInsights } from '../reviews/ReviewsInsights';
 import { ReviewsRoutine } from '../reviews/ReviewsRoutine';
 import { ReviewsSetupView } from '../reviews/ReviewsSetup';
+import { BusinessProfileTab } from '../reviews/BusinessProfileTab';
+import { BusinessPostsTab } from '../reviews/BusinessPostsTab';
+import { BusinessPhotosTab } from '../reviews/BusinessPhotosTab';
 import '../ads/ads.css';
 import '../reviews/reviews.css';
 
-type Tab = 'inbox' | 'approvals' | 'insights' | 'locations' | 'routine' | 'setup';
+type Tab = 'inbox' | 'approvals' | 'profile' | 'posts' | 'photos' | 'insights' | 'locations' | 'routine' | 'setup';
 const TABS: Array<{ id: Tab; label: string; icon: typeof Inbox }> = [
   { id: 'inbox', label: 'Reviews', icon: Inbox },
   { id: 'approvals', label: 'Approvals & history', icon: CheckCheck },
+  { id: 'profile', label: 'Profile', icon: Store },
+  { id: 'posts', label: 'Posts', icon: Megaphone },
+  { id: 'photos', label: 'Photos', icon: Images },
   { id: 'insights', label: 'Insights', icon: BarChart3 },
-  { id: 'locations', label: 'Locations & reply rules', icon: MapPin },
+  { id: 'locations', label: 'Locations & rules', icon: MapPin },
   { id: 'routine', label: 'AI routine', icon: Bot },
   { id: 'setup', label: 'Setup', icon: Settings2 },
 ];
@@ -42,7 +48,8 @@ export default function ReviewsPage() {
   const needsSetup = !!setup && (!setup.steps.business_scope || !setup.steps.locations_linked);
   const tab = (params.get('tab') as Tab | null) ?? (needsSetup ? 'setup' : 'inbox');
   const locationId = params.get('location') ?? '';
-  const waiting = locations.reduce((sum, l) => sum + l.stats.awaiting_approval, 0);
+  const waiting = locations.reduce((sum, l) => sum + l.stats.awaiting_approval + (l.stats.changes_awaiting_approval ?? 0), 0);
+  const profileAlerts = locations.filter(l => l.google_updates?.fields.length).length;
   const unreplied = locations.reduce((sum, l) => sum + l.stats.unreplied, 0);
 
   function go(next: { tab?: Tab; location?: string | null }) {
@@ -58,8 +65,8 @@ export default function ReviewsPage() {
       <header className="ops-page-header">
         <div>
           <span className="eyebrow"><Star size={13} /> Local</span>
-          <h1>Google reviews</h1>
-          <p>Read and answer every client's Google reviews in one place — by hand, or with an AI assistant that replies within the rules you set for each location.</p>
+          <h1>Google Business Profile</h1>
+          <p>Reviews, profile details, posts and photos for every client's Business Profile in one place. Do it by hand, or let an AI assistant work within the rules you set for each location.</p>
         </div>
         <div className="header-actions">
           {locations.length > 1 && (
@@ -74,29 +81,34 @@ export default function ReviewsPage() {
         </div>
       </header>
 
-      <nav className="ops-tabs ads-tabs" aria-label="Google reviews sections">
+      <nav className="ops-tabs ads-tabs" aria-label="Business Profile sections">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" className={tab === id ? 'active' : ''} aria-pressed={tab === id} onClick={() => go({ tab: id })}>
             <Icon size={14} /> {label}
             {id === 'inbox' && unreplied > 0 && <span className="badge badge-info">{unreplied}</span>}
             {id === 'approvals' && waiting > 0 && <span className="badge badge-warn">{waiting}</span>}
+            {id === 'profile' && profileAlerts > 0 && <span className="badge badge-warn" title="Google changed a profile">{profileAlerts}</span>}
             {id === 'setup' && needsSetup && <span className="badge badge-accent">Start here</span>}
           </button>
         ))}
       </nav>
 
       {error && <div className="alert alert-error"><div className="alert-content">{error}</div></div>}
-      {!canManage && <div className="alert alert-info"><div className="alert-content">You can read reviews in this workspace. Replying, approving replies or changing reply rules needs the “Manage Google reviews” permission.</div></div>}
+      {!canManage && <div className="alert alert-info"><div className="alert-content">You can read this workspace's Business Profiles. Replying, posting, editing profiles or approving changes needs the “Manage Google Business Profile” permission.</div></div>}
 
       {tab === 'setup' && <ReviewsSetupView setup={setup} canManage={canManage} reload={load} onLinked={() => go({ tab: 'locations' })} />}
       {tab === 'inbox' && (locations.length
         ? <ReviewsInbox locations={locations} locationId={locationId} canManage={canManage} reload={load} />
         : <EmptyState loading={loading} onSetup={() => go({ tab: 'setup' })} />)}
       {tab === 'approvals' && <ReviewsApprovals canManage={canManage} reload={load} />}
+      {(tab === 'profile' || tab === 'posts' || tab === 'photos') && !locations.length && <EmptyState loading={loading} onSetup={() => go({ tab: 'setup' })} />}
+      {tab === 'profile' && !!locations.length && <BusinessProfileTab locations={locations} locationId={locationId || locations[0].id} canManage={canManage} onPick={id => go({ location: id })} reload={load} />}
+      {tab === 'posts' && !!locations.length && <BusinessPostsTab locations={locations} locationId={locationId || locations[0].id} canManage={canManage} onPick={id => go({ location: id })} reload={load} />}
+      {tab === 'photos' && !!locations.length && <BusinessPhotosTab locations={locations} locationId={locationId || locations[0].id} canManage={canManage} onPick={id => go({ location: id })} reload={load} />}
       {tab === 'insights' && (locations.length
         ? <ReviewsInsights locations={locations} locationId={locationId || locations[0].id} onPick={id => go({ location: id })} />
         : <EmptyState loading={loading} onSetup={() => go({ tab: 'setup' })} />)}
-      {tab === 'locations' && <ReviewsLocations locations={locations} canManage={canManage} reload={load} onOpen={id => go({ tab: 'inbox', location: id })} />}
+      {tab === 'locations' && <ReviewsLocations locations={locations} connections={setup?.connections ?? []} canManage={canManage} reload={load} onOpen={id => go({ tab: 'inbox', location: id })} />}
       {tab === 'routine' && <ReviewsRoutine locations={locations} />}
     </div>
   );
@@ -109,7 +121,7 @@ function EmptyState({ onSetup, loading }: { onSetup: () => void; loading: boolea
       <div className="ops-empty">
         <Star />
         <h3>No Business Profile locations linked yet</h3>
-        <p>Connect a Google account that manages your clients' Business Profiles, then link their locations.</p>
+        <p>Connect a Google account that manages your clients' Business Profiles (or the Cloud project Google approved for them), then link their locations.</p>
         <button className="btn btn-primary" onClick={onSetup}>Open setup</button>
       </div>
     </section>

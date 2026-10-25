@@ -32,6 +32,7 @@ export interface LocationStats {
   unreplied_negative: number;
   reply_rejected: number;
   awaiting_approval: number;
+  changes_awaiting_approval: number;
   last_30_days: { reviews: number; average: number | null };
   previous_30_days: { reviews: number; average: number | null };
   response_rate_90d: number | null;
@@ -53,6 +54,9 @@ export interface ReviewLocation {
   site_id: string | null;
   brief: ReviewBrief;
   rules: ReplyRules;
+  profile_rules: ProfileRules;
+  google_updates: GoogleUpdates | null;
+  google_updates_checked_at: string | null;
   enabled: boolean;
   average_rating: number | null;
   total_reviews: number | null;
@@ -103,9 +107,76 @@ export type ReviewFilter = 'all' | 'unreplied' | 'negative' | 'reply_rejected' |
 
 export interface ConnectionStatus {
   id: string; email: string | null; project: string | null; has_business_scope: boolean; has_cloud_scope: boolean; needs_reauth: boolean;
+  /** Asked Google for Business Profile only (no Search Console or Analytics). */
+  business_only: boolean;
+  /** Linked locations using this connection. */
+  locations: number;
   api: 'ok' | 'api_disabled' | 'not_approved' | 'no_scope' | 'needs_reauth' | 'error' | 'unchecked';
   accounts: number | null; message: string | null; hint: string | null;
+  links: { access_form: string; quotas: string; enable_apis: string; business_profile: string };
 }
+
+export type AiMode = 'off' | 'approval' | 'auto';
+export interface ProfileRules { profile: AiMode; posts: AiMode; photos: AiMode; alert_google_updates: boolean }
+
+export const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
+export type Day = (typeof DAYS)[number];
+export interface HoursPeriod { day: Day; open: string; close: string }
+export interface SpecialHours { date: string; closed: boolean; open?: string; close?: string }
+
+export interface GoogleUpdates {
+  fields: string[];
+  pending: string[];
+  google: { description?: string; primary_phone?: string | null; website?: string | null; regular_hours?: HoursPeriod[]; special_hours?: SpecialHours[] };
+  mask: string;
+}
+
+export interface BusinessProfile {
+  title: string | null; description: string; primary_phone: string | null; additional_phones: string[]; website: string | null;
+  primary_category: string | null; additional_categories: string[]; address: string | null; service_area: string[]; open_status: string | null;
+  regular_hours: HoursPeriod[]; special_hours: SpecialHours[]; verified: boolean | null; has_google_updated: boolean; has_pending_edits: boolean;
+  maps_uri: string | null; new_review_uri: string | null;
+}
+
+export interface ChecklistItem { id: string; label: string; status: 'done' | 'warn' | 'todo'; detail: string }
+
+export type ChangeKind = 'profile' | 'post' | 'post_delete' | 'photo' | 'photo_delete';
+export interface ProfileChange {
+  id: string; location_id: string; kind: ChangeKind; payload: Record<string, unknown>; summary: string; rationale: string | null;
+  source: 'dashboard' | 'mcp'; status: 'needs_approval' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
+  findings: ReplyFinding[]; decided_at: string | null; published_at: string | null; error: string | null; result: Record<string, unknown> | null; created_at: string;
+  location_title?: string | null;
+}
+
+export interface ProfileOverview {
+  profile: BusinessProfile;
+  checklist: { score: number; items: ChecklistItem[] };
+  rules: ProfileRules;
+  google_updates: GoogleUpdates | null;
+  google_updates_checked_at: string | null;
+  photos: { total: number } | null; photos_error: string | null;
+  posts: { total: number; newest: string | null } | null; posts_error: string | null;
+  pending_changes: ProfileChange[];
+}
+
+export interface BusinessPost {
+  name: string; topic: 'STANDARD' | 'EVENT' | 'OFFER' | 'ALERT' | string; summary: string | null; state: string | null;
+  button: { type: string; url: string | null } | null; title: string | null; start: string | null; end: string | null;
+  photo: string | null; url: string | null; coupon_code: string | null; created: string | null; updated: string | null;
+}
+
+export interface PostDraft {
+  topic: 'STANDARD' | 'EVENT' | 'OFFER'; summary?: string; cta_type?: string; cta_url?: string; photo_url?: string;
+  event_title?: string; start_date?: string; start_time?: string; end_date?: string; end_time?: string; coupon_code?: string; redeem_url?: string; terms?: string;
+}
+
+export const PHOTO_CATEGORIES = ['ADDITIONAL', 'COVER', 'PROFILE', 'LOGO', 'EXTERIOR', 'INTERIOR', 'PRODUCT', 'AT_WORK', 'TEAMS', 'FOOD_AND_DRINK', 'MENU', 'COMMON_AREA', 'ROOMS'] as const;
+export interface BusinessPhoto {
+  name: string; category: string; url: string | null; thumbnail: string | null; description: string | null;
+  created: string | null; views: number | null; width: number | null; height: number | null; format: string;
+}
+
+export interface ProfileEdit { description?: string; primary_phone?: string; website?: string; regular_hours?: HoursPeriod[]; special_hours?: SpecialHours[] }
 
 export interface ReviewsSetup {
   builtin_oauth_client: boolean;
@@ -122,7 +193,7 @@ export interface DiscoveryResult {
     google_account_id: string; email: string | null; error: string | null; hint: string | null;
     accounts: Array<{
       account_name: string; account_title: string; error: string | null;
-      locations: Array<{ location_name: string; title: string | null; address: string | null; website: string | null; verified: boolean | null; linked_location_id: string | null }>;
+      locations: Array<{ location_name: string; title: string | null; address: string | null; website: string | null; verified: boolean | null; linked_location_id: string | null; linked_via: string | null }>;
     }>;
   }>;
 }
@@ -151,7 +222,20 @@ export const reviewsApi = {
   discover: () => apiFetch<DiscoveryResult>('/api/reviews/discover'),
   locations: () => apiFetch<ReviewLocation[]>('/api/reviews/locations'),
   link: (data: { googleAccountId: string; accountName: string; locationName: string }) => apiFetch<ReviewLocation>('/api/reviews/locations', { method: 'POST', ...json(data) }),
-  update: (id: string, data: { brief?: ReviewBrief; rules?: Partial<ReplyRules>; enabled?: boolean }) => apiFetch<ReviewLocation>(`/api/reviews/locations/${id}`, { method: 'PATCH', ...json(data) }),
+  update: (id: string, data: { brief?: ReviewBrief; rules?: Partial<ReplyRules>; profileRules?: Partial<ProfileRules>; enabled?: boolean; googleAccountId?: string }) => apiFetch<ReviewLocation>(`/api/reviews/locations/${id}`, { method: 'PATCH', ...json(data) }),
+  profile: (id: string, fresh = false) => apiFetch<ProfileOverview>(`/api/reviews/locations/${id}/profile${fresh ? '?fresh=1' : ''}`),
+  editProfile: (id: string, edit: ProfileEdit) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/profile`, { method: 'PATCH', ...json(edit) }),
+  checkGoogleUpdates: (id: string) => apiFetch<GoogleUpdates>(`/api/reviews/locations/${id}/google-updates/check`, { method: 'POST', ...json({}) }),
+  resolveGoogleUpdates: (id: string, keep: 'google' | 'mine') => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/google-updates/resolve`, { method: 'POST', ...json({ keep }) }),
+  posts: (id: string, fresh = false) => apiFetch<BusinessPost[]>(`/api/reviews/locations/${id}/posts${fresh ? '?fresh=1' : ''}`),
+  createPost: (id: string, post: PostDraft) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/posts`, { method: 'POST', ...json(post) }),
+  deletePost: (id: string, name: string) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/posts?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  photos: (id: string, fresh = false) => apiFetch<{ total: number; photos: BusinessPhoto[] }>(`/api/reviews/locations/${id}/photos${fresh ? '?fresh=1' : ''}`),
+  addPhoto: (id: string, photo: { url: string; category: string; description?: string }) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/photos`, { method: 'POST', ...json(photo) }),
+  deletePhoto: (id: string, name: string) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/photos?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  changes: (status?: ProfileChange['status']) => apiFetch<ProfileChange[]>(`/api/reviews/changes${status ? `?status=${status}` : ''}`),
+  approveChange: (id: string) => apiFetch<ProfileChange>(`/api/reviews/changes/${id}/approve`, { method: 'POST', ...json({}) }),
+  rejectChange: (id: string) => apiFetch<ProfileChange>(`/api/reviews/changes/${id}/reject`, { method: 'POST', ...json({}) }),
   unlink: (id: string) => apiFetch<{ ok: boolean }>(`/api/reviews/locations/${id}`, { method: 'DELETE' }),
   sync: (id: string) => apiFetch<{ fetched: number; created: number }>(`/api/reviews/locations/${id}/sync`, { method: 'POST' }),
   performance: (id: string, days = 28) => apiFetch<Performance>(`/api/reviews/locations/${id}/performance?days=${days}`),
@@ -169,6 +253,14 @@ export const reviewsApi = {
   routinePrompt: (data: { settings: ReviewRoutineSettings; locationIds: string[]; connectorName: string }) =>
     apiFetch<{ prompt: string; schedule: string; cron: string }>('/api/reviews/routine/prompt', { method: 'POST', ...json(data) }),
 };
+
+export const AI_MODE_LABEL: Record<AiMode, string> = {
+  approval: 'Wait for my approval',
+  auto: 'Publish within the checks',
+  off: 'Not allowed',
+};
+
+export const DAY_LABEL: Record<Day, string> = { MONDAY: 'Monday', TUESDAY: 'Tuesday', WEDNESDAY: 'Wednesday', THURSDAY: 'Thursday', FRIDAY: 'Friday', SATURDAY: 'Saturday', SUNDAY: 'Sunday' };
 
 export const MODE_LABEL: Record<ReplyMode, string> = {
   guarded: 'Auto-publish replies to good reviews',

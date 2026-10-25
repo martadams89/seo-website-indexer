@@ -978,7 +978,7 @@ function NotificationsTab() {
 
   useEffect(() => {
     api.getNotifyConfig().then(rec => {
-      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts', 'notify_google_connection'];
+      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts', 'notify_google_connection', 'notify_profile_alerts'];
       const next: Record<string, string> = {};
       for (const k of keys) next[k] = rec[k] ?? '';
       setVals(next);
@@ -1024,6 +1024,7 @@ function NotificationsTab() {
           ['notify_citation_changes', 'AI citation movement', 'A tracked answer engine gains or loses your domain.'],
           ['notify_playbook_ready', 'Ranking playbook ready', 'Weekly summary of new ranking opportunities and their estimated upside.'],
           ['notify_review_alerts', 'Google review alerts', 'A new low-rated Google review arrives, or Google rejects a reply (threshold set per location).'],
+          ['notify_profile_alerts', 'Business Profile changes', 'Google, or someone using "Suggest an edit", changed a Business Profile you manage (checked daily, sent once per change).'],
           ['notify_google_connection', 'Google connection problems', 'A Google connection needs reconnecting, a new permission, or a Google API switched on. Sent once per change.'],
         ].map(([key, label, description]) => (
           <label key={key}>

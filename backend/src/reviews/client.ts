@@ -6,6 +6,9 @@
  *   Locations:  mybusinessbusinessinformation.googleapis.com/v1/{account}/locations
  *   Reviews:    mybusiness.googleapis.com/v4/{account}/{location}/reviews  (list, get, PUT/DELETE …/reply)
  *   Insights:   businessprofileperformance.googleapis.com/v1/{location}  (daily metrics, search keywords)
+ *   Profile:    mybusinessbusinessinformation.googleapis.com/v1/{location}  (get, patch, getGoogleUpdated)
+ *   Posts:      mybusiness.googleapis.com/v4/{account}/{location}/localPosts
+ *   Photos:     mybusiness.googleapis.com/v4/{account}/{location}/media
  *
  * Every call uses the stored Google connection's OAuth token with the
  * business.manage scope. Google only serves these APIs to Cloud projects it
@@ -69,7 +72,7 @@ export function parseBusinessError(status: number, body: unknown, projectNumber:
   if (details.some(d => d.reason === 'SERVICE_DISABLED') || /has not been used in project|is disabled/i.test(err?.message ?? '')) {
     return new ReviewsApiError(message, 'API_DISABLED', {
       status,
-      hint: `Enable the Business Profile APIs (My Business Account Management, My Business Business Information and Google My Business) on Google Cloud project ${project}, or use "Enable automatically" on the Reviews page.`,
+      hint: `Enable the Business Profile APIs (My Business Account Management, My Business Business Information, Google My Business and Business Profile Performance) on Google Cloud project ${project}, or use "Switch on for me" on the Business Profile setup tab.`,
     });
   }
   // An unapproved project has a quota of 0 requests per minute.
@@ -82,13 +85,13 @@ export function parseBusinessError(status: number, body: unknown, projectNumber:
   if (status === 401 && !/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(raw)) {
     return new ReviewsApiError(message, 'NEEDS_REAUTH', {
       status,
-      hint: 'Google rejected this connection\'s sign-in. Reconnect the Google account (Reviews → Setup) and try again.',
+      hint: 'Google rejected this connection\'s sign-in. Reconnect the Google account (Business Profile → Setup) and try again.',
     });
   }
   if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(raw)) {
     return new ReviewsApiError(message, 'NO_SCOPE', {
       status,
-      hint: 'This Google connection has not granted Business Profile access. Use "Add Business Profile access" on the Reviews page to re-consent.',
+      hint: 'This Google connection has not granted Business Profile access. Use "Add Business Profile access" on the Business Profile page to re-consent.',
     });
   }
   if (status === 429) {
@@ -124,10 +127,10 @@ function networkError(e: unknown, url: string): ReviewsApiError | null {
   return failure ? new ReviewsApiError(failure.message, 'NETWORK', { hint: failure.hint }) : null;
 }
 
-async function call<T>(googleAccountId: string, url: string, init: { method?: 'GET' | 'PUT' | 'DELETE' | 'POST'; body?: unknown } = {}): Promise<T> {
+async function call<T>(googleAccountId: string, url: string, init: { method?: 'GET' | 'PUT' | 'DELETE' | 'POST' | 'PATCH'; body?: unknown } = {}): Promise<T> {
   const account = getGoogleAccountById(googleAccountId);
-  if (!account) throw new ReviewsApiError('The Google connection for this location was removed. Link the location again from the Reviews page.', 'NEEDS_REAUTH');
-  if (account.needs_reauth) throw new ReviewsApiError(`Google connection ${account.email ?? account.id} must be reconnected before it can be used.`, 'NEEDS_REAUTH', { hint: 'Reconnect it under Settings → Google Accounts or from the Reviews page.' });
+  if (!account) throw new ReviewsApiError('The Google connection for this location was removed. Link the location again from the Business Profile page.', 'NEEDS_REAUTH');
+  if (account.needs_reauth) throw new ReviewsApiError(`Google connection ${account.email ?? account.id} must be reconnected before it can be used.`, 'NEEDS_REAUTH', { hint: 'Reconnect it under Settings → Google Accounts or from the Business Profile page.' });
   const token = await tokenSource(googleAccountId).catch((e: unknown) => { throw networkError(e, 'https://oauth2.googleapis.com') ?? e; });
   const res = await fetcher(url, {
     method: init.method ?? 'GET',
@@ -284,4 +287,137 @@ export async function fetchSearchKeywords(googleAccountId: string, locationName:
     if (!pageToken) break;
   }
   return out;
+}
+
+// ── Profile (Business Information) ───────────────────────────────────────────
+
+export interface TimeOfDay { hours?: number; minutes?: number }
+export interface GoogleDate { year?: number; month?: number; day?: number }
+export interface TimePeriod { openDay?: string; openTime?: TimeOfDay; closeDay?: string; closeTime?: TimeOfDay }
+export interface SpecialHourPeriod { startDate?: GoogleDate; endDate?: GoogleDate; openTime?: TimeOfDay; closeTime?: TimeOfDay; closed?: boolean }
+export interface GoogleCategory { name?: string; displayName?: string }
+
+export interface LocationDetails extends BusinessLocation {
+  phoneNumbers?: { primaryPhone?: string; additionalPhones?: string[] };
+  categories?: { primaryCategory?: GoogleCategory; additionalCategories?: GoogleCategory[] };
+  regularHours?: { periods?: TimePeriod[] };
+  specialHours?: { specialHourPeriods?: SpecialHourPeriod[] };
+  profile?: { description?: string };
+  openInfo?: { status?: string; openingDate?: GoogleDate };
+  serviceArea?: { businessType?: string; places?: { placeInfos?: Array<{ placeName?: string }> } };
+  metadata?: BusinessLocation['metadata'] & { hasGoogleUpdated?: boolean; hasPendingEdits?: boolean; canModifyServiceList?: boolean; duplicateLocation?: string };
+}
+
+export const PROFILE_READ_MASK = 'name,title,phoneNumbers,categories,storefrontAddress,websiteUri,regularHours,specialHours,profile,openInfo,metadata,serviceArea';
+/** Google caps the business description at 750 characters. */
+export const MAX_DESCRIPTION_CHARS = 750;
+
+export async function getLocationDetails(googleAccountId: string, locationName: string): Promise<LocationDetails> {
+  return call<LocationDetails>(googleAccountId, `${INFO_BASE}/${locationName}?readMask=${encodeURIComponent(PROFILE_READ_MASK)}`);
+}
+
+/** Update the listed fields. `updateMask` uses Google's field names (profile, phoneNumbers, websiteUri, regularHours, specialHours). */
+export async function patchLocation(googleAccountId: string, locationName: string, body: Partial<LocationDetails>, updateMask: string[]): Promise<LocationDetails> {
+  if (!updateMask.length) throw new ReviewsApiError('Nothing to change.', 'INVALID_REQUEST');
+  const q = new URLSearchParams({ updateMask: updateMask.join(',') });
+  return call<LocationDetails>(googleAccountId, `${INFO_BASE}/${locationName}?${q}`, { method: 'PATCH', body });
+}
+
+/** Google's own version of the profile: fields it (or the public) changed, and edits still waiting to publish. */
+export async function getGoogleUpdated(googleAccountId: string, locationName: string): Promise<{ location: LocationDetails; diffMask: string; pendingMask: string }> {
+  const data = await call<{ location?: LocationDetails; diffMask?: string; pendingMask?: string }>(
+    googleAccountId, `${INFO_BASE}/${locationName}:getGoogleUpdated?readMask=${encodeURIComponent(PROFILE_READ_MASK)}`);
+  return { location: data.location ?? { name: locationName }, diffMask: data.diffMask ?? '', pendingMask: data.pendingMask ?? '' };
+}
+
+// ── Posts (v4 localPosts) ────────────────────────────────────────────────────
+
+export type PostTopic = 'STANDARD' | 'EVENT' | 'OFFER' | 'ALERT';
+export type CallToAction = 'BOOK' | 'ORDER' | 'SHOP' | 'LEARN_MORE' | 'SIGN_UP' | 'CALL';
+export interface GoogleInterval { startDate?: GoogleDate; startTime?: TimeOfDay; endDate?: GoogleDate; endTime?: TimeOfDay }
+
+export interface LocalPost {
+  /** "accounts/1/locations/2/localPosts/3". */
+  name?: string;
+  languageCode?: string;
+  summary?: string;
+  topicType?: PostTopic;
+  callToAction?: { actionType?: CallToAction; url?: string };
+  event?: { title?: string; schedule?: GoogleInterval };
+  offer?: { couponCode?: string; redeemOnlineUrl?: string; termsConditions?: string };
+  media?: Array<{ mediaFormat?: string; sourceUrl?: string; googleUrl?: string }>;
+  state?: string;
+  searchUrl?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+/** Google caps post text at 1,500 characters. */
+export const MAX_POST_CHARS = 1500;
+
+export async function listLocalPosts(googleAccountId: string, parent: string, limit = 50): Promise<LocalPost[]> {
+  const out: LocalPost[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 5 && out.length < limit; page++) {
+    const q = new URLSearchParams({ pageSize: '100', ...(pageToken ? { pageToken } : {}) });
+    const data = await call<{ localPosts?: LocalPost[]; nextPageToken?: string }>(googleAccountId, `${REVIEWS_BASE}/${parent}/localPosts?${q}`);
+    out.push(...(data.localPosts ?? []));
+    pageToken = data.nextPageToken || undefined;
+    if (!pageToken) break;
+  }
+  return out.slice(0, limit);
+}
+
+export async function createLocalPost(googleAccountId: string, parent: string, post: LocalPost): Promise<LocalPost> {
+  return call<LocalPost>(googleAccountId, `${REVIEWS_BASE}/${parent}/localPosts`, { method: 'POST', body: post });
+}
+
+export async function deleteLocalPost(googleAccountId: string, postName: string): Promise<void> {
+  await call(googleAccountId, `${REVIEWS_BASE}/${postName}`, { method: 'DELETE' });
+}
+
+// ── Photos (v4 media) ────────────────────────────────────────────────────────
+
+export const PHOTO_CATEGORIES = ['COVER', 'PROFILE', 'LOGO', 'EXTERIOR', 'INTERIOR', 'PRODUCT', 'AT_WORK', 'FOOD_AND_DRINK', 'MENU', 'COMMON_AREA', 'ROOMS', 'TEAMS', 'ADDITIONAL'] as const;
+export type PhotoCategory = (typeof PHOTO_CATEGORIES)[number];
+
+export interface MediaItem {
+  /** "accounts/1/locations/2/media/3". */
+  name?: string;
+  mediaFormat?: 'PHOTO' | 'VIDEO' | string;
+  locationAssociation?: { category?: string; priceListItemId?: string };
+  googleUrl?: string;
+  thumbnailUrl?: string;
+  sourceUrl?: string;
+  description?: string;
+  createTime?: string;
+  dimensions?: { widthPixels?: number; heightPixels?: number };
+  insights?: { viewCount?: string };
+}
+
+export async function listMedia(googleAccountId: string, parent: string, limit = 100): Promise<{ items: MediaItem[]; total: number | null }> {
+  const items: MediaItem[] = [];
+  let total: number | null = null;
+  let pageToken: string | undefined;
+  for (let page = 0; page < 5 && items.length < limit; page++) {
+    const q = new URLSearchParams({ pageSize: '100', ...(pageToken ? { pageToken } : {}) });
+    const data = await call<{ mediaItems?: MediaItem[]; totalMediaItemCount?: number; nextPageToken?: string }>(googleAccountId, `${REVIEWS_BASE}/${parent}/media?${q}`);
+    items.push(...(data.mediaItems ?? []));
+    if (typeof data.totalMediaItemCount === 'number') total = data.totalMediaItemCount;
+    pageToken = data.nextPageToken || undefined;
+    if (!pageToken) break;
+  }
+  return { items: items.slice(0, limit), total };
+}
+
+/** Add a photo from a public URL; Google fetches and processes it. */
+export async function createMedia(googleAccountId: string, parent: string, input: { sourceUrl: string; category: PhotoCategory; description?: string }): Promise<MediaItem> {
+  return call<MediaItem>(googleAccountId, `${REVIEWS_BASE}/${parent}/media`, {
+    method: 'POST',
+    body: { mediaFormat: 'PHOTO', locationAssociation: { category: input.category }, sourceUrl: input.sourceUrl, ...(input.description ? { description: input.description } : {}) },
+  });
+}
+
+export async function deleteMedia(googleAccountId: string, mediaName: string): Promise<void> {
+  await call(googleAccountId, `${REVIEWS_BASE}/${mediaName}`, { method: 'DELETE' });
 }

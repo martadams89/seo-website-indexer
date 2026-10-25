@@ -12,11 +12,15 @@ import { recordAuditEvent, type User } from '../auth/users.js';
 import { publicOrigin } from '../utils/origin.js';
 import { ReviewsApiError } from './client.js';
 import { buildReviewRoutinePrompt, DEFAULT_REVIEW_ROUTINE, normalizeReviewRoutine } from './routine-prompt.js';
-import { approveReply, businessPerformance, discoverLocations, enableBusinessApis, linkLocation, rejectReply, setupStatus, submitReply, syncLocation } from './service.js';
+import { approveReply, businessPerformance, discoverLocations, enableBusinessApis, linkLocation, moveLocation, rejectReply, setupStatus, submitReply, syncLocation } from './service.js';
 import {
-  deleteLocation, getLocation, getReplyPlan, getReview, listLocations, listReplyPlans, listReviews, locationStats, updateLocation,
-  type ReplyStatus, type ReviewFilter, type ReviewLocation,
+  deleteLocation, getChange, getLocation, getReplyPlan, getReview, listChanges, listLocations, listReplyPlans, listReviews, locationStats, updateLocation,
+  type ChangeStatus, type ReplyStatus, type ReviewFilter, type ReviewLocation,
 } from './store.js';
+import {
+  approveChange, checkGoogleUpdates, getPhotos, getPosts, profileOverview, rejectChange, resolveGoogleUpdates, submitChange, type ChangeInput,
+} from './profile-service.js';
+import type { PhotoInput, PostInput, ProfileEdit } from './profile-rules.js';
 
 interface RequestContext { ctx: { user: User; impersonator: User | null; workspaceId: string | null } }
 const context = (req: FastifyRequest) => (req as unknown as RequestContext).ctx;
@@ -85,14 +89,20 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
 
   app.patch('/api/reviews/locations/:id', handle(async (req) => {
     const loc = locationInWorkspace(req, (req.params as { id: string }).id);
-    const body = (req.body ?? {}) as { brief?: unknown; rules?: unknown; enabled?: boolean; siteId?: string | null };
+    const body = (req.body ?? {}) as { brief?: unknown; rules?: unknown; profileRules?: unknown; enabled?: boolean; siteId?: string | null; googleAccountId?: string };
+    if (body.googleAccountId && body.googleAccountId !== loc.google_account_id) {
+      const moved = await moveLocation(loc, body.googleAccountId);
+      recordAuditEvent({ actorUserId: actor(req).id, workspaceId: loc.workspace_id, action: 'google_reviews.location_moved', detail: { locationId: loc.id, from: loc.google_account_id, to: moved.google_account_id } });
+    }
     const updated = updateLocation(loc.id, {
       brief: body.brief === undefined ? undefined : { ...loc.brief, ...(body.brief as object) },
       rules: body.rules === undefined ? undefined : { ...loc.rules, ...(body.rules as object) },
+      profile_rules: body.profileRules === undefined ? undefined : { ...loc.profile_rules, ...(body.profileRules as object) },
       enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
       site_id: body.siteId === undefined ? undefined : body.siteId,
     });
     if (body.rules !== undefined) recordAuditEvent({ actorUserId: actor(req).id, workspaceId: loc.workspace_id, action: 'google_reviews.rules_updated', detail: { locationId: loc.id, rules: updated?.rules } });
+    if (body.profileRules !== undefined) recordAuditEvent({ actorUserId: actor(req).id, workspaceId: loc.workspace_id, action: 'google_business.profile_rules_updated', detail: { locationId: loc.id, rules: updated?.profile_rules } });
     return updated;
   }));
 
@@ -117,6 +127,87 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
     const loc = locationInWorkspace(req, (req.params as { id: string }).id);
     const q = req.query as { days?: string; fresh?: string };
     return businessPerformance(loc, Number(q.days) || 28, { fresh: q.fresh === '1' || q.fresh === 'true' });
+  }));
+
+  // ── Profile, posts and photos ──────────────────────────────────────────────
+  const fresh = (req: FastifyRequest) => ['1', 'true'].includes(String((req.query as { fresh?: string }).fresh ?? ''));
+  const change = async (req: FastifyRequest, loc: ReviewLocation, input: ChangeInput) => {
+    const result = await submitChange({ location: loc, change: input, user: actor(req), source: 'dashboard' });
+    recordAuditEvent({ actorUserId: actor(req).id, workspaceId: loc.workspace_id, action: `google_business.${input.kind}`, detail: { locationId: loc.id, changeId: result.id, status: result.status, summary: result.summary } });
+    if (result.status === 'failed') throw new ReviewsApiError(result.error ?? 'Google refused the change.', 'UNKNOWN');
+    return result;
+  };
+
+  app.get('/api/reviews/locations/:id/profile', handle(async (req) => profileOverview(locationInWorkspace(req, (req.params as { id: string }).id), { fresh: fresh(req) })));
+
+  app.patch('/api/reviews/locations/:id/profile', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    return change(req, loc, { kind: 'profile', edit: (req.body ?? {}) as ProfileEdit });
+  }));
+
+  app.post('/api/reviews/locations/:id/google-updates/check', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    return checkGoogleUpdates(loc);
+  }));
+
+  app.post('/api/reviews/locations/:id/google-updates/resolve', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    const { keep } = (req.body ?? {}) as { keep?: string };
+    if (keep !== 'google' && keep !== 'mine') throw Object.assign(new Error('keep must be "google" or "mine".'), { statusCode: 400 });
+    const result = await resolveGoogleUpdates(loc, keep, actor(req));
+    if (result.status === 'failed') throw new ReviewsApiError(result.error ?? 'Google refused the change.', 'UNKNOWN');
+    return result;
+  }));
+
+  app.get('/api/reviews/locations/:id/posts', handle(async (req) => getPosts(locationInWorkspace(req, (req.params as { id: string }).id), { fresh: fresh(req) })));
+
+  app.post('/api/reviews/locations/:id/posts', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    return change(req, loc, { kind: 'post', post: (req.body ?? {}) as PostInput });
+  }));
+
+  app.delete('/api/reviews/locations/:id/posts', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    const { name } = req.query as { name?: string };
+    if (!name) throw Object.assign(new Error('Pass the post name.'), { statusCode: 400 });
+    return change(req, loc, { kind: 'post_delete', post_name: name });
+  }));
+
+  app.get('/api/reviews/locations/:id/photos', handle(async (req) => getPhotos(locationInWorkspace(req, (req.params as { id: string }).id), { fresh: fresh(req) })));
+
+  app.post('/api/reviews/locations/:id/photos', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    return change(req, loc, { kind: 'photo', photo: (req.body ?? {}) as PhotoInput });
+  }));
+
+  app.delete('/api/reviews/locations/:id/photos', handle(async (req) => {
+    const loc = locationInWorkspace(req, (req.params as { id: string }).id);
+    const { name } = req.query as { name?: string };
+    if (!name) throw Object.assign(new Error('Pass the photo name.'), { statusCode: 400 });
+    return change(req, loc, { kind: 'photo_delete', media_name: name });
+  }));
+
+  app.get('/api/reviews/changes', handle(async (req) => {
+    const q = req.query as { status?: ChangeStatus; locationId?: string; limit?: string };
+    const ws = workspace(req);
+    if (q.locationId) locationInWorkspace(req, q.locationId);
+    return listChanges({ workspaceIds: [ws], status: q.status, locationId: q.locationId || undefined, limit: Number(q.limit) || 100 })
+      .map(c => ({ ...c, location_title: getLocation(c.location_id)?.title ?? null }));
+  }));
+
+  app.post('/api/reviews/changes/:id/approve', handle(async (req) => {
+    const item = getChange((req.params as { id: string }).id);
+    if (!item || item.workspace_id !== workspace(req)) throw Object.assign(new Error('Change not found.'), { statusCode: 404 });
+    const result = await approveChange(item.id, actor(req));
+    recordAuditEvent({ actorUserId: actor(req).id, workspaceId: item.workspace_id, action: 'google_business.change_approved', detail: { changeId: item.id, status: result.status } });
+    if (result.status === 'failed') throw new ReviewsApiError(result.error ?? 'Google refused the change.', 'UNKNOWN');
+    return result;
+  }));
+
+  app.post('/api/reviews/changes/:id/reject', handle(async (req) => {
+    const item = getChange((req.params as { id: string }).id);
+    if (!item || item.workspace_id !== workspace(req)) throw Object.assign(new Error('Change not found.'), { statusCode: 404 });
+    return rejectChange(item.id, actor(req));
   }));
 
   // ── Reviews and replies ────────────────────────────────────────────────────
