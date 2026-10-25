@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.45.0](https://github.com/martadams89/seo-website-indexer/compare/v1.44.3...v1.45.0) (2026-10-25)
+
+
+### ✨ Features
+
+* Google connection health with one-click permission updates and one-off API enabling ([83ef7d4](https://github.com/martadams89/seo-website-indexer/commit/83ef7d4dd0543de61c5675b0c72f04df0bd14bf8))
+* Google reviews with guarded AI replies, Business Profile insights and OpenGSC-inspired MCP tools ([83ef7d4](https://github.com/martadams89/seo-website-indexer/commit/83ef7d4dd0543de61c5675b0c72f04df0bd14bf8))
+* replace OpenGSC and Porter Metrics workflows with content groups, period comparison and local reports ([83ef7d4](https://github.com/martadams89/seo-website-indexer/commit/83ef7d4dd0543de61c5675b0c72f04df0bd14bf8))
+
 ## [1.44.3](https://github.com/martadams89/seo-website-indexer/compare/v1.44.2...v1.44.3) (2026-10-24)
 
 
