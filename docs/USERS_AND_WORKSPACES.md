@@ -70,6 +70,14 @@ A Google credential:
 
 An editor with **Manage integrations and API keys** can connect their own Google account to the active workspace. This supports both common operating models: a client can provide its own Google account, or the team can use a Google account already shared with the workspace.
 
+### Setting up a new workspace
+
+A new, empty workspace opens the Google setup wizard. You don't have to finish it:
+
+- **Use a Google account you've already connected** lists the logins you own in other workspaces. One click shares it with the new workspace, with no Google sign-in needed.
+- **Skip for now** goes to the dashboard and stops this browser being sent back to the wizard for that workspace. Connect Google later from **Settings → Google Accounts**, or from **Setup required** in the sidebar.
+- If you belong to more than one workspace, the wizard has a workspace picker so you can switch back.
+
 ## Layered settings
 
 API keys and notifications can be stored at two levels:

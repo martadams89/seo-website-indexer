@@ -10,6 +10,7 @@ import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
 import { useWorkspace } from './workspace/WorkspaceContext';
 import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
+import { isSetupSkipped } from './workspace/setupSkip';
 import { createLogStream } from './api';
 import { ToastHost } from './components/Toast';
 
@@ -92,6 +93,9 @@ export default function Layout() {
   // it anyway.
   const isViewer = active?.role === 'viewer' && !user.is_super_admin;
   const needsSetup = !!status && !status.auth.authenticated && sites.length === 0 && !isViewer;
+  // "Skip for now" on the wizard stops the redirect for this workspace; the
+  // sidebar's "Setup required" link still leads back to it.
+  const forceSetup = needsSetup && !isSetupSkipped(active?.id);
   // Public hostnames always get https links; a LAN/IP host behind an HTTPS
   // proxy that doesn't send X-Forwarded-Proto still gets http:// ones, which
   // Google and AI apps reject.
@@ -100,10 +104,10 @@ export default function Layout() {
 
   // Redirect to onboarding if not configured
   useEffect(() => {
-    if (needsSetup && window.location.pathname !== '/setup') {
+    if (forceSetup && window.location.pathname !== '/setup') {
       navigate('/setup');
     }
-  }, [needsSetup, navigate]);
+  }, [forceSetup, navigate]);
 
   // SSE connection for live logs
   useEffect(() => {
