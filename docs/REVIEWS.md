@@ -39,6 +39,10 @@ Replies that still look like a template (`[Name]`, `{{first_name}}`) always need
 
 The **brief** shapes how replies sound: business name, voice, sign-off, where unhappy customers should go, language and things never to say. Assistants read it with `reviews_get_brief`; they can add notes but can't change the rules.
 
+## Reports
+
+Add the **Google reviews and Business Profile** section to a report template (**Reports → New template**) to send clients each location's rating, new reviews, response rate, unanswered reviews and Business Profile calls, website clicks, direction requests and views for the period.
+
 ## Alerts
 
 Turn on **Google review alerts** under **Settings → Notifications**. The app then tells you when a new review at or below a location's alert threshold arrives, or when Google rejects a reply (with the policy reason). Each sync sends at most one message per location and lists up to eight reviews.

@@ -223,6 +223,19 @@ describe('Google reviews over MCP', () => {
     expect(result.search_keywords.keywords[1].below_threshold).toBe(true);
   });
 
+  it('puts reviews and Business Profile performance in client reports, honouring the chosen sections', async () => {
+    const reports = await import('../platform/reports.js');
+    const template = reports.createReportTemplate({ workspaceId: alice.workspaceId, userId: alice.user.id, name: 'Local monthly', sections: ['local', 'nonsense'] });
+    expect(template.sections).toEqual(['local']);
+    const { html, snapshot } = await reports.generateReport(alice.workspaceId, template.id);
+    expect(snapshot.local?.[0]).toMatchObject({ name: 'Acme Plumbing Leeds', unanswered: expect.any(Number) });
+    expect(snapshot.local?.[0].performance?.calls).toBeGreaterThan(0);
+    expect(html).toContain('Google reviews and Business Profile');
+    expect(html).toContain('website clicks');
+    expect(html).not.toContain('AI visibility');
+    expect(html).not.toContain('Executive priorities');
+  });
+
   it('explains an unapproved Cloud project instead of a raw quota error', async () => {
     notApproved = true;
     const err = await m.service.syncLocation(m.store.getLocation(locationId)!).catch((e: unknown) => e) as InstanceType<typeof m.client.ReviewsApiError>;

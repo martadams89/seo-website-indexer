@@ -2438,3 +2438,8 @@ body::before {
 .mcp-copy-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); }
 .mcp-copy-row > code { flex: 1; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
 .mcp-copy-row > .mcp-copy-label { flex: 0 0 92px; font-size: 12px; opacity: 0.7; }
+.report-sections { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.report-sections legend { padding: 0 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.report-sections label { display: flex; align-items: flex-start; gap: 8px; color: var(--text-primary); font-size: 12px; font-weight: 600; }
+.report-sections label span { display: flex; flex-direction: column; gap: 2px; }
+.report-sections small { color: var(--text-dim); font-size: 12px; font-weight: 400; }

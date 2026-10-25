@@ -23,7 +23,9 @@ import { checkSiteHygiene } from '../indexer/hygiene.js';
 import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
 import { GOOGLE_INDEXING_CAPABILITIES, recordRequestOutcomes, siteRequestCandidates, type RequestOutcome } from '../indexer/request-indexing.js';
-import { snapshotSitePerformance, getWowDeltas } from '../analytics/perf-store.js';
+import { snapshotSitePerformance, getWowDeltas, addTrackedQuery, listTrackedQueries, removeTrackedQuery } from '../analytics/perf-store.js';
+import { comparePeriods, type CompareDimension } from '../analytics/compare.js';
+import { contentGroupPerformance, deleteContentGroup, saveContentGroup } from '../analytics/content-groups.js';
 import { getOpportunity, getPlaybook, setOpportunityStatus, type StoredOpportunity } from '../analytics/playbook.js';
 import { getAlerts } from '../analytics/stats.js';
 import { getResults } from '../ai/citations.js';
@@ -407,6 +409,89 @@ export const TOOLS: ToolDef[] = [
       const o = setOpportunityStatus(site, String(args.opportunityId), args.status as 'open' | 'dismissed' | 'done');
       if (!o) throw new Error('Opportunity not found.');
       return { id: o.id, status: o.status, done_at: o.done_at };
+    },
+  },
+  {
+    name: 'compare_periods',
+    title: 'Compare search performance between periods',
+    description: 'Compare a site\'s Google Search Console performance for a period (the last N days, or start/end dates) with the period before or the same period last year: total clicks, impressions, CTR and position, plus the queries, pages, countries or devices that gained and lost the most clicks, and how many are new or lost.',
+    scope: 'mcp:read',
+    inputShape: {
+      siteId: z.string(),
+      days: z.number().int().min(1).max(480).optional().describe('Last N complete days (default 28). Ignored when start and end are given.'),
+      start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      compareTo: z.enum(['previous', 'year']).optional().describe('previous (default) or year (same dates last year).'),
+      dimension: z.enum(['query', 'page', 'country', 'device']).optional(),
+      limit: z.number().int().min(5).max(200).optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    handler: (ctx, args) => comparePeriods(requireSite(ctx, String(args.siteId)), {
+      days: args.days as number | undefined, start: args.start as string | undefined, end: args.end as string | undefined,
+      mode: args.compareTo as 'previous' | 'year' | undefined, dimension: args.dimension as CompareDimension | undefined, limit: args.limit as number | undefined,
+    }),
+  },
+  {
+    name: 'list_content_groups',
+    title: 'Content group performance',
+    description: 'A site\'s content groups (pages grouped by URL rules, e.g. blog, services, locations) with clicks, impressions, CTR and position for the last N days vs the period before, top pages per group, and the ungrouped remainder.',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string(), days: z.number().int().min(1).max(240).optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => contentGroupPerformance(requireSite(ctx, String(args.siteId)).id, (args.days as number | undefined) ?? 28),
+  },
+  {
+    name: 'save_content_group',
+    title: 'Create or update a content group',
+    description: 'Group a site\'s pages by URL rules. A page belongs when it matches any include rule and no exclude rule. Rule values starting with "/" match the URL path; otherwise the full URL. Saving with an existing name (or id) updates that group. Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: {
+      siteId: z.string(),
+      name: z.string().min(1).max(100),
+      include: z.array(z.object({ match: z.enum(['prefix', 'contains', 'exact', 'regex']), value: z.string().min(1).max(300) })).min(1),
+      exclude: z.array(z.object({ match: z.enum(['prefix', 'contains', 'exact', 'regex']), value: z.string().min(1).max(300) })).optional(),
+      id: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => saveContentGroup(requireWritableSite(ctx, String(args.siteId)).id, { id: args.id as string | undefined, name: String(args.name), include: args.include, exclude: args.exclude, userId: ctx.user.id }),
+  },
+  {
+    name: 'delete_content_group',
+    title: 'Delete a content group',
+    description: 'Delete one of a site\'s content groups (only the grouping; no page or Search Console data is removed). Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), groupId: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const ok = deleteContentGroup(requireWritableSite(ctx, String(args.siteId)).id, String(args.groupId));
+      if (!ok) throw new Error('Content group not found.');
+      return { ok };
+    },
+  },
+  {
+    name: 'list_tracked_queries',
+    title: 'List tracked keywords',
+    description: 'Search queries tracked for a site, with their last recorded Google position (from Search Console). Position drops raise alerts.',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => ({ tracked: listTrackedQueries(requireSite(ctx, String(args.siteId)).id) }),
+  },
+  {
+    name: 'track_query',
+    title: 'Track or untrack a keyword',
+    description: 'Start (or stop) tracking a search query\'s Google position for a site. Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), query: z.string().min(1).max(200), track: z.boolean().optional().describe('false to stop tracking (default true).') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireWritableSite(ctx, String(args.siteId));
+      const query = String(args.query).trim();
+      if (args.track === false) {
+        const row = listTrackedQueries(site.id).find(t => t.query.toLowerCase() === query.toLowerCase());
+        if (row) removeTrackedQuery(row.id);
+      } else addTrackedQuery(site.id, query);
+      return { tracked: listTrackedQueries(site.id) };
     },
   },
   {

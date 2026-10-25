@@ -22,7 +22,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. See exactly what Google's APIs can and can't do, and get a prioritised "Request indexing" queue with copyable prompts for a browser agent. |
 | Google Ads | Link each client's ad accounts (including through a manager account), set monthly budgets and guardrails, see performance, pacing and an audit, and approve, reject or revert changes. An AI routine builder turns a short questionnaire into a ready-to-schedule prompt for any MCP-capable assistant that reviews, researches competitors and optimises spend inside the guardrails. |
 | Google reviews | Link each client's Business Profile locations, read and answer reviews, approve AI-drafted replies, get alerts for new low-rated reviews and rejected replies, and see calls, website clicks, direction requests and the searches that found each profile. Per-location reply rules decide what an AI assistant may publish on its own. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Compare any period with the one before or last year, see the biggest gainers and losers, and report on content groups (pages grouped by URL rules). Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
 | Ranking playbook | A ranked list of what to change to earn more Google clicks: snippet rewrites, striking-distance pages, cannibalising pairs and decaying content, each with evidence, steps, an estimated monthly click range and an AI-drafted fix for review. Done items are measured after 31 days. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
@@ -30,7 +30,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
 | Work and publishing | Select multiple work items to start, resolve, dismiss, reopen or assign together. Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
-| Reports | Build scheduled reports, send digests and provide an authenticated, read-only Executive View. |
+| Reports | Build scheduled reports with the sections you choose — search, Google reviews and Business Profile (calls, directions, views), Google Ads, AI visibility — send digests and provide an authenticated, read-only Executive View. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
 All external services are optional. A basic install can run sitemap checks and IndexNow without connecting an analytics or AI provider.
@@ -231,7 +231,7 @@ Send the token as `Authorization: Bearer oc_…`. See the [automation API guide]
 
 ## MCP server (connect an AI assistant)
 
-The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so any MCP-capable assistant can read — and, with your permission, act on — your data: sites, Search Console performance, URL inspection, the ranking playbook, alerts, indexing, hygiene, AI-agent readiness, AI citations, Google Ads and Google reviews.
+The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so any MCP-capable assistant can read — and, with your permission, act on — your data: sites, Search Console performance, period comparisons, content groups, tracked keywords, URL inspection, the ranking playbook, alerts, indexing, hygiene, AI-agent readiness, AI citations, Google Ads and Google reviews.
 
 **Connect with OAuth (recommended):** add the server URL to your AI app. It finds the sign-in automatically, opens this app, and you choose what it may do: read data, run SEO actions (`mcp:write`), manage Google Ads (`ads:write`) and/or reply to Google reviews (`reviews:write`). Access tokens last an hour and refresh automatically; disconnect an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
 
@@ -298,6 +298,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
 - [Google Ads: setup, guardrails, MCP tools and AI routines](docs/GOOGLE_ADS.md)
 - [Google reviews: Business Profile setup, reply rules, alerts and MCP tools](docs/REVIEWS.md)
+- [Moving from OpenGSC and Porter Metrics](docs/MIGRATING.md)
 - [Page-level Action Centre and Google verification](docs/ACTION_CENTRE.md)
 - [Ranking playbook: opportunities ranked by clicks gained](docs/RANKING_PLAYBOOK.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)

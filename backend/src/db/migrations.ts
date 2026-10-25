@@ -18,6 +18,25 @@ const migrations: Migration[] = [
     },
   },
   {
+    id: '20261025_02_content_groups',
+    description: 'Content groups: pages grouped by URL rules for group-level Search Console reporting',
+    up(db) {
+      db.exec(`
+        CREATE TABLE content_groups (
+          id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          include_rules TEXT NOT NULL DEFAULT '[]',
+          exclude_rules TEXT NOT NULL DEFAULT '[]',
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(site_id, name)
+        );
+      `);
+    },
+  },
+  {
     id: '20261025_01_google_reviews',
     description: 'Google Business Profile locations, synced reviews and guarded reply plans',
     up(db) {
