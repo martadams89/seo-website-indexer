@@ -83,7 +83,13 @@ import {
   createGoogleOAuthAuthorization,
   consumeGoogleOAuthState,
   GOOGLE_ADS_SCOPE,
+  GOOGLE_BUSINESS_SCOPE,
+  createApiEnableAuthorization,
+  exchangeCodeForAccessToken,
+  enableRequiredApis,
 } from './auth/google-oauth.js';
+import { forgetProbe, googleAttentionCount, KNOWN_GOOGLE_SERVICES, probeDisabledApis, servicesFor, workspaceGoogleHealth } from './auth/google-health.js';
+import { healOrphanedReviewLocations } from './reviews/store.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
 import { GOOGLE_INDEXING_CAPABILITIES, oneOffPrompt, recordRequestOutcomes, routinePrompt, siteRequestCandidates, type RequestOutcome } from './indexer/request-indexing.js';
@@ -156,6 +162,8 @@ import { registerMcpProtocolRoute } from './mcp/http.js';
 import { healOrphanedAdsAccounts } from './ads/store.js';
 import { registerMcpOAuthRoutes, registerMcpOAuthApiRoutes } from './mcp/oauth.js';
 import { registerAdsRoutes } from './ads/routes.js';
+import { registerReviewsRoutes } from './reviews/routes.js';
+import { registerSearchRoutes } from './analytics/search-routes.js';
 import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
@@ -393,13 +401,14 @@ function capabilityForPath(path: string): Capability | null {
     return 'manage_sites';
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
-    || path.startsWith('/api/auth/google/start') || path.startsWith('/api/auth/bing/start')
+    || path.startsWith('/api/auth/google/start') || path.startsWith('/api/auth/google/enable-apis') || path.startsWith('/api/auth/bing/start')
     || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys'
     || path === '/api/ai/models' || path.startsWith('/api/ai/provision/')) {
     return 'manage_integrations';
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
   if (path.startsWith('/api/ads/')) return 'manage_ads';
+  if (path.startsWith('/api/reviews/')) return 'manage_reviews';
   if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
   if (path.startsWith('/api/platform/discovery')) return 'manage_content';
   if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
@@ -561,12 +570,18 @@ app.get('/api/status', async (req) => {
     // The address the server builds callback and MCP URLs from, so the
     // dashboard can flag an HTTPS proxy in front of a LAN/IP host without PUBLIC_URL.
     publicOrigin: requestOrigin(req),
+    // Google connections in this workspace that need a reconnect, a permission or an API switched on.
+    googleAttention: ws ? googleAttentionCount(ws) : 0,
   };
 });
 
 // ── App authentication (users, sessions, 2FA) ─────────────────────────────────
 
-app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0, emailEnabled: emailConfigured() }));
+// A public install is claimable by whoever reaches it first. ADMIN_EMAIL locks
+// the first-run signup to one address (case-insensitive).
+const BOOTSTRAP_ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? '').trim().toLowerCase();
+
+app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0, emailEnabled: emailConfigured(), signupRestricted: !!BOOTSTRAP_ADMIN_EMAIL }));
 
 app.get('/api/auth/me', async (req, reply) => {
   const token = sessionTokenFromReq(req);
@@ -587,6 +602,9 @@ app.post('/api/auth/signup', AUTH_RATE_LIMIT, async (req, reply) => {
   const { email, password, name } = (req.body ?? {}) as { email?: string; password?: string; name?: string };
   if (!email?.includes('@') || !password || password.length < 8) {
     return reply.status(400).send({ error: 'A valid email and a password of at least 8 characters are required.' });
+  }
+  if (BOOTSTRAP_ADMIN_EMAIL && email.trim().toLowerCase() !== BOOTSTRAP_ADMIN_EMAIL) {
+    return reply.status(403).send({ error: 'This install only lets the email address set in ADMIN_EMAIL create the first admin account.' });
   }
   const user = createUser({ email, password, name, role: 'admin', superAdmin: true });
   bootstrapUserWorkspace(user, true); // first user: also claims any pre-existing single-tenant data
@@ -834,6 +852,7 @@ app.get('/api/workspaces', async (req) => {
       manage_reports: hasCapability(user, w.id, 'manage_reports'),
       manage_governance: hasCapability(user, w.id, 'manage_governance'),
       manage_ads: hasCapability(user, w.id, 'manage_ads'),
+      manage_reviews: hasCapability(user, w.id, 'manage_reviews'),
     },
   }));
 });
@@ -1394,8 +1413,8 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads } = (req.body ?? {}) as {
-    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean;
+  const { clientId, clientSecret, autoSetup, accountId, ads, business } = (req.body ?? {}) as {
+    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
   };
   let reconnect: ReturnType<typeof getGoogleAccountById> = null;
   if (accountId) {
@@ -1411,9 +1430,11 @@ app.post('/api/auth/google/start', async (req, reply) => {
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
-      // A reconnect must never silently drop Google Ads: carry it forward when
-      // the existing grant has it (the URL no longer uses incremental auth).
+      // A reconnect must never silently drop Google Ads or Business Profile:
+      // carry them forward when the existing grant has them (the URL no
+      // longer uses incremental auth).
       ads: !!ads || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_ADS_SCOPE),
+      business: !!business || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_BUSINESS_SCOPE),
       clientId: reconnect?.client_id ?? clientId,
       clientSecret: reconnect?.client_secret ?? clientSecret,
       loginHint: reconnect?.email ?? null,
@@ -1458,12 +1479,44 @@ app.get('/api/auth/google/callback', async (req, reply) => {
     return reply.status(403).send({ error: 'The user or workspace for this authorization is no longer available.' });
   }
 
+  if (pending.purpose === 'enable_apis') {
+    // One-off: switch the APIs on with a short-lived Cloud token and keep nothing.
+    const openerOrigin = new URL(pending.redirectUri).origin;
+    let result: { enabled: string[]; skipped: string[] } = { enabled: [], skipped: [] };
+    let failure: string | null = null;
+    try {
+      const token = await exchangeCodeForAccessToken(code, pending.redirectUri, pending.clientId, pending.clientSecret);
+      result = await enableRequiredApis(token, pending.clientId, pending.payload?.accountId ?? 'Google connection', pending.payload?.services ?? []);
+      if (pending.payload?.accountId) forgetProbe(pending.payload.accountId);
+    } catch (e) { failure = e instanceof Error ? e.message : String(e); }
+    const ok = !failure && !result.skipped.length;
+    return reply.type('text/html').send(`
+      <!DOCTYPE html>
+      <html lang="en">
+        <head><meta charset="utf-8"><title>${ok ? 'APIs enabled' : 'Some APIs could not be enabled'}</title></head>
+        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #e2e8f0; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
+          <div style="font-size: 48px; margin-bottom: 20px;">${ok ? '✅' : '⚠️'}</div>
+          <h2 style="color: white; margin-bottom: 8px;">${ok ? 'Google APIs switched on' : 'Some APIs could not be switched on'}</h2>
+          <p style="color: #94a3b8; font-size: 14px; max-width: 520px;">${escapeHtml(failure ?? (ok
+            ? `Enabled ${result.enabled.length} API(s). This one-off sign-in kept no Cloud access, so your saved connection is unchanged.`
+            : `Not enabled: ${result.skipped.join(', ')}. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.`))}</p>
+          <script>
+            if (window.opener) window.opener.postMessage({ type: 'GOOGLE_APIS_ENABLED', ok: ${ok}, enabled: ${JSON.stringify(result.enabled)}, skipped: ${JSON.stringify(result.skipped)} }, ${JSON.stringify(openerOrigin)});
+            ${ok ? 'setTimeout(() => window.close(), 1500);' : ''}
+          </script>
+          <button onclick="window.close()" style="margin-top: 16px; background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close</button>
+        </body>
+      </html>
+    `);
+  }
+
   try {
     await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
       { clientId: pending.clientId, clientSecret: pending.clientSecret });
     // Reconnecting after a Disconnect leaves Ads accounts pointing at nothing;
     // re-attach them to this login straight away when that's unambiguous.
     try { healOrphanedAdsAccounts(pending.workspaceId); } catch (e) { req.log.warn({ err: e }, 'Ads relink after Google connect failed'); }
+    try { healOrphanedReviewLocations(pending.workspaceId); } catch (e) { req.log.warn({ err: e }, 'Business Profile relink after Google connect failed'); }
     const openerOrigin = new URL(pending.redirectUri).origin;
     return reply.type('text/html').send(`
       <!DOCTYPE html>
@@ -1502,6 +1555,37 @@ app.get('/api/auth/google/callback', async (req, reply) => {
         </body>
       </html>
     `);
+  }
+});
+
+// ── Google connection health ────────────────────────────────────────────────
+// What each connection in the active workspace still needs: permissions its
+// sites, Ads clients and Business Profile locations use but the grant lacks,
+// switched-off APIs, and what will make Google expire it.
+app.get('/api/auth/google/health', async (req) => {
+  const ws = currentWorkspace(req);
+  if (!ws) return [];
+  const q = req.query as { probe?: string; fresh?: string };
+  return workspaceGoogleHealth(ws, { probe: q.probe === '1' || q.probe === 'true', fresh: q.fresh === '1' || q.fresh === 'true' });
+});
+
+// Start the one-off "switch the APIs on" sign-in for one connection.
+app.post('/api/auth/google/enable-apis/start', async (req, reply) => {
+  const ws = currentWorkspace(req);
+  if (!ws) return reply.status(400).send({ error: 'No active workspace.' });
+  const { accountId, services: asked } = (req.body ?? {}) as { accountId?: string; services?: unknown };
+  const account = getGoogleAccountsForWorkspace(ws).find(a => a.id === accountId);
+  if (!account) return reply.status(404).send({ error: 'Google connection not found in this workspace.' });
+  // A setup page can name the APIs it's about to need (e.g. Google Ads before any client is linked).
+  const requested = Array.isArray(asked) ? asked.filter((v): v is string => typeof v === 'string' && KNOWN_GOOGLE_SERVICES.has(v)) : [];
+  const disabled = (await probeDisabledApis(account, { fresh: true })).map(d => d.service);
+  const services = [...new Set([...requested, ...(disabled.length ? disabled : requested.length ? [] : servicesFor(account))])];
+  if (!services.length) return reply.status(400).send({ error: 'Nothing to enable: this connection isn\'t used by any site, Ads client or Business Profile location yet.' });
+  try {
+    const authorizationUrl = createApiEnableAuthorization({ userId: currentUser(req).id, workspaceId: ws, redirectUri: `${browserOrigin(req)}/api/auth/google/callback`, account, services });
+    return { authorizationUrl, services };
+  } catch (e) {
+    return reply.status(400).send({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -2771,7 +2855,7 @@ app.get('/api/mcp/info', async (req) => {
   return {
     endpoint,
     transport: 'http',
-    scopes: ['mcp:read', 'mcp:write', 'ads:write'],
+    scopes: ['mcp:read', 'mcp:write', 'ads:write', 'reviews:write'],
     oauth: { issuer: origin, authorizationEndpoint: `${origin}/oauth/authorize`, tokenEndpoint: `${origin}/oauth/token`, registrationEndpoint: `${origin}/oauth/register` },
     headerName: 'Authorization',
     // The frontend fills <token> in from the freshly minted value at create time.
@@ -2803,6 +2887,8 @@ app.delete('/api/mcp/tokens/:id', async (req, reply) => {
 registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
 registerAdsRoutes(app);
+registerReviewsRoutes(app);
+registerSearchRoutes(app);
 registerPlaybookRoutes(app);
 registerMcpOAuthRoutes(app);
 registerMcpOAuthApiRoutes(app, currentUser);

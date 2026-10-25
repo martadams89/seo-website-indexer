@@ -23,12 +23,17 @@ import { checkSiteHygiene } from '../indexer/hygiene.js';
 import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
 import { GOOGLE_INDEXING_CAPABILITIES, recordRequestOutcomes, siteRequestCandidates, type RequestOutcome } from '../indexer/request-indexing.js';
-import { snapshotSitePerformance, getWowDeltas } from '../analytics/perf-store.js';
+import { snapshotSitePerformance, getWowDeltas, addTrackedQuery, listTrackedQueries, removeTrackedQuery } from '../analytics/perf-store.js';
+import { comparePeriods, type CompareDimension } from '../analytics/compare.js';
+import { contentGroupPerformance, deleteContentGroup, saveContentGroup } from '../analytics/content-groups.js';
+import { getOpportunity, getPlaybook, setOpportunityStatus, type StoredOpportunity } from '../analytics/playbook.js';
+import { getAlerts } from '../analytics/stats.js';
 import { getResults } from '../ai/citations.js';
 import { runIndexing, isRunning } from '../scheduler.js';
 import { type McpScope, type McpTokenAuth } from './tokens.js';
 import { ADS_TOOLS } from './ads-tools.js';
 import { GA4_TOOLS } from './ga4-tools.js';
+import { REVIEWS_TOOLS } from './reviews-tools.js';
 
 export interface McpContext {
   user: User;
@@ -347,10 +352,169 @@ export const TOOLS: ToolDef[] = [
       return { ok: true, siteId: site.id, snapshotAt: new Date().toISOString() };
     },
   },
+  {
+    name: 'get_playbook',
+    title: 'Get the ranking playbook',
+    description: 'Ranked SEO opportunities for a site from its Search Console data: striking-distance queries (positions 4–20), CTR gaps and regressions, cannibalisation (two pages competing for the same queries) and content decay. Each comes with an estimated monthly-click range, effort, confidence, evidence and steps. Also returns blockers (indexing problems to fix first) and measured results of opportunities marked done.',
+    scope: 'mcp:read',
+    inputShape: {
+      siteId: z.string(),
+      kind: z.enum(['striking_distance', 'ctr_gap', 'cannibalisation', 'content_decay']).optional(),
+      status: z.enum(['open', 'dismissed', 'done']).optional().describe('Default open.'),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireSite(ctx, String(args.siteId));
+      const playbook = getPlaybook(site.id);
+      if (!playbook) throw new Error('Site not found.');
+      const status = (args.status as string | undefined) ?? 'open';
+      const opportunities = (status === 'done' ? playbook.results : playbook.opportunities
+        .filter((o: StoredOpportunity) => o.status === status && (!args.kind || o.kind === args.kind))
+        .slice(0, (args.limit as number | undefined) ?? 25)
+        .map((o: StoredOpportunity) => ({
+          id: o.id, kind: o.kind, subtype: o.subtype, page: o.page, competing_page: o.secondary_page, headline: o.headline,
+          monthly_clicks_estimate: { low: o.low, high: o.high }, effort: o.effort, confidence: o.confidence, steps: o.steps, evidence: o.evidence,
+        })));
+      return {
+        site: playbook.site, computed_at: playbook.computedAt, summary: playbook.summary, blockers: playbook.blockers,
+        opportunities, methodology: playbook.methodology,
+        ...(playbook.computedAt ? {} : { note: 'No playbook has been computed for this site yet. It is built after Search Console data syncs (or with Refresh on the Playbook page).' }),
+      };
+    },
+  },
+  {
+    name: 'get_playbook_opportunity',
+    title: 'Get one playbook opportunity',
+    description: 'Full detail for one opportunity from get_playbook, including evidence, steps and any saved draft (titles, descriptions, briefs).',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string(), opportunityId: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireSite(ctx, String(args.siteId));
+      const o = getOpportunity(site.id, String(args.opportunityId));
+      if (!o) throw new Error('Opportunity not found.');
+      return o;
+    },
+  },
+  {
+    name: 'set_playbook_opportunity_status',
+    title: 'Mark a playbook opportunity done or dismissed',
+    description: 'Mark an opportunity done (after the change is live — the app then measures the real effect about a month later), dismissed, or open again. Requires the mcp:write scope.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), opportunityId: z.string(), status: z.enum(['open', 'dismissed', 'done']) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireWritableSite(ctx, String(args.siteId));
+      const o = setOpportunityStatus(site, String(args.opportunityId), args.status as 'open' | 'dismissed' | 'done');
+      if (!o) throw new Error('Opportunity not found.');
+      return { id: o.id, status: o.status, done_at: o.done_at };
+    },
+  },
+  {
+    name: 'compare_periods',
+    title: 'Compare search performance between periods',
+    description: 'Compare a site\'s Google Search Console performance for a period (the last N days, or start/end dates) with the period before or the same period last year: total clicks, impressions, CTR and position, plus the queries, pages, countries or devices that gained and lost the most clicks, and how many are new or lost.',
+    scope: 'mcp:read',
+    inputShape: {
+      siteId: z.string(),
+      days: z.number().int().min(1).max(480).optional().describe('Last N complete days (default 28). Ignored when start and end are given.'),
+      start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      compareTo: z.enum(['previous', 'year']).optional().describe('previous (default) or year (same dates last year).'),
+      dimension: z.enum(['query', 'page', 'country', 'device']).optional(),
+      limit: z.number().int().min(5).max(200).optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    handler: (ctx, args) => comparePeriods(requireSite(ctx, String(args.siteId)), {
+      days: args.days as number | undefined, start: args.start as string | undefined, end: args.end as string | undefined,
+      mode: args.compareTo as 'previous' | 'year' | undefined, dimension: args.dimension as CompareDimension | undefined, limit: args.limit as number | undefined,
+    }),
+  },
+  {
+    name: 'list_content_groups',
+    title: 'Content group performance',
+    description: 'A site\'s content groups (pages grouped by URL rules, e.g. blog, services, locations) with clicks, impressions, CTR and position for the last N days vs the period before, top pages per group, and the ungrouped remainder.',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string(), days: z.number().int().min(1).max(240).optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => contentGroupPerformance(requireSite(ctx, String(args.siteId)).id, (args.days as number | undefined) ?? 28),
+  },
+  {
+    name: 'save_content_group',
+    title: 'Create or update a content group',
+    description: 'Group a site\'s pages by URL rules. A page belongs when it matches any include rule and no exclude rule. Rule values starting with "/" match the URL path; otherwise the full URL. Saving with an existing name (or id) updates that group. Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: {
+      siteId: z.string(),
+      name: z.string().min(1).max(100),
+      include: z.array(z.object({ match: z.enum(['prefix', 'contains', 'exact', 'regex']), value: z.string().min(1).max(300) })).min(1),
+      exclude: z.array(z.object({ match: z.enum(['prefix', 'contains', 'exact', 'regex']), value: z.string().min(1).max(300) })).optional(),
+      id: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => saveContentGroup(requireWritableSite(ctx, String(args.siteId)).id, { id: args.id as string | undefined, name: String(args.name), include: args.include, exclude: args.exclude, userId: ctx.user.id }),
+  },
+  {
+    name: 'delete_content_group',
+    title: 'Delete a content group',
+    description: 'Delete one of a site\'s content groups (only the grouping; no page or Search Console data is removed). Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), groupId: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const ok = deleteContentGroup(requireWritableSite(ctx, String(args.siteId)).id, String(args.groupId));
+      if (!ok) throw new Error('Content group not found.');
+      return { ok };
+    },
+  },
+  {
+    name: 'list_tracked_queries',
+    title: 'List tracked keywords',
+    description: 'Search queries tracked for a site, with their last recorded Google position (from Search Console). Position drops raise alerts.',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => ({ tracked: listTrackedQueries(requireSite(ctx, String(args.siteId)).id) }),
+  },
+  {
+    name: 'track_query',
+    title: 'Track or untrack a keyword',
+    description: 'Start (or stop) tracking a search query\'s Google position for a site. Requires mcp:write.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), query: z.string().min(1).max(200), track: z.boolean().optional().describe('false to stop tracking (default true).') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireWritableSite(ctx, String(args.siteId));
+      const query = String(args.query).trim();
+      if (args.track === false) {
+        const row = listTrackedQueries(site.id).find(t => t.query.toLowerCase() === query.toLowerCase());
+        if (row) removeTrackedQuery(row.id);
+      } else addTrackedQuery(site.id, query);
+      return { tracked: listTrackedQueries(site.id) };
+    },
+  },
+  {
+    name: 'get_alerts',
+    title: 'Get alerts',
+    description: 'Recent alerts across your workspaces (index drops, schema or llms.txt drift, hygiene problems, quota, Bing, AI citation changes), newest first.',
+    scope: 'mcp:read',
+    inputShape: { workspaceId: z.string().optional(), unacknowledgedOnly: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const workspaces = typeof args.workspaceId === 'string' ? ctx.workspaceIds.filter(w => w === args.workspaceId) : ctx.workspaceIds;
+      const limit = (args.limit as number | undefined) ?? 50;
+      const rows = workspaces.flatMap(w => getAlerts(w, limit).map(a => ({ ...a, workspace_id: w }) as Record<string, unknown>))
+        .filter(a => !args.unacknowledgedOnly || !a.acked)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, limit);
+      return { alerts: rows };
+    },
+  },
 ];
 
-/** Every tool: the SEO tools above plus the Google Ads tools. */
-export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS, ...GA4_TOOLS];
+/** Every tool: the SEO tools above plus the Google Ads, GA4 and Google reviews tools. */
+export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS, ...GA4_TOOLS, ...REVIEWS_TOOLS];
 
 /** Tools this context is allowed to use, by scope. */
 export function toolsForContext(ctx: McpContext): ToolDef[] {

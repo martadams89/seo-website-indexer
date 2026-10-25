@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
   ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut,
   BarChart3, Search, Command, ArrowRight,
-  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness, Rocket, Megaphone,
+  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness, Rocket, Megaphone, Star,
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
@@ -25,6 +25,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: '/actions', icon: BriefcaseBusiness, label: 'Work', detail: 'Owned actions and remediation' },
   { to: '/insights', icon: BarChart3, label: 'Insights', detail: 'Search, AI and connected evidence' },
   { to: '/ads', icon: Megaphone, label: 'Google Ads', detail: 'Client ad accounts, budgets, approvals and AI routines' },
+  { to: '/reviews', icon: Star, label: 'Reviews', detail: 'Google Business Profile reviews, replies and local performance' },
   { to: '/reports', icon: FileOutput, label: 'Reports', detail: 'Snapshots and executive reporting' },
 ];
 const ADVANCED_NAV: NavItem[] = [
@@ -370,6 +371,15 @@ export default function Layout() {
               Google sign-in callbacks and the MCP server URL are built from it, and Google and AI apps reject plain http.
               Set <code>PUBLIC_URL={insecureOrigin}</code> in the server's environment and restart the app, or have your reverse
               proxy send <code>X-Forwarded-Proto: https</code>.
+            </div>
+          </div>
+        )}
+        {!isViewer && (status?.googleAttention ?? 0) > 0 && !(location.pathname === '/settings' && location.search.includes('tab=google')) && (
+          <div className="alert alert-warn origin-alert" role="alert">
+            <AlertTriangle size={14} />
+            <div className="alert-content">
+              <div className="alert-title">{status!.googleAttention === 1 ? 'A Google connection needs' : `${status!.googleAttention} Google connections need`} attention</div>
+              A reconnect, a new permission or a switched-off Google API is stopping some features. <NavLink to="/settings?tab=google">Fix it in Settings → Google Accounts</NavLink>.
             </div>
           </div>
         )}

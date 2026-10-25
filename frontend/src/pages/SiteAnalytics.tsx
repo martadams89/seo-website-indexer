@@ -4,6 +4,9 @@ import { ArrowLeft, Activity, FileText, Gauge, Radar, Send, Stethoscope, UploadC
 import { api, type SiteAnalytics, type LlmsAudit, type HygieneReport, type AgentReadiness, type ApiError } from '../api';
 import { Sparkline, FunnelBar, StatCard } from '../components/Charts';
 import { SearchPerformance } from '../components/SearchPerformance';
+import { SearchCompare } from '../components/SearchCompare';
+import { ContentGroups } from '../components/ContentGroups';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 import { PagePriorities } from '../components/PagePriorities';
 import { useSort, SortTh } from '../components/SortableTable';
 import { useApp } from '../AppContext';
@@ -14,6 +17,7 @@ export default function SiteAnalyticsPage() {
   const navigate = useNavigate();
   const { toast, status } = useApp();
   const { range, setSiteScope } = useInsights();
+  const { active } = useWorkspace();
   const [data, setData] = useState<SiteAnalytics | null>(null);
   const [llms, setLlms] = useState<LlmsAudit | null>(null);
   const [llmsLoading, setLlmsLoading] = useState(false);
@@ -154,6 +158,8 @@ export default function SiteAnalyticsPage() {
       </div>
 
       <SearchPerformance siteId={siteId} initialDays={range} />
+      <SearchCompare siteId={siteId} />
+      <ContentGroups siteId={siteId} canManage={!!active?.permissions?.manage_sites} />
 
       {bingQuota && (
         <div className="empty-note" style={{ marginBottom: 16 }}>

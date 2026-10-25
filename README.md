@@ -2,7 +2,7 @@
 
 # SEO Website Indexer
 
-**A self-hosted SEO, GEO, ASO and Google Ads workbench for indexing, search performance, paid search, backlinks, content and website operations across multiple clients or teams — with an MCP server so any AI assistant (ChatGPT, Claude, Gemini, Cursor, VS Code, agent CLIs…) can do the work on a schedule.**
+**A self-hosted SEO, GEO, ASO, Google Ads and Google reviews workbench for indexing, search performance, paid search, local reputation, backlinks, content and website operations across multiple clients or teams — with an MCP server so any AI assistant (ChatGPT, Claude, Gemini, Cursor, VS Code, agent CLIs…) can do the work on a schedule.**
 
 [![CI](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/martadams89/seo-website-indexer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/martadams89/seo-website-indexer?logo=github)](https://github.com/martadams89/seo-website-indexer/releases)
@@ -21,7 +21,8 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | --- | --- |
 | Indexing | Submit changed sitemaps to Google Search Console and changed URLs to IndexNow or Bing Webmaster. Send removal notices for retired pages, and act on Google's inspection and sitemap feedback. Inspect and clear failed submissions from the dashboard. See exactly what Google's APIs can and can't do, and get a prioritised "Request indexing" queue with copyable prompts for a browser agent. |
 | Google Ads | Link each client's ad accounts (including through a manager account), set monthly budgets and guardrails, see performance, pacing and an audit, and approve, reject or revert changes. An AI routine builder turns a short questionnaire into a ready-to-schedule prompt for any MCP-capable assistant that reviews, researches competitors and optimises spend inside the guardrails. |
-| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
+| Google reviews | Link each client's Business Profile locations, read and answer reviews, approve AI-drafted replies, get alerts for new low-rated reviews and rejected replies, and see calls, website clicks, direction requests and the searches that found each profile. Per-location reply rules decide what an AI assistant may publish on its own. |
+| Search performance | Track coverage, clicks, impressions, queries, pages, countries, devices, crawl freshness and Core Web Vitals. Compare any period with the one before or last year, see the biggest gainers and losers, and report on content groups (pages grouped by URL rules). Find orphaned and weakly linked pages with suggested links, measure title/description changes by click-through rate, and rank page-level Core Web Vitals failures by traffic. |
 | Ranking playbook | A ranked list of what to change to earn more Google clicks: snippet rewrites, striking-distance pages, cannibalising pairs and decaying content, each with evidence, steps, an estimated monthly click range and an AI-drafted fix for review. Done items are measured after 31 days. Search opportunities automatically fetches query history, shows lower-volume queries and highlights priority opportunities. |
 | AI visibility | Build and edit a structured buyer-question library, test it across supported AI and search providers, distinguish direct website citations from third-party marketplace/profile citations and brand mentions, compare competitors and safely upgrade older prompt history. |
 | Site checks | Audit broken links, redirect chains, structured data, `robots.txt`, AI crawler access and `llms.txt`, with change-only history for live and deployed discovery files. |
@@ -29,7 +30,7 @@ SEO Website Indexer brings the routine work around technical SEO and AI search v
 | Markets and entities | Discover brand, organisation or local-business facts from a site's public structured data, review them in normal fields and monitor listing consistency by market. |
 | Data and integrations | Bring together GA4, PageSpeed, Cloudflare, Plausible, Matomo, server logs and external rank data. Switch Unified Intelligence between one site, the full portfolio or workspace-wide evidence; every signal names its website, source, scope, trend and suggested next step. |
 | Work and publishing | Select multiple work items to start, resolve, dismiss, reopen or assign together. Repair findings with website/page context, copyable LLM briefs, deployment notes and saved Google verification; use approval-based publishing flows for WordPress, Shopify and Webflow. |
-| Reports | Build scheduled reports, send digests and provide an authenticated, read-only Executive View. |
+| Reports | Build scheduled reports with the sections you choose — search, Google reviews and Business Profile (calls, directions, views), Google Ads, AI visibility — send digests and provide an authenticated, read-only Executive View. |
 | Teams and governance | Separate clients with workspaces, control permissions, share or bring your own connected accounts, audit admin activity, set usage budgets and use scoped API tokens. |
 
 All external services are optional. A basic install can run sitemap checks and IndexNow without connecting an analytics or AI provider.
@@ -67,10 +68,11 @@ After signing in:
 5. Add any analytics, AI, publishing or notification services you need.
 6. Run an audit first, review the result, then enable scheduled submissions.
 7. For paid search, open **Google Ads → Setup**: add Google Ads access to a Google connection, link your clients' ad accounts, set their monthly budgets and build an AI routine.
+8. For local clients, open **Reviews → Setup**: add Business Profile access, apply once for Google's Business Profile API approval, then link their locations.
 
 The [indexing guide](docs/INDEXING.md) covers Google OAuth, IndexNow verification, Bing, sitemap `lastmod`, `llms.txt` routing, failed-submission recovery, what Google's indexing APIs can and can't do, and requesting indexing with a browser agent.
 
-The [Google Ads guide](docs/GOOGLE_ADS.md) covers Cloud project access levels, linking client accounts, budgets and guardrails, approvals, connecting an AI assistant and the AI routine.
+The [Google Ads guide](docs/GOOGLE_ADS.md) covers Cloud project access levels, linking client accounts, budgets and guardrails, approvals, connecting an AI assistant and the AI routine. The [Google reviews guide](docs/REVIEWS.md) covers Business Profile API approval, reply rules, alerts and answering reviews with an assistant.
 
 The [Action Centre guide](docs/ACTION_CENTRE.md) explains the page-level repair flow, copyable issue briefs and the supported Search Console sitemap plus URL Inspection check. The [ranking playbook guide](docs/RANKING_PLAYBOOK.md) explains how opportunities are found, estimated and measured.
 
@@ -124,6 +126,7 @@ Connections are configured in the dashboard and scoped to the active workspace u
 | --- | --- |
 | Search and indexing | Google Search Console, IndexNow, Bing Webmaster |
 | Paid search | Google Ads (API v26, access through your own Google Cloud project) |
+| Local | Google Business Profile: reviews, replies and performance (needs Google's one-time API approval for your Cloud project) |
 | Analytics and performance | Google Analytics 4, PageSpeed and CrUX, Cloudflare, Plausible, Matomo |
 | AI visibility | OpenAI, Anthropic, Gemini, Perplexity, xAI, Brave Search |
 | Publishing | WordPress, Shopify, Webflow |
@@ -144,6 +147,14 @@ Once connected, the app keeps a Google account signed in indefinitely: it stores
 - **Reconnect every 7 days (any account type):** the Accounts page shows *"Google issued a time-limited refresh grant"*. Your OAuth app's consent screen is still in **Testing**, so Google issues refresh tokens that expire after 7 days, whatever scopes you pick. In Google Cloud Console → **Google Auth Platform → Audience**, set the user type to **Internal** (Google Workspace) or click **Publish app**, then reconnect.
 
 The Accounts page shows the exact Google error and the matching fix on any account that needs reconnecting.
+
+### New permissions and switched-off APIs
+
+Google never adds a permission silently: a new scope always needs one consent click. The app works out what each connection needs and asks only for that:
+
+- **Missing permissions.** If a connection is linked to Google Ads clients or Business Profile locations but its grant lacks that scope (or lacks Search Console, Indexing or Analytics for the sites using it), **Settings → Google Accounts** lists what's missing and why, with an **Update permissions** button. It opens Google's consent screen for that account, keeps everything already granted and adds the rest. Nothing is disconnected and the refresh token keeps renewing.
+- **Switched-off APIs.** Every 30 minutes, and whenever you open that page, the app checks the APIs each connection uses (Search Console, Analytics Admin, Google Ads, Business Profile). Anything Google reports as disabled gets a Cloud console link and a **Switch them on for me** button. That button starts a one-off sign-in that asks for Cloud access, uses it once to enable the APIs, and keeps nothing. The saved connection never carries the Cloud scope, so Workspace Cloud session control can't expire it. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.
+- **Alerts.** A banner on every page says when a connection needs attention. Each workspace also gets a notification (event *Google connection problems*) when a connection needs reconnecting, a permission or an API, sent once per change rather than every hour.
 
 ## How indexing works
 
@@ -186,6 +197,8 @@ Most settings live in the dashboard. These environment variables control the con
 | `AI_DRAFT_DAILY_LIMIT` | `25` | Daily ranking-playbook AI drafts for non-owner members. Owners and super-admins are exempt. |
 | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Optional deployment-level Google connection credentials (Search Console, GA4, Google Ads). They can also be entered during setup. |
 | `GOOGLE_ADS_API_VERSION` | `v26` | Google Ads REST API version. |
+| `REVIEWS_SYNC_MINUTES` | `60` | How often each linked Business Profile location's reviews are synced (minimum 15). |
+| `ADMIN_EMAIL` | unset | Only this email address may create the first admin account. Set it before exposing a fresh install to the internet. |
 | `OAUTH_RATE_LIMIT_MAX` | `30` | MCP OAuth registration/token requests per IP per minute. |
 | `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Redirect hosts/schemes MCP clients may use (e.g. `chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1`). |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*` | unset | Optional Google or generic OpenID Connect sign-in. |
@@ -203,6 +216,8 @@ The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, reco
 - Service tokens are hashed, scoped to one workspace and can be expired or revoked.
 - MCP clients sign in with OAuth 2.1 (PKCE, one-hour access tokens, rotating refresh tokens, revocable connected apps) or hashed personal tokens, and never get more than their user's role allows.
 - Google Ads changes are validated by Google, checked against each client's monthly budget and guardrails, and recorded with the person or assistant that made them.
+- AI replies to Google reviews are checked against each location's reply rules; anything outside them waits for a person, and every reply is recorded with who proposed and approved it.
+- `ADMIN_EMAIL` stops anyone else from claiming a fresh public install by creating the first admin account.
 - Administrative actions, impersonation and security changes are recorded in the audit history.
 - User-configured HTTP, webhook, SSO and FTP destinations are checked against loopback, private and reserved networks before connection and again after redirects/DNS resolution.
 - Cross-origin browser access is disabled unless an explicit `CORS_ORIGIN` allowlist is configured; forwarded client addresses are ignored unless `TRUST_PROXY` is enabled.
@@ -224,9 +239,9 @@ Send the token as `Authorization: Bearer oc_…`. See the [automation API guide]
 
 ## MCP server (connect an AI assistant)
 
-The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so any MCP-capable assistant can read — and, with your permission, act on — your data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness, AI citations and Google Ads.
+The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so any MCP-capable assistant can read — and, with your permission, act on — your data: sites, Search Console performance, period comparisons, content groups, tracked keywords, URL inspection, the ranking playbook, alerts, indexing, hygiene, AI-agent readiness, AI citations, Google Ads and Google reviews.
 
-**Connect with OAuth (recommended):** add the server URL to your AI app. It finds the sign-in automatically, opens this app, and you choose what it may do: read data, run SEO actions (`mcp:write`) and/or manage Google Ads (`ads:write`). Access tokens last an hour and refresh automatically; disconnect an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
+**Connect with OAuth (recommended):** add the server URL to your AI app. It finds the sign-in automatically, opens this app, and you choose what it may do: read data, run SEO actions (`mcp:write`), manage Google Ads (`ads:write`) and/or reply to Google reviews (`reviews:write`). Access tokens last an hour and refresh automatically; disconnect an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
 
 | Client | Add the server |
 | --- | --- |
@@ -239,9 +254,9 @@ The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.i
 | VS Code | `{"servers": {"seo-indexer": {"type": "http", "url": "https://<your-host>/mcp"}}}` in `.vscode/mcp.json`. |
 | Other MCP clients | Give it the URL; OAuth is discovered via dynamic client registration or Client ID Metadata Documents. |
 
-Apps that ask for an OAuth client ID and secret can use a client you register on the same card (*Apps that need a client ID*). Clients that can only send a fixed header can use a personal token (tick *SEO actions* and/or *Google Ads changes*) sent as `Authorization: Bearer seomcp_…`; a `?token=` URL also works but may appear in reverse-proxy logs.
+Apps that ask for an OAuth client ID and secret can use a client you register on the same card (*Apps that need a client ID*). Clients that can only send a fixed header can use a personal token (tick *SEO actions*, *Google Ads changes* and/or *Review replies*) sent as `Authorization: Bearer seomcp_…`; a `?token=` URL also works but may appear in reverse-proxy logs.
 
-Tokens reach every workspace their owner can access and never exceed the owner's role. The Google Ads tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded change tools; see the [Google Ads guide](docs/GOOGLE_ADS.md#connect-an-ai-assistant). Hosted AI apps need the endpoint on public HTTPS, which the app advertises automatically on a public hostname; consider setting `MCP_OAUTH_REDIRECT_ALLOWLIST` too.
+Tokens reach every workspace their owner can access and never exceed the owner's role. The Google Ads tools mirror Google's open-source [google-ads-mcp](https://github.com/googleads/google-ads-mcp) server (`search`, `get_resource_metadata`, `list_accessible_customers`) and add audits, pacing, research helpers and guarded change tools; see the [Google Ads guide](docs/GOOGLE_ADS.md#connect-an-ai-assistant). The `reviews_*` tools read, summarise and answer Google reviews within each location's reply rules; see the [Google reviews guide](docs/REVIEWS.md#answering-reviews-with-an-ai-assistant). Hosted AI apps need the endpoint on public HTTPS, which the app advertises automatically on a public hostname; consider setting `MCP_OAUTH_REDIRECT_ALLOWLIST` too.
 
 ## Updating and backups
 
@@ -290,6 +305,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit and pull-request guidance.
 - [Integration permissions and setup](docs/INTEGRATIONS.md)
 - [Google, IndexNow, Bing and sitemap setup](docs/INDEXING.md)
 - [Google Ads: setup, guardrails, MCP tools and AI routines](docs/GOOGLE_ADS.md)
+- [Google reviews: Business Profile setup, reply rules, alerts and MCP tools](docs/REVIEWS.md)
+- [Moving from OpenGSC and Porter Metrics](docs/MIGRATING.md)
 - [Page-level Action Centre and Google verification](docs/ACTION_CENTRE.md)
 - [Ranking playbook: opportunities ranked by clicks gained](docs/RANKING_PLAYBOOK.md)
 - [Markets, entities and website discovery](docs/MARKETS_AND_ENTITIES.md)

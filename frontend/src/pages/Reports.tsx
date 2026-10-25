@@ -19,6 +19,15 @@ import {
   type ReportTemplate,
 } from "../api";
 import { Modal } from "../components/Modal";
+
+const REPORT_SECTIONS = [
+  { id: "executive", label: "Executive summary", detail: "Health, clicks, AI visibility and priority actions" },
+  { id: "search", label: "Search momentum", detail: "Clicks and impressions by site" },
+  { id: "local", label: "Google reviews and Business Profile", detail: "Rating, new reviews, response rate, calls, website clicks, directions and views" },
+  { id: "ads", label: "Google Ads", detail: "Spend, clicks, conversions, CPA/ROAS and budget pacing" },
+  { id: "ai", label: "AI visibility", detail: "Share of voice by AI provider" },
+  { id: "operations", label: "Proof and governance", detail: "Verified sites, evidence and provider cost" },
+];
 import { useToast } from "../AppContext";
 import { useWorkspace } from "../workspace/WorkspaceContext";
 import { Link } from "react-router-dom";
@@ -40,6 +49,7 @@ export default function ReportsPage() {
     title: "",
     accent: "#7c5cff",
     footer: "",
+    sections: REPORT_SECTIONS.map((section) => section.id),
   });
   const load = useCallback(async () => {
     const [t, r, g] = await Promise.all([
@@ -67,6 +77,7 @@ export default function ReportsPage() {
         name: draft.name,
         cadence: draft.cadence,
         recipients: draft.recipients.split(/[\s,]+/).filter(Boolean),
+        sections: draft.sections,
         branding: {
           title: draft.title || undefined,
           accent: draft.accent,
@@ -381,7 +392,7 @@ export default function ReportsPage() {
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!draft.name.trim() || busy === "create"}
+                disabled={!draft.name.trim() || !draft.sections.length || busy === "create"}
                 onClick={create}
               >
                 <Download size={13} /> Create template
@@ -438,6 +449,29 @@ export default function ReportsPage() {
                 placeholder="client@example.com, team@example.com"
               />
             </label>
+            <fieldset className="full report-sections">
+              <legend>Sections</legend>
+              {REPORT_SECTIONS.map((section) => (
+                <label key={section.id} className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={draft.sections.includes(section.id)}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        sections: e.target.checked
+                          ? REPORT_SECTIONS.map((s) => s.id).filter((id) => id === section.id || draft.sections.includes(id))
+                          : draft.sections.filter((id) => id !== section.id),
+                      })
+                    }
+                  />
+                  <span>
+                    {section.label}
+                    <small>{section.detail}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             <label className="full">
               Footer
               <textarea

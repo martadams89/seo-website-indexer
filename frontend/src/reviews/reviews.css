@@ -1,0 +1,59 @@
+/* Google reviews page — builds on ads/ads.css for the shared setup, checklist and toolbar styles. */
+.reviews-toolbar { justify-content: space-between; margin-bottom: 12px; }
+.reviews-page .ops-card-head > select.ads-account-select { flex: 0 0 auto; width: auto; }
+.reviews-search { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.reviews-search .input { width: 220px; }
+
+.review-list { display: flex; flex-direction: column; gap: 10px; }
+.review-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+.review-card.negative { border-left: 3px solid var(--warn); }
+.review-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-card header strong { font-size: 13px; }
+.review-card header small { color: var(--text-dim); font-size: 12px; }
+.review-card > p { margin: 0; color: var(--text-primary); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-card > p.muted { color: var(--text-dim); font-style: italic; }
+.review-stars { display: inline-flex; gap: 1px; color: var(--border-bright); }
+.review-stars svg.on { color: var(--warn); fill: var(--warn); }
+.review-media { display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 12px; }
+.review-reply { padding: 10px 12px; border-radius: 10px; background: var(--bg-input); }
+.review-reply-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px; }
+.review-reply p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-draft { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-radius: 9px; color: var(--text-secondary); background: var(--accent-dim); font-size: 12px; line-height: 1.5; }
+.review-draft svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
+.review-composer textarea, .review-card > textarea { width: 100%; resize: vertical; }
+.review-composer .ads-row-actions small { flex: 1; font-size: 12px; }
+.reviews-more { align-self: center; margin-top: 12px; }
+
+.reviews-location-list { display: flex; flex-direction: column; }
+.reviews-location-list article { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 13px 0; border-top: 1px solid var(--border); }
+.reviews-location-list article:first-child { border-top: 0; }
+.reviews-location-list article.paused { opacity: 0.7; }
+.reviews-location-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.reviews-location-main strong { font-size: 13px; }
+.reviews-location-main small { color: var(--text-dim); font-size: 12px; }
+.reviews-location-list .ads-cell-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.reviews-account-title { display: block; margin: 8px 0 4px; color: var(--text-dim); font-size: 12px; font-weight: 700; }
+
+.reviews-fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.reviews-fieldset legend { padding: 0 6px; color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.reviews-fieldset > label, .reviews-wide { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.reviews-fieldset .input, .reviews-wide .input { width: 100%; }
+.reviews-wide { grid-column: 1 / -1; margin-top: 12px; }
+.reviews-fieldset .reviews-wide { margin-top: 0; }
+.reviews-checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+
+.review-distribution { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; max-width: 520px; }
+.review-distribution > div { display: grid; grid-template-columns: 44px 1fr 40px; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.review-distribution span { display: inline-flex; align-items: center; gap: 3px; }
+.review-distribution i { display: block; height: 8px; min-width: 2px; border-radius: 6px; background: var(--warn); }
+.review-distribution small { color: var(--text-dim); text-align: right; font-size: 12px; }
+.reviews-subhead { display: flex; align-items: center; gap: 6px; margin: 20px 0 8px; font-size: 13px; }
+.reviews-history-text { max-width: 420px; }
+.reviews-history-text small { white-space: pre-wrap; overflow-wrap: anywhere; }
+.reviews-approval .ads-guide-steps { margin-top: 0; }
+
+@media (max-width: 720px) {
+  .reviews-fieldset { grid-template-columns: 1fr; }
+  .reviews-search, .reviews-search .input { width: 100%; }
+  .reviews-location-list article { flex-direction: column; }
+}

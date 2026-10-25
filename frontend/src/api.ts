@@ -98,6 +98,8 @@ export interface AppStatus {
   version?: string;
   /** The origin the server builds callback and MCP URLs from. */
   publicOrigin?: string;
+  /** Google connections that need a reconnect, a permission or an API switched on. */
+  googleAttention?: number;
 }
 
 export interface QuotaSummary {
@@ -257,7 +259,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 
@@ -636,7 +638,7 @@ export interface WorkspaceMember {
   user_id: string; email: string; name: string | null; role: string; is_owner: boolean;
   ai_citations: boolean; disabled: boolean; permissions: Record<WorkspaceCapability, boolean>;
 }
-export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications' | 'manage_content' | 'manage_reports' | 'manage_governance' | 'manage_ads';
+export type WorkspaceCapability = 'manage_sites' | 'manage_integrations' | 'manage_notifications' | 'manage_content' | 'manage_reports' | 'manage_governance' | 'manage_ads' | 'manage_reviews';
 export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: string }> = [
   { id: 'manage_sites', label: 'Manage sites' },
   { id: 'manage_integrations', label: 'Manage integrations & API keys' },
@@ -645,6 +647,7 @@ export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: str
   { id: 'manage_reports', label: 'Manage reports' },
   { id: 'manage_governance', label: 'Manage governance & budgets' },
   { id: 'manage_ads', label: 'Manage Google Ads (budgets, guardrails, approvals)' },
+  { id: 'manage_reviews', label: 'Manage Google reviews (reply rules, approvals, replies)' },
 ];
 export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;

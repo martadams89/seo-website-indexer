@@ -8,12 +8,119 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261025_03_google_oauth_state_purpose',
+    description: 'Let a Google sign-in be a one-off API enable flow that stores no connection',
+    up(db) {
+      db.exec(`
+        ALTER TABLE google_oauth_states ADD COLUMN purpose TEXT;
+        ALTER TABLE google_oauth_states ADD COLUMN payload TEXT;
+      `);
+    },
+  },
+  {
     id: '20261021_01_ads_ga4_property',
     description: 'Link a GA4 property to each Google Ads client so the AI routine can read its analytics',
     up(db) {
       db.exec(`
         ALTER TABLE ads_accounts ADD COLUMN ga4_property_id TEXT;
         ALTER TABLE ads_accounts ADD COLUMN ga4_property_name TEXT;
+      `);
+    },
+  },
+  {
+    id: '20261025_02_content_groups',
+    description: 'Content groups: pages grouped by URL rules for group-level Search Console reporting',
+    up(db) {
+      db.exec(`
+        CREATE TABLE content_groups (
+          id TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          include_rules TEXT NOT NULL DEFAULT '[]',
+          exclude_rules TEXT NOT NULL DEFAULT '[]',
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(site_id, name)
+        );
+      `);
+    },
+  },
+  {
+    id: '20261025_01_google_reviews',
+    description: 'Google Business Profile locations, synced reviews and guarded reply plans',
+    up(db) {
+      db.exec(`
+        CREATE TABLE gbp_locations (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL,
+          account_name TEXT NOT NULL,
+          location_name TEXT NOT NULL,
+          title TEXT,
+          address TEXT,
+          website TEXT,
+          place_id TEXT,
+          maps_uri TEXT,
+          new_review_uri TEXT,
+          site_id TEXT REFERENCES sites(id) ON DELETE SET NULL,
+          brief TEXT NOT NULL DEFAULT '{}',
+          rules TEXT NOT NULL DEFAULT '{}',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          average_rating REAL,
+          total_reviews INTEGER,
+          last_synced_at TEXT,
+          last_full_sync_at TEXT,
+          last_error TEXT,
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(workspace_id, location_name)
+        );
+        CREATE TABLE gbp_reviews (
+          id TEXT PRIMARY KEY,
+          location_id TEXT NOT NULL REFERENCES gbp_locations(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          review_name TEXT NOT NULL,
+          reviewer_name TEXT,
+          reviewer_photo TEXT,
+          anonymous INTEGER NOT NULL DEFAULT 0,
+          rating INTEGER NOT NULL DEFAULT 0,
+          comment TEXT,
+          create_time TEXT,
+          update_time TEXT,
+          reply_comment TEXT,
+          reply_update_time TEXT,
+          reply_state TEXT,
+          reply_policy_violation TEXT,
+          reply_url TEXT,
+          media TEXT NOT NULL DEFAULT '[]',
+          first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(location_id, review_name)
+        );
+        CREATE INDEX idx_gbp_reviews_location_time ON gbp_reviews(location_id, create_time DESC);
+        CREATE TABLE gbp_replies (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          location_id TEXT NOT NULL REFERENCES gbp_locations(id) ON DELETE CASCADE,
+          review_id TEXT NOT NULL REFERENCES gbp_reviews(id) ON DELETE CASCADE,
+          action TEXT NOT NULL DEFAULT 'reply',
+          text TEXT,
+          previous_reply TEXT,
+          rationale TEXT,
+          rating INTEGER,
+          source TEXT NOT NULL DEFAULT 'dashboard',
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          status TEXT NOT NULL,
+          findings TEXT NOT NULL DEFAULT '[]',
+          decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          decided_at TEXT,
+          published_at TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_gbp_replies_workspace_status ON gbp_replies(workspace_id, status, created_at DESC);
+        CREATE INDEX idx_gbp_replies_review ON gbp_replies(review_id, created_at DESC);
       `);
     },
   },

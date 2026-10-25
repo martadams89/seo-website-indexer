@@ -28,7 +28,7 @@ docker compose down
 Before exposing the application to the internet:
 
 1. Put it behind an HTTPS reverse proxy.
-2. Set a stable, random `APP_SECRET` and keep a separate copy in your secrets manager.
+2. Set a stable, random `APP_SECRET` and keep a separate copy in your secrets manager. On a fresh install, also set `ADMIN_EMAIL` so only you can create the first admin account.
 3. Keep `/data` on persistent storage and copy its backups to another machine or storage service.
 4. Set `CORS_ORIGIN` if the dashboard is served from a different origin.
 5. Serve the app over HTTPS. The site, MCP server URL, OAuth issuer and Google/Bing/SSO callbacks use `https://` for any public hostname automatically, even when your reverse proxy forwards plain http. Set `PUBLIC_URL` to pin the canonical origin (for example when the app is reached by several names), and enable `TRUST_PROXY` only if a trusted reverse proxy overwrites forwarded headers.
@@ -69,6 +69,8 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `AI_CITATION_DAILY_LIMIT` | `25` | Citation checks allowed each day for non-owner members. |
 | `AI_DRAFT_DAILY_LIMIT` | `25` | Ranking-playbook AI drafts allowed each day for non-owner members. |
 | `GSC_INSPECTION_DAILY_LIMIT` | `2000` | Daily Google URL Inspection allowance per Search Console property. |
+| `REVIEWS_SYNC_MINUTES` | `60` | How often each linked Business Profile location's reviews are synced. Minimum 15. |
+| `ADMIN_EMAIL` | unset | Only this email address (case-insensitive) may create the first admin account. Set it before a fresh install is reachable from the internet; without it, whoever signs up first becomes super-admin. |
 | `GOOGLE_ADS_API_VERSION` | `v26` | Google Ads REST API version. Raise it when Google releases a new version and the release notes allow. |
 | `OAUTH_RATE_LIMIT_MAX` | `30` | MCP OAuth registration, token and revocation requests allowed per IP per minute. |
 | `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Comma-separated redirect hosts/schemes MCP clients may use, e.g. `chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1`. Unset allows any `https` redirect. |

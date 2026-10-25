@@ -1,0 +1,28 @@
+/* Period comparison and content groups on the site search page. */
+.search-compare, .content-groups { margin-bottom: 16px; }
+.search-compare-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.search-compare-controls .input { width: auto; }
+.search-compare-tables { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+.search-compare-tables h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; }
+.search-compare-key { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-compare-key .badge { margin-left: 6px; }
+.cg-name { padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.cg-name:hover strong { color: var(--accent); }
+.content-group-rules { display: block; margin-top: 2px; color: var(--text-dim); font-size: 12px; }
+.content-group-pages { margin: 8px 0 0; padding: 0; list-style: none; }
+.content-group-pages li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 12px; }
+.content-group-pages li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content-group-pages li small { flex: 0 0 auto; color: var(--text-dim); font-size: 12px; }
+.content-group-actions { white-space: nowrap; text-align: right; }
+.content-groups tr.muted-row td { color: var(--text-dim); }
+.cg-wide { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.cg-fieldset { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.cg-fieldset legend { padding: 0 6px; color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.cg-fieldset .btn { align-self: flex-start; }
+.content-group-rule { display: grid; grid-template-columns: 180px 1fr auto; gap: 8px; align-items: center; }
+@media (max-width: 720px) {
+  .search-compare-tables { grid-template-columns: 1fr; }
+  .search-compare-controls { justify-content: flex-start; }
+  .content-group-rule { grid-template-columns: 1fr auto; }
+  .content-group-rule select { grid-column: 1 / -1; }
+}

@@ -9,7 +9,7 @@ type ConnectedApp = { id: string; client_name: string; scopes: string[]; created
 type OAuthClient = Awaited<ReturnType<typeof api.getOAuthClients>>[number];
 type CreatedClient = Awaited<ReturnType<typeof api.createOAuthClient>>;
 
-const SCOPE_LABEL: Record<string, string> = { 'mcp:read': 'read', 'mcp:write': 'SEO actions', 'ads:write': 'Google Ads changes' };
+const SCOPE_LABEL: Record<string, string> = { 'mcp:read': 'read', 'mcp:write': 'SEO actions', 'ads:write': 'Google Ads changes', 'reviews:write': 'review replies' };
 
 interface ClientGuide {
   id: string;
@@ -96,7 +96,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
   const [apps, setApps] = useState<ConnectedApp[]>([]);
   const [clients, setClients] = useState<OAuthClient[]>([]);
   const [guide, setGuide] = useState('chatgpt');
-  const [form, setForm] = useState({ name: 'AI assistant', allowWrite: false, allowAds: false });
+  const [form, setForm] = useState({ name: 'AI assistant', allowWrite: false, allowAds: false, allowReviews: false });
   const [created, setCreated] = useState<string | null>(null);
   const [clientForm, setClientForm] = useState({ name: '', redirects: '', confidential: true });
   const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null);
@@ -125,7 +125,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
   async function createToken() {
     setBusy(true);
     try {
-      const scopes = ['mcp:read', ...(form.allowWrite ? ['mcp:write'] : []), ...(form.allowAds ? ['ads:write'] : [])];
+      const scopes = ['mcp:read', ...(form.allowWrite ? ['mcp:write'] : []), ...(form.allowAds ? ['ads:write'] : []), ...(form.allowReviews ? ['reviews:write'] : [])];
       const result = await api.createMcpToken({ name: form.name, scopes });
       setCreated(result.token);
       await load();
@@ -191,7 +191,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
           </div>
         )}
         <p className="mcp-note">
-          Tick <b>Manage Google Ads</b> on the sign-in screen if routines should make or propose Google Ads changes. Access tokens last an
+          On the sign-in screen, tick <b>Manage Google Ads</b> or <b>Reply to Google reviews</b> if routines should make Google Ads changes or answer reviews. Access tokens last an
           hour and renew automatically; disconnect an app below to cut it off.
         </p>
         {!publicHttps(endpoint) && (
@@ -244,7 +244,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
               {createdClient.client_secret && copyRow('Client secret', createdClient.client_secret, 'Copy client secret')}
               {copyRow('Authorization URL', createdClient.authorization_endpoint, 'Copy authorization URL')}
               {copyRow('Token URL', createdClient.token_endpoint, 'Copy token URL')}
-              {copyRow('Scopes', 'mcp:read mcp:write ads:write', 'Copy scopes')}
+              {copyRow('Scopes', 'mcp:read mcp:write ads:write reviews:write', 'Copy scopes')}
               <p className="mcp-note">PKCE (S256) is required. People still choose the permissions on the sign-in screen.</p>
             </div>
           )}
@@ -272,6 +272,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
               <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Token name (e.g. n8n workflow)" aria-label="MCP token name" />
               <label><input type="checkbox" checked={form.allowWrite} onChange={e => setForm({ ...form, allowWrite: e.target.checked })} /> SEO actions</label>
               <label><input type="checkbox" checked={form.allowAds} onChange={e => setForm({ ...form, allowAds: e.target.checked })} /> Google Ads changes</label>
+              <label><input type="checkbox" checked={form.allowReviews} onChange={e => setForm({ ...form, allowReviews: e.target.checked })} /> Review replies</label>
               <button className="btn btn-secondary btn-sm" disabled={busy || !form.name.trim()} onClick={createToken}><Plus size={12} /> Create token</button>
             </div>
           </div>
