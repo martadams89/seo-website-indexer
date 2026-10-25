@@ -120,4 +120,20 @@ describe('MCP tools', () => {
     expect(names).toContain('list_sites'); // read tools still present (write implies read)
     expect(() => tools.buildMcpServer(writeCtx)).not.toThrow();
   });
+
+  it('exposes the ranking playbook and alerts, fenced to the owner', async () => {
+    const { user, siteId, workspace } = seedUserWithSite('gina');
+    const { user: other } = seedUserWithSite('hank');
+    const ctx = tools.buildContext(tokens.authenticateMcpToken(tokens.createMcpToken({ userId: user.id, name: 'r', scopes: ['mcp:read'] }).token)!)!;
+    const otherCtx = tools.buildContext(tokens.authenticateMcpToken(tokens.createMcpToken({ userId: other.id, name: 'r', scopes: ['mcp:read'] }).token)!)!;
+    const playbook = await tools.runTool(ctx, 'get_playbook', { siteId }) as { opportunities: unknown[]; note?: string };
+    expect(playbook.opportunities).toEqual([]);
+    expect(playbook.note).toMatch(/No playbook/);
+    await expect(tools.runTool(otherCtx, 'get_playbook', { siteId })).rejects.toThrow(/not found/);
+    await expect(tools.runTool(ctx, 'set_playbook_opportunity_status', { siteId, opportunityId: 'x', status: 'done' })).rejects.toThrow(/mcp:write/);
+    db.getDb().prepare("INSERT INTO alerts(site_id, workspace_id, kind, severity, message) VALUES(?,?,?,?,?)").run(siteId, workspace.id, 'index_drop', 'warn', 'Indexed pages fell 30%');
+    const alerts = await tools.runTool(ctx, 'get_alerts', {}) as { alerts: Array<{ message: string }> };
+    expect(alerts.alerts.map(a => a.message)).toContain('Indexed pages fell 30%');
+    expect((await tools.runTool(otherCtx, 'get_alerts', {}) as { alerts: unknown[] }).alerts).toEqual([]);
+  });
 });

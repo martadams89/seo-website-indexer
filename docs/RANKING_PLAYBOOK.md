@@ -65,3 +65,12 @@ Workspaces with notification channels receive **Ranking playbook ready** at most
 - Seasonality is not yet checked against last year. Content decay is therefore never rated high confidence.
 - Positions between 11 and 20 mix devices and result types; items priced mostly from page two carry lower confidence.
 - Estimates are ranges for prioritisation. The Results section is the only measurement of what a change achieved.
+
+## Using the playbook from an AI assistant
+
+The MCP server exposes the playbook so a connected assistant can plan and track the work:
+
+- `get_playbook` — open (or dismissed/done) opportunities for a site, filtered by kind, with estimates, evidence, steps and blockers.
+- `get_playbook_opportunity` — one opportunity in full, including any saved draft.
+- `set_playbook_opportunity_status` (needs `mcp:write`) — mark an opportunity done once the change is live, so its effect is measured, or dismiss it.
+- `get_alerts` — recent index drops, schema or `llms.txt` drift, hygiene, quota and citation alerts across your workspaces.

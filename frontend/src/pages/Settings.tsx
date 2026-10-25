@@ -977,7 +977,7 @@ function NotificationsTab() {
 
   useEffect(() => {
     api.getNotifyConfig().then(rec => {
-      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready'];
+      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts'];
       const next: Record<string, string> = {};
       for (const k of keys) next[k] = rec[k] ?? '';
       setVals(next);
@@ -1022,6 +1022,7 @@ function NotificationsTab() {
           ['notify_run_failed', 'Failed or stopped runs', 'A run fails, is stopped, or cannot complete.'],
           ['notify_citation_changes', 'AI citation movement', 'A tracked answer engine gains or loses your domain.'],
           ['notify_playbook_ready', 'Ranking playbook ready', 'Weekly summary of new ranking opportunities and their estimated upside.'],
+          ['notify_review_alerts', 'Google review alerts', 'A new low-rated Google review arrives, or Google rejects a reply (threshold set per location).'],
         ].map(([key, label, description]) => (
           <label key={key}>
             <input type="checkbox" checked={vals[key] !== 'false'} disabled={!canManage} onChange={event => set(key, event.target.checked ? 'true' : 'false')} />

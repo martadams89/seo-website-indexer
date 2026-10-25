@@ -11,10 +11,12 @@ import { getDb } from '../db/database.js';
 
 /**
  * Scopes an MCP token can carry. `mcp:read` = read data (including Google Ads
- * reporting); `mcp:write` = safe SEO actions; `ads:write` = propose and apply
- * Google Ads changes, always subject to each client's guardrails.
+ * reporting and Google reviews); `mcp:write` = safe SEO actions; `ads:write` =
+ * propose and apply Google Ads changes, always subject to each client's
+ * guardrails; `reviews:write` = reply to Google reviews within each location's
+ * reply rules.
  */
-export const MCP_SCOPES = ['mcp:read', 'mcp:write', 'ads:write'] as const;
+export const MCP_SCOPES = ['mcp:read', 'mcp:write', 'ads:write', 'reviews:write'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /** Human-visible prefix so a leaked token is easy to recognise and revoke. */
@@ -108,6 +110,7 @@ export function expandScopes(stored: string[]): McpScope[] {
   if (stored.includes('*') || stored.some(s => (MCP_SCOPES as readonly string[]).includes(s))) scopes.add('mcp:read');
   if (stored.includes('*') || stored.includes('mcp:write')) scopes.add('mcp:write');
   if (stored.includes('*') || stored.includes('ads:write')) scopes.add('ads:write');
+  if (stored.includes('*') || stored.includes('reviews:write')) scopes.add('reviews:write');
   return [...scopes];
 }
 

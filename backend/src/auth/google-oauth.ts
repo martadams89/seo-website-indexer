@@ -59,6 +59,10 @@ export const OAUTH_SCOPES = [
 // this one grant covers reporting and changes; the app's own guardrails and
 // MCP scopes decide what may actually be changed.
 export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
+// Opt-in: Google Business Profile (reading and answering reviews). Like Ads,
+// Google offers no read-only variant, so the app's reply rules and MCP scopes
+// decide what may be published.
+export const GOOGLE_BUSINESS_SCOPE = 'https://www.googleapis.com/auth/business.manage';
 export const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
@@ -132,7 +136,7 @@ export interface PendingGoogleOAuth {
 /** Create a concurrency-safe, single-use OAuth handshake and authorization URL. */
 export function createGoogleOAuthAuthorization(opts: {
   userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
-  clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean;
+  clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean; business?: boolean;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -145,7 +149,7 @@ export function createGoogleOAuthAuthorization(opts: {
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
     VALUES(?,?,?,?,?,?,?)
   `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
-  const scopes = [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : ''].filter(Boolean).join(' ');
+  const scopes = [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.business ? GOOGLE_BUSINESS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : ''].filter(Boolean).join(' ');
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: opts.redirectUri,
@@ -154,7 +158,7 @@ export function createGoogleOAuthAuthorization(opts: {
     access_type: 'offline',
     prompt: 'select_account consent',
     // No include_granted_scopes: every scope the app needs is requested
-    // explicitly above (reconnects carry Ads forward), so incremental auth
+    // explicitly above (reconnects carry Ads and Business Profile forward), so incremental auth
     // would only add scopes the user did NOT ask for this time. In particular
     // it re-attached a previously granted cloud-platform scope even with
     // Auto-configure unticked, keeping the grant under Workspace Google Cloud
@@ -306,7 +310,11 @@ export async function exchangeCodeForTokens(
   // so it never delays the OAuth response.
   const granted = (data.scope ?? '').split(' ');
   if (granted.includes(CLOUD_PLATFORM_SCOPE)) {
-    const services = granted.includes(GOOGLE_ADS_SCOPE) ? [...AUTO_ENABLE_SERVICES, GOOGLE_ADS_SERVICE] : AUTO_ENABLE_SERVICES;
+    const services = [
+      ...AUTO_ENABLE_SERVICES,
+      ...(granted.includes(GOOGLE_ADS_SCOPE) ? [GOOGLE_ADS_SERVICE] : []),
+      ...(granted.includes(GOOGLE_BUSINESS_SCOPE) ? GOOGLE_BUSINESS_SERVICES : []),
+    ];
     void enableRequiredApis(data.access_token, clientId, email, services);
   }
 
@@ -326,6 +334,8 @@ function projectFromClientId(clientId: string): string | null {
 
 const AUTO_ENABLE_SERVICES = ['searchconsole.googleapis.com', 'indexing.googleapis.com', 'analyticsdata.googleapis.com', 'analyticsadmin.googleapis.com'];
 export const GOOGLE_ADS_SERVICE = 'googleads.googleapis.com';
+/** Accounts, locations and (v4) reviews. Enabling them doesn't grant access: Google approves projects separately. */
+export const GOOGLE_BUSINESS_SERVICES = ['mybusinessaccountmanagement.googleapis.com', 'mybusinessbusinessinformation.googleapis.com', 'mybusiness.googleapis.com', 'businessprofileperformance.googleapis.com'];
 
 /**
  * Enable the APIs the tool depends on, on the project owning the OAuth client.

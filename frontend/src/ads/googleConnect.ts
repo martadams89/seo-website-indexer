@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { api } from '../api';
 
-export async function openGoogleConsent(options: { accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean }): Promise<void> {
+export async function openGoogleConsent(options: { accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean; business?: boolean }): Promise<void> {
   const { authorizationUrl } = await api.beginGoogleAuth(options);
   const width = 600;
   const height = 700;

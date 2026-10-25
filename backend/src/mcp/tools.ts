@@ -24,11 +24,14 @@ import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
 import { GOOGLE_INDEXING_CAPABILITIES, recordRequestOutcomes, siteRequestCandidates, type RequestOutcome } from '../indexer/request-indexing.js';
 import { snapshotSitePerformance, getWowDeltas } from '../analytics/perf-store.js';
+import { getOpportunity, getPlaybook, setOpportunityStatus, type StoredOpportunity } from '../analytics/playbook.js';
+import { getAlerts } from '../analytics/stats.js';
 import { getResults } from '../ai/citations.js';
 import { runIndexing, isRunning } from '../scheduler.js';
 import { type McpScope, type McpTokenAuth } from './tokens.js';
 import { ADS_TOOLS } from './ads-tools.js';
 import { GA4_TOOLS } from './ga4-tools.js';
+import { REVIEWS_TOOLS } from './reviews-tools.js';
 
 export interface McpContext {
   user: User;
@@ -347,10 +350,86 @@ export const TOOLS: ToolDef[] = [
       return { ok: true, siteId: site.id, snapshotAt: new Date().toISOString() };
     },
   },
+  {
+    name: 'get_playbook',
+    title: 'Get the ranking playbook',
+    description: 'Ranked SEO opportunities for a site from its Search Console data: striking-distance queries (positions 4–20), CTR gaps and regressions, cannibalisation (two pages competing for the same queries) and content decay. Each comes with an estimated monthly-click range, effort, confidence, evidence and steps. Also returns blockers (indexing problems to fix first) and measured results of opportunities marked done.',
+    scope: 'mcp:read',
+    inputShape: {
+      siteId: z.string(),
+      kind: z.enum(['striking_distance', 'ctr_gap', 'cannibalisation', 'content_decay']).optional(),
+      status: z.enum(['open', 'dismissed', 'done']).optional().describe('Default open.'),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireSite(ctx, String(args.siteId));
+      const playbook = getPlaybook(site.id);
+      if (!playbook) throw new Error('Site not found.');
+      const status = (args.status as string | undefined) ?? 'open';
+      const opportunities = (status === 'done' ? playbook.results : playbook.opportunities
+        .filter((o: StoredOpportunity) => o.status === status && (!args.kind || o.kind === args.kind))
+        .slice(0, (args.limit as number | undefined) ?? 25)
+        .map((o: StoredOpportunity) => ({
+          id: o.id, kind: o.kind, subtype: o.subtype, page: o.page, competing_page: o.secondary_page, headline: o.headline,
+          monthly_clicks_estimate: { low: o.low, high: o.high }, effort: o.effort, confidence: o.confidence, steps: o.steps, evidence: o.evidence,
+        })));
+      return {
+        site: playbook.site, computed_at: playbook.computedAt, summary: playbook.summary, blockers: playbook.blockers,
+        opportunities, methodology: playbook.methodology,
+        ...(playbook.computedAt ? {} : { note: 'No playbook has been computed for this site yet. It is built after Search Console data syncs (or with Refresh on the Playbook page).' }),
+      };
+    },
+  },
+  {
+    name: 'get_playbook_opportunity',
+    title: 'Get one playbook opportunity',
+    description: 'Full detail for one opportunity from get_playbook, including evidence, steps and any saved draft (titles, descriptions, briefs).',
+    scope: 'mcp:read',
+    inputShape: { siteId: z.string(), opportunityId: z.string() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireSite(ctx, String(args.siteId));
+      const o = getOpportunity(site.id, String(args.opportunityId));
+      if (!o) throw new Error('Opportunity not found.');
+      return o;
+    },
+  },
+  {
+    name: 'set_playbook_opportunity_status',
+    title: 'Mark a playbook opportunity done or dismissed',
+    description: 'Mark an opportunity done (after the change is live — the app then measures the real effect about a month later), dismissed, or open again. Requires the mcp:write scope.',
+    scope: 'mcp:write',
+    inputShape: { siteId: z.string(), opportunityId: z.string(), status: z.enum(['open', 'dismissed', 'done']) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const site = requireWritableSite(ctx, String(args.siteId));
+      const o = setOpportunityStatus(site, String(args.opportunityId), args.status as 'open' | 'dismissed' | 'done');
+      if (!o) throw new Error('Opportunity not found.');
+      return { id: o.id, status: o.status, done_at: o.done_at };
+    },
+  },
+  {
+    name: 'get_alerts',
+    title: 'Get alerts',
+    description: 'Recent alerts across your workspaces (index drops, schema or llms.txt drift, hygiene problems, quota, Bing, AI citation changes), newest first.',
+    scope: 'mcp:read',
+    inputShape: { workspaceId: z.string().optional(), unacknowledgedOnly: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    handler: (ctx, args) => {
+      const workspaces = typeof args.workspaceId === 'string' ? ctx.workspaceIds.filter(w => w === args.workspaceId) : ctx.workspaceIds;
+      const limit = (args.limit as number | undefined) ?? 50;
+      const rows = workspaces.flatMap(w => getAlerts(w, limit).map(a => ({ ...a, workspace_id: w }) as Record<string, unknown>))
+        .filter(a => !args.unacknowledgedOnly || !a.acked)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, limit);
+      return { alerts: rows };
+    },
+  },
 ];
 
-/** Every tool: the SEO tools above plus the Google Ads tools. */
-export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS, ...GA4_TOOLS];
+/** Every tool: the SEO tools above plus the Google Ads, GA4 and Google reviews tools. */
+export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...ADS_TOOLS, ...GA4_TOOLS, ...REVIEWS_TOOLS];
 
 /** Tools this context is allowed to use, by scope. */
 export function toolsForContext(ctx: McpContext): ToolDef[] {

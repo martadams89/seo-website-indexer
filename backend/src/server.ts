@@ -83,6 +83,7 @@ import {
   createGoogleOAuthAuthorization,
   consumeGoogleOAuthState,
   GOOGLE_ADS_SCOPE,
+  GOOGLE_BUSINESS_SCOPE,
 } from './auth/google-oauth.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -156,6 +157,7 @@ import { registerMcpProtocolRoute } from './mcp/http.js';
 import { healOrphanedAdsAccounts } from './ads/store.js';
 import { registerMcpOAuthRoutes, registerMcpOAuthApiRoutes } from './mcp/oauth.js';
 import { registerAdsRoutes } from './ads/routes.js';
+import { registerReviewsRoutes } from './reviews/routes.js';
 import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
 import { addAnnotation } from './platform/store.js';
 import { safeFetch, validateOutboundUrl } from './security/outbound-url.js';
@@ -400,6 +402,7 @@ function capabilityForPath(path: string): Capability | null {
   }
   if (path.startsWith('/api/notifications')) return 'manage_notifications';
   if (path.startsWith('/api/ads/')) return 'manage_ads';
+  if (path.startsWith('/api/reviews/')) return 'manage_reviews';
   if (path.startsWith('/api/platform/integrations') || path.startsWith('/api/platform/automation')) return 'manage_integrations';
   if (path.startsWith('/api/platform/discovery')) return 'manage_content';
   if (path.startsWith('/api/platform/work-items') || path.startsWith('/api/platform/content') || path.startsWith('/api/platform/annotations') || path.startsWith('/api/platform/entities')) return 'manage_content';
@@ -566,7 +569,11 @@ app.get('/api/status', async (req) => {
 
 // ── App authentication (users, sessions, 2FA) ─────────────────────────────────
 
-app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0, emailEnabled: emailConfigured() }));
+// A public install is claimable by whoever reaches it first. ADMIN_EMAIL locks
+// the first-run signup to one address (case-insensitive).
+const BOOTSTRAP_ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? '').trim().toLowerCase();
+
+app.get('/api/auth/bootstrap-status', async () => ({ needsBootstrap: countUsers() === 0, emailEnabled: emailConfigured(), signupRestricted: !!BOOTSTRAP_ADMIN_EMAIL }));
 
 app.get('/api/auth/me', async (req, reply) => {
   const token = sessionTokenFromReq(req);
@@ -587,6 +594,9 @@ app.post('/api/auth/signup', AUTH_RATE_LIMIT, async (req, reply) => {
   const { email, password, name } = (req.body ?? {}) as { email?: string; password?: string; name?: string };
   if (!email?.includes('@') || !password || password.length < 8) {
     return reply.status(400).send({ error: 'A valid email and a password of at least 8 characters are required.' });
+  }
+  if (BOOTSTRAP_ADMIN_EMAIL && email.trim().toLowerCase() !== BOOTSTRAP_ADMIN_EMAIL) {
+    return reply.status(403).send({ error: 'This install only lets the email address set in ADMIN_EMAIL create the first admin account.' });
   }
   const user = createUser({ email, password, name, role: 'admin', superAdmin: true });
   bootstrapUserWorkspace(user, true); // first user: also claims any pre-existing single-tenant data
@@ -834,6 +844,7 @@ app.get('/api/workspaces', async (req) => {
       manage_reports: hasCapability(user, w.id, 'manage_reports'),
       manage_governance: hasCapability(user, w.id, 'manage_governance'),
       manage_ads: hasCapability(user, w.id, 'manage_ads'),
+      manage_reviews: hasCapability(user, w.id, 'manage_reviews'),
     },
   }));
 });
@@ -1394,8 +1405,8 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads } = (req.body ?? {}) as {
-    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean;
+  const { clientId, clientSecret, autoSetup, accountId, ads, business } = (req.body ?? {}) as {
+    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
   };
   let reconnect: ReturnType<typeof getGoogleAccountById> = null;
   if (accountId) {
@@ -1411,9 +1422,11 @@ app.post('/api/auth/google/start', async (req, reply) => {
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
-      // A reconnect must never silently drop Google Ads: carry it forward when
-      // the existing grant has it (the URL no longer uses incremental auth).
+      // A reconnect must never silently drop Google Ads or Business Profile:
+      // carry them forward when the existing grant has them (the URL no
+      // longer uses incremental auth).
       ads: !!ads || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_ADS_SCOPE),
+      business: !!business || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_BUSINESS_SCOPE),
       clientId: reconnect?.client_id ?? clientId,
       clientSecret: reconnect?.client_secret ?? clientSecret,
       loginHint: reconnect?.email ?? null,
@@ -2771,7 +2784,7 @@ app.get('/api/mcp/info', async (req) => {
   return {
     endpoint,
     transport: 'http',
-    scopes: ['mcp:read', 'mcp:write', 'ads:write'],
+    scopes: ['mcp:read', 'mcp:write', 'ads:write', 'reviews:write'],
     oauth: { issuer: origin, authorizationEndpoint: `${origin}/oauth/authorize`, tokenEndpoint: `${origin}/oauth/token`, registrationEndpoint: `${origin}/oauth/register` },
     headerName: 'Authorization',
     // The frontend fills <token> in from the freshly minted value at create time.
@@ -2803,6 +2816,7 @@ app.delete('/api/mcp/tokens/:id', async (req, reply) => {
 registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
 registerAdsRoutes(app);
+registerReviewsRoutes(app);
 registerPlaybookRoutes(app);
 registerMcpOAuthRoutes(app);
 registerMcpOAuthApiRoutes(app, currentUser);

@@ -5,11 +5,12 @@ import { auditContentInventory } from './content-audit.js';
 import { syncIntegration } from './connectors.js';
 import { runDueDigests, runDueReports } from './reports.js';
 import { dueIntegrations } from './store.js';
+import { syncDueLocations } from '../reviews/service.js';
 
 let running = false;
 
-export async function runPlatformAutomation(): Promise<{ integrations: number; prompts: number; reports: number; digests: number; audited: number; retained: number }> {
-  if (running) return { integrations: 0, prompts: 0, reports: 0, digests: 0, audited: 0, retained: 0 };
+export async function runPlatformAutomation(): Promise<{ integrations: number; prompts: number; reports: number; digests: number; audited: number; retained: number; reviews: number }> {
+  if (running) return { integrations: 0, prompts: 0, reports: 0, digests: 0, audited: 0, retained: 0, reviews: 0 };
   running = true;
   try {
     let integrations = 0;
@@ -17,6 +18,8 @@ export async function runPlatformAutomation(): Promise<{ integrations: number; p
       try { await syncIntegration(integration); integrations++; } catch { /* work item and status retained */ }
     }
     const prompts = await runDuePrompts(); const reports = await runDueReports(); const digests = await runDueDigests();
+    // Google reviews: each linked location re-syncs about hourly (REVIEWS_SYNC_MINUTES); new negative reviews raise alerts.
+    const reviews = await syncDueLocations().catch(() => 0);
     const workspaces = getDb().prepare('SELECT id FROM workspaces').all() as Array<{ id: string }>; let audited = 0;
     let retained = 0;
     for (const workspace of workspaces) {
@@ -30,7 +33,7 @@ export async function runPlatformAutomation(): Promise<{ integrations: number; p
         retained += getDb().prepare(`DELETE FROM ${table} WHERE workspace_id=? AND ${timeColumn}<datetime('now',?)`).run(workspace.id, `-${days} days`).changes;
       }
     }
-    return { integrations, prompts, reports, digests, audited, retained };
+    return { integrations, prompts, reports, digests, audited, retained, reviews };
   } finally { running = false; }
 }
 

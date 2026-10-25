@@ -30,6 +30,7 @@ Editors have seven separately controlled capabilities:
 - Manage reports and saved views
 - Manage governance, budgets, tokens and webhooks
 - Manage Google Ads: link accounts, set client budgets and guardrails, approve, reject and revert changes (also required for an assistant to change Google Ads on this member's behalf)
+- Manage Google reviews: link Business Profile locations, change reply rules, reply to reviews and approve or reject AI-drafted replies (also required for an assistant to reply on this member's behalf)
 
 Admins always have all seven capabilities. Viewers cannot be granted write capabilities. Owners and super-admins have full access.
 

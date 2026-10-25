@@ -31,6 +31,7 @@ Official references: [Data API quickstart](https://developers.google.com/analyti
 | --- | --- | --- |
 | Google Search Console | OAuth `webmasters`; Owner or Full user on the property | Settings → Google Accounts, then Sites |
 | Google Analytics 4 | OAuth `analytics.readonly`; GA4 Viewer or higher | Integrations |
+| Google Business Profile (reviews) | OAuth `business.manage` (opt-in); the Google user must own or manage the profiles; the OAuth client's Cloud project needs Google's Business Profile API approval | Reviews → Setup |
 | Google Ads | OAuth `adwords` (opt-in); the Google user needs access to the ad accounts (directly or through a manager account); the OAuth client's Cloud project needs Explorer or Basic API access | Google Ads → Setup |
 | PageSpeed Insights | PageSpeed Insights API key; no OAuth | Integrations |
 | Chrome UX Report | Chrome UX Report API key; no OAuth | Settings → API Keys |
@@ -78,6 +79,7 @@ Enable these APIs in the Google Cloud project that owns the OAuth client:
 - **Web Search Indexing API**: `indexing.googleapis.com` (only used by sites that opt in to Indexing API recrawl requests)
 - **Google Analytics Data API**: `analyticsdata.googleapis.com`
 - **Google Ads API**: `googleads.googleapis.com` (only when Google Ads is used)
+- **Business Profile APIs**: `mybusinessaccountmanagement.googleapis.com`, `mybusinessbusinessinformation.googleapis.com`, `mybusiness.googleapis.com` and `businessprofileperformance.googleapis.com` (only when Google reviews are used)
 
 The standard account connection requests:
 
@@ -93,6 +95,8 @@ Google Ads is opt-in. Ticking **Also allow Google Ads management** (or **Add Goo
 ```text
 https://www.googleapis.com/auth/adwords
 ```
+
+Google reviews are opt-in too: **Add Business Profile access** (Reviews → Setup) adds `https://www.googleapis.com/auth/business.manage`. Google has no read-only variant, so replies are governed by the MCP `reviews:write` scope, the **Manage Google reviews** capability and each location's reply rules. Google must also approve the Cloud project once before the APIs answer; see the [Google reviews guide](REVIEWS.md).
 
 Google publishes no read-only Ads scope, so what may change is decided by the app: the MCP `ads:write` scope, the member's **Manage Google Ads** capability and each client's monthly budget and guardrails. Re-consent uses incremental authorisation, so existing scopes and linked sites are kept. Google Ads API access is granted to the Cloud project that owns the OAuth client (Explorer or Basic; developer tokens are no longer used). See the [Google Ads guide](GOOGLE_ADS.md).
 
@@ -329,9 +333,10 @@ AI assistants (any MCP client) use the MCP server at `/mcp` instead. Connect the
 
 | MCP scope | Allows |
 | --- | --- |
-| `mcp:read` | Read sites, Search Console, indexing, AI citations and Google Ads data in every workspace the user can access. |
-| `mcp:write` | SEO actions: submit URLs, trigger runs, refresh snapshots, record Request indexing results. |
+| `mcp:read` | Read sites, Search Console, the ranking playbook, alerts, indexing, AI citations, Google Ads and Google reviews data in every workspace the user can access. |
+| `mcp:write` | SEO actions: submit URLs, trigger runs, refresh snapshots, record Request indexing results, mark playbook opportunities done or dismissed. |
 | `ads:write` | Propose and apply Google Ads changes, always within each client's guardrails. |
+| `reviews:write` | Reply to Google reviews within each location's reply rules; anything outside them waits for approval. |
 
 A token never exceeds its owner's role: viewers stay read-only and editors need the matching capability. See the [Google Ads guide](GOOGLE_ADS.md#connect-an-ai-assistant).
 

@@ -27,6 +27,10 @@ services:
       # Google Ads). Google Ads API access belongs to this client's Cloud project.
       # - GOOGLE_OAUTH_CLIENT_ID=
       # - GOOGLE_OAUTH_CLIENT_SECRET=
+      # Only this email may create the first admin on a fresh install.
+      # - ADMIN_EMAIL=you@example.com
+      # How often linked Google Business Profile locations sync reviews (minutes).
+      # - REVIEWS_SYNC_MINUTES=60
       # Only let these AI apps sign in as MCP clients (see docs/DEPLOYMENT.md).
       # - MCP_OAUTH_REDIRECT_ALLOWLIST=chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1
       # Trust forwarded IP/protocol headers only when your proxy overwrites them.

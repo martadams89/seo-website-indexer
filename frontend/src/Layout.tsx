@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Globe, ScrollText, Settings, Zap, AlertTriangle, Activity,
   ChevronLeft, ChevronRight, Menu, X, Sun, Moon, WifiOff, LogOut,
   BarChart3, Search, Command, ArrowRight,
-  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness, Rocket, Megaphone,
+  Layers3, PlugZap, FileOutput, ShieldCheck, Send, MapPin, Eye, BriefcaseBusiness, Rocket, Megaphone, Star,
 } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useAuth } from './auth/AuthGate';
@@ -25,6 +25,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: '/actions', icon: BriefcaseBusiness, label: 'Work', detail: 'Owned actions and remediation' },
   { to: '/insights', icon: BarChart3, label: 'Insights', detail: 'Search, AI and connected evidence' },
   { to: '/ads', icon: Megaphone, label: 'Google Ads', detail: 'Client ad accounts, budgets, approvals and AI routines' },
+  { to: '/reviews', icon: Star, label: 'Reviews', detail: 'Google Business Profile reviews, replies and local performance' },
   { to: '/reports', icon: FileOutput, label: 'Reports', detail: 'Snapshots and executive reporting' },
 ];
 const ADVANCED_NAV: NavItem[] = [

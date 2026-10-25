@@ -18,6 +18,84 @@ const migrations: Migration[] = [
     },
   },
   {
+    id: '20261025_01_google_reviews',
+    description: 'Google Business Profile locations, synced reviews and guarded reply plans',
+    up(db) {
+      db.exec(`
+        CREATE TABLE gbp_locations (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          google_account_id TEXT REFERENCES google_accounts(id) ON DELETE SET NULL,
+          account_name TEXT NOT NULL,
+          location_name TEXT NOT NULL,
+          title TEXT,
+          address TEXT,
+          website TEXT,
+          place_id TEXT,
+          maps_uri TEXT,
+          new_review_uri TEXT,
+          site_id TEXT REFERENCES sites(id) ON DELETE SET NULL,
+          brief TEXT NOT NULL DEFAULT '{}',
+          rules TEXT NOT NULL DEFAULT '{}',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          average_rating REAL,
+          total_reviews INTEGER,
+          last_synced_at TEXT,
+          last_full_sync_at TEXT,
+          last_error TEXT,
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(workspace_id, location_name)
+        );
+        CREATE TABLE gbp_reviews (
+          id TEXT PRIMARY KEY,
+          location_id TEXT NOT NULL REFERENCES gbp_locations(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          review_name TEXT NOT NULL,
+          reviewer_name TEXT,
+          reviewer_photo TEXT,
+          anonymous INTEGER NOT NULL DEFAULT 0,
+          rating INTEGER NOT NULL DEFAULT 0,
+          comment TEXT,
+          create_time TEXT,
+          update_time TEXT,
+          reply_comment TEXT,
+          reply_update_time TEXT,
+          reply_state TEXT,
+          reply_policy_violation TEXT,
+          reply_url TEXT,
+          media TEXT NOT NULL DEFAULT '[]',
+          first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(location_id, review_name)
+        );
+        CREATE INDEX idx_gbp_reviews_location_time ON gbp_reviews(location_id, create_time DESC);
+        CREATE TABLE gbp_replies (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          location_id TEXT NOT NULL REFERENCES gbp_locations(id) ON DELETE CASCADE,
+          review_id TEXT NOT NULL REFERENCES gbp_reviews(id) ON DELETE CASCADE,
+          action TEXT NOT NULL DEFAULT 'reply',
+          text TEXT,
+          previous_reply TEXT,
+          rationale TEXT,
+          rating INTEGER,
+          source TEXT NOT NULL DEFAULT 'dashboard',
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          status TEXT NOT NULL,
+          findings TEXT NOT NULL DEFAULT '[]',
+          decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          decided_at TEXT,
+          published_at TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_gbp_replies_workspace_status ON gbp_replies(workspace_id, status, created_at DESC);
+        CREATE INDEX idx_gbp_replies_review ON gbp_replies(review_id, created_at DESC);
+      `);
+    },
+  },
+  {
     id: '20261019_03_manual_index_requests',
     description: 'Track Search Console "Request indexing" clicks made by a person or a browser agent',
     up(db) {
