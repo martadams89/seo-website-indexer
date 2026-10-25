@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Circle, Cloud, Copy, ExternalLink, KeyRoun
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
 import { adsApi, errorMessage, type AdsAccount, type AdsConnectionStatus, type AdsSetup } from './api';
-import { openGoogleConsent, useGoogleAuthSuccess } from './googleConnect';
+import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from './googleConnect';
 import { LinkAccountsModal } from './AdsClients';
 
 const API_LABEL: Record<string, { text: string; tone: 'ok' | 'warn' | 'error' | 'info' }> = {
@@ -21,7 +21,10 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [autoSetup, setAutoSetup] = useState(true);
+  // Off by default: a Cloud scope on the saved connection lets a Workspace
+  // session-control policy expire it. "Switch on for me" below enables the API
+  // with a one-off sign-in instead.
+  const [autoSetup, setAutoSetup] = useState(false);
   const [custom, setCustom] = useState(false);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -30,6 +33,12 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
 
   const refreshAfterConsent = useCallback(() => { void reload(true); }, [reload]);
   useGoogleAuthSuccess(refreshAfterConsent);
+  useApisEnabled(useCallback(result => {
+    toast(result.ok ? 'success' : 'warning', result.ok
+      ? 'Google Ads API switched on. Google can take a few minutes to apply it.'
+      : `Couldn't switch on ${result.skipped.join(', ') || 'the API'}. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.`);
+    void reload(true);
+  }, [reload, toast]));
 
   function copy(value: string) {
     navigator.clipboard.writeText(value);
@@ -54,9 +63,14 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
   async function enableApi(conn: AdsConnectionStatus) {
     setBusy(`enable:${conn.id}`);
     try {
-      const result = await adsApi.enableApi(conn.id);
-      toast(result.ok ? 'success' : 'warning', result.message);
-      await reload(true);
+      if (conn.has_cloud_scope) {
+        const result = await adsApi.enableApi(conn.id);
+        toast(result.ok ? 'success' : 'warning', result.message);
+        await reload(true);
+      } else {
+        // One-off sign-in; the popup reports back through useApisEnabled.
+        await openApiEnable(conn.id, ['googleads.googleapis.com']);
+      }
     } catch (e) {
       toast('error', errorMessage(e));
     }
@@ -67,7 +81,7 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
   const s = setup.steps;
   const steps = [
     { done: s.google_connected && s.ads_scope, title: 'Connect Google with Google Ads access', detail: 'Sign in with the Google user that manages your clients (ideally the one on your manager account).' },
-    { done: s.api_enabled, title: `Enable the Google Ads API${setup.project ? ` on project ${setup.project}` : ''}`, detail: 'Done automatically when you allow Cloud access while connecting, or with one click below.' },
+    { done: s.api_enabled, title: `Enable the Google Ads API${setup.project ? ` on project ${setup.project}` : ''}`, detail: 'One click below (a one-off Google sign-in; the saved connection keeps no Cloud access), or by hand in the Cloud console.' },
     { done: s.production_access, title: 'Production API access (Explorer or Basic)', detail: 'New Cloud projects start on Test access, which only reaches test accounts. Apply once per project.' },
     { done: s.accounts_linked, title: 'Link your clients\' ad accounts', detail: 'Accounts under your manager account are found automatically.' },
     { done: s.budgets_set, title: 'Set each client\'s monthly budget and guardrails', detail: 'The AI can only raise spend inside these limits; everything else waits for your approval.' },
@@ -117,8 +131,8 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
                       <KeyRound size={13} /> {conn.needs_reauth ? 'Reconnect' : 'Add Google Ads access'}
                     </button>
                   )}
-                  {conn.api === 'api_disabled' && conn.has_cloud_scope && (
-                    <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApi(conn)}><Zap size={13} /> Enable automatically</button>
+                  {conn.api === 'api_disabled' && (
+                    <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApi(conn)} title="Switches the API on with a one-off Google sign-in; the saved connection keeps no Cloud access"><Zap size={13} /> Switch on for me</button>
                   )}
                   {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={`https://console.cloud.google.com/apis/library/googleads.googleapis.com?project=${conn.project ?? ''}`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
                   {conn.access === 'access_level' && <a className="btn btn-secondary btn-sm" href={`https://console.cloud.google.com/google/ads-apis/overview?project=${conn.project ?? ''}`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Apply for access</a>}
@@ -133,8 +147,8 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
           <label className="autosetup-row">
             <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
             <div>
-              <strong>Let the app enable the Google APIs it needs</strong>
-              <div className="text-dim">Asks Google for Cloud access so the Google Ads, Search Console, Indexing and Analytics APIs are switched on for you. Managed Google Workspace accounts may then need to sign in again periodically — untick to enable APIs by hand instead.</div>
+              <strong>Also keep Cloud access on this connection</strong>
+              <div className="text-dim">Not needed to switch APIs on: "Switch on for me" does that with a one-off sign-in. Keeping Cloud access lets the app enable APIs without asking, but managed Google Workspace accounts can then be signed out every few hours by Google Cloud session control.</div>
             </div>
           </label>
           {setup.builtin_oauth_client && (

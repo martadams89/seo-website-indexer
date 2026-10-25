@@ -131,6 +131,9 @@ export interface PendingGoogleOAuth {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  /** 'connect' stores the connection; 'enable_apis' only switches APIs on and keeps nothing. */
+  purpose: 'connect' | 'enable_apis';
+  payload: { services?: string[]; accountId?: string } | null;
 }
 
 /** Create a concurrency-safe, single-use OAuth handshake and authorization URL. */
@@ -173,11 +176,11 @@ export function createGoogleOAuthAuthorization(opts: {
 export function consumeGoogleOAuthState(state: string): PendingGoogleOAuth | null {
   const db = getDb();
   const row = db.prepare(`
-    SELECT user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at
+    SELECT user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at, purpose, payload
     FROM google_oauth_states WHERE state_hash = ?
   `).get(hashState(state)) as {
     user_id: string; workspace_id: string; client_id: string; client_secret: string;
-    redirect_uri: string; expires_at: string;
+    redirect_uri: string; expires_at: string; purpose: string | null; payload: string | null;
   } | undefined;
   if (!row) return null;
   db.prepare('DELETE FROM google_oauth_states WHERE state_hash = ?').run(hashState(state));
@@ -190,7 +193,55 @@ export function consumeGoogleOAuthState(state: string): PendingGoogleOAuth | nul
     clientId: row.client_id,
     clientSecret,
     redirectUri: row.redirect_uri,
+    purpose: row.purpose === 'enable_apis' ? 'enable_apis' : 'connect',
+    payload: (() => { try { return row.payload ? JSON.parse(row.payload) : null; } catch { return null; } })(),
   };
+}
+
+/**
+ * A one-off Google sign-in that only switches APIs on for the OAuth client's
+ * Cloud project. It asks for the cloud-platform scope with online access (no
+ * refresh token), uses the access token once and stores nothing — so the
+ * saved connection never carries Cloud access, and a Workspace Google Cloud
+ * session-control policy can't start expiring it every few hours.
+ */
+export function createApiEnableAuthorization(opts: {
+  userId: string; workspaceId: string; redirectUri: string; account: GoogleAccount; services: string[];
+}): string {
+  if (!opts.account.client_id || !opts.account.client_secret) throw new Error('This Google connection has no OAuth client to enable APIs with.');
+  const state = randomBytes(32).toString('base64url');
+  const expires = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
+  const db = getDb();
+  db.prepare("DELETE FROM google_oauth_states WHERE julianday(expires_at) < julianday('now')").run();
+  db.prepare(`
+    INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at, purpose, payload)
+    VALUES(?,?,?,?,?,?,?,?,?)
+  `).run(hashState(state), opts.userId, opts.workspaceId, opts.account.client_id, encrypt(opts.account.client_secret), opts.redirectUri, expires,
+    'enable_apis', JSON.stringify({ services: opts.services, accountId: opts.account.id }));
+  const params = new URLSearchParams({
+    client_id: opts.account.client_id,
+    redirect_uri: opts.redirectUri,
+    response_type: 'code',
+    scope: CLOUD_PLATFORM_SCOPE,
+    access_type: 'online',
+    prompt: 'consent',
+    state,
+  });
+  if (opts.account.email) params.set('login_hint', opts.account.email);
+  return `${GOOGLE_AUTHORIZE_URL}?${params.toString()}`;
+}
+
+/** Exchange a code for a short-lived access token without storing anything (used by the one-off API enable flow). */
+export async function exchangeCodeForAccessToken(code: string, redirectUri: string, clientId: string, clientSecret: string): Promise<string> {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }).toString(),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => ({})) as { access_token?: string; error?: string; error_description?: string };
+  if (!data.access_token) throw new Error(`Google didn't return an access token (${data.error ?? res.status}${data.error_description ? `: ${data.error_description}` : ''}).`);
+  return data.access_token;
 }
 
 // ── Web Flow Token Exchange ───────────────────────────────────────────────────

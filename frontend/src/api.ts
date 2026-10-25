@@ -98,6 +98,8 @@ export interface AppStatus {
   version?: string;
   /** The origin the server builds callback and MCP URLs from. */
   publicOrigin?: string;
+  /** Google connections that need a reconnect, a permission or an API switched on. */
+  googleAttention?: number;
 }
 
 export interface QuotaSummary {

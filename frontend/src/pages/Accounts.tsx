@@ -3,6 +3,7 @@ import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, AlertTriangle
 import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
+import { GoogleHealth } from '../components/GoogleHealth';
 
 const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 const hasAds = (acc: GoogleAccount) => !!acc.granted_scopes?.split(' ').includes(ADS_SCOPE);
@@ -297,6 +298,8 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
           </div>
         </div>
       )}
+
+      {accounts.length > 0 && <GoogleHealth canManage={canConnect} />}
 
       <div className="card">
         <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>Connected Accounts</h2>

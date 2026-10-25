@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus, Send, Loader2, CheckCircle2, XCircle, MessageSquare, AtSign, Webhook } from 'lucide-react';
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
@@ -977,7 +978,7 @@ function NotificationsTab() {
 
   useEffect(() => {
     api.getNotifyConfig().then(rec => {
-      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts'];
+      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts', 'notify_google_connection'];
       const next: Record<string, string> = {};
       for (const k of keys) next[k] = rec[k] ?? '';
       setVals(next);
@@ -1023,6 +1024,7 @@ function NotificationsTab() {
           ['notify_citation_changes', 'AI citation movement', 'A tracked answer engine gains or loses your domain.'],
           ['notify_playbook_ready', 'Ranking playbook ready', 'Weekly summary of new ranking opportunities and their estimated upside.'],
           ['notify_review_alerts', 'Google review alerts', 'A new low-rated Google review arrives, or Google rejects a reply (threshold set per location).'],
+          ['notify_google_connection', 'Google connection problems', 'A Google connection needs reconnecting, a new permission, or a Google API switched on. Sent once per change.'],
         ].map(([key, label, description]) => (
           <label key={key}>
             <input type="checkbox" checked={vals[key] !== 'false'} disabled={!canManage} onChange={event => set(key, event.target.checked ? 'true' : 'false')} />
@@ -1300,13 +1302,22 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const { status, refresh } = useApp();
   const { active } = useWorkspace();
-  const [tab, setTab] = useState<Tab>(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab');
+  const location = useLocation();
+  const tabFromSearch = (search: string): Tab | null => {
+    const requested = new URLSearchParams(search).get('tab');
     const aliases: Record<string, Tab> = { accounts: 'google', notifications: 'notify' };
     const candidate = requested ? (aliases[requested] ?? requested) : null;
     const allowed = TABS.filter(item => !item.superAdmin || user.is_super_admin).map(item => item.id);
-    return candidate && allowed.includes(candidate as Tab) ? candidate as Tab : 'account';
-  });
+    return candidate && allowed.includes(candidate as Tab) ? candidate as Tab : null;
+  };
+  const [tab, setTab] = useState<Tab>(() => tabFromSearch(window.location.search) ?? 'account');
+  // Follow in-app links such as the Google connection banner's /settings?tab=google.
+  const [seenSearch, setSeenSearch] = useState(location.search);
+  if (location.search !== seenSearch) {
+    setSeenSearch(location.search);
+    const linked = tabFromSearch(location.search);
+    if (linked) setTab(linked);
+  }
   const [advancedOpen, setAdvancedOpen] = useState(() => TABS.find(item => item.id === tab)?.group === 'platform');
   const [cronSchedule, setCronSchedule] = useState('');
   const [projectId, setProjectId] = useState('');

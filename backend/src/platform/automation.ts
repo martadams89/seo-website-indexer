@@ -6,6 +6,7 @@ import { syncIntegration } from './connectors.js';
 import { runDueDigests, runDueReports } from './reports.js';
 import { dueIntegrations } from './store.js';
 import { syncDueLocations } from '../reviews/service.js';
+import { notifyGoogleConnectionProblems } from '../auth/google-health.js';
 
 let running = false;
 
@@ -20,6 +21,8 @@ export async function runPlatformAutomation(): Promise<{ integrations: number; p
     const prompts = await runDuePrompts(); const reports = await runDueReports(); const digests = await runDueDigests();
     // Google reviews: each linked location re-syncs about hourly (REVIEWS_SYNC_MINUTES); new negative reviews raise alerts.
     const reviews = await syncDueLocations().catch(() => 0);
+    // Google connections: hourly check for reconnects, missing permissions and switched-off APIs; notifies once per change.
+    await notifyGoogleConnectionProblems().catch(() => 0);
     const workspaces = getDb().prepare('SELECT id FROM workspaces').all() as Array<{ id: string }>; let audited = 0;
     let retained = 0;
     for (const workspace of workspaces) {

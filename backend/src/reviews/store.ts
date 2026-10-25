@@ -5,7 +5,7 @@
  * so the plan history is also the audit log.
  */
 import { randomUUID } from 'crypto';
-import { getDb } from '../db/database.js';
+import { getDb, getGoogleAccountsForWorkspace } from '../db/database.js';
 import { normalizeReviewBrief, normalizeRules, type ReplyFinding, type ReplyRules, type ReviewBrief } from './rules.js';
 
 // ── Locations ────────────────────────────────────────────────────────────────
@@ -92,6 +92,19 @@ export function updateLocation(id: string, patch: Partial<Pick<ReviewLocation, '
   }
   if (sets.length) getDb().prepare(`UPDATE gbp_locations SET ${sets.join(', ')}, updated_at=datetime('now') WHERE id=?`).run(...values, id);
   return getLocation(id);
+}
+
+/**
+ * After a Google connection is removed and reconnected, its locations point at
+ * nothing. Re-attach them when exactly one connection in the workspace has
+ * Business Profile access (the same rule as Ads accounts).
+ */
+export function healOrphanedReviewLocations(workspaceId: string): number {
+  const orphans = getDb().prepare('SELECT id FROM gbp_locations WHERE workspace_id=? AND google_account_id IS NULL').all(workspaceId) as Array<{ id: string }>;
+  if (!orphans.length) return 0;
+  const candidates = getGoogleAccountsForWorkspace(workspaceId).filter(a => (a.granted_scopes ?? '').split(' ').includes('https://www.googleapis.com/auth/business.manage') && !a.needs_reauth);
+  if (candidates.length !== 1) return 0;
+  return getDb().prepare("UPDATE gbp_locations SET google_account_id=?, last_error=NULL, updated_at=datetime('now') WHERE workspace_id=? AND google_account_id IS NULL").run(candidates[0].id, workspaceId).changes;
 }
 
 export function deleteLocation(id: string): void {

@@ -374,6 +374,15 @@ export default function Layout() {
             </div>
           </div>
         )}
+        {!isViewer && (status?.googleAttention ?? 0) > 0 && !(location.pathname === '/settings' && location.search.includes('tab=google')) && (
+          <div className="alert alert-warn origin-alert" role="alert">
+            <AlertTriangle size={14} />
+            <div className="alert-content">
+              <div className="alert-title">{status!.googleAttention === 1 ? 'A Google connection needs' : `${status!.googleAttention} Google connections need`} attention</div>
+              A reconnect, a new permission or a switched-off Google API is stopping some features. <NavLink to="/settings?tab=google">Fix it in Settings → Google Accounts</NavLink>.
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
 

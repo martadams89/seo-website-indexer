@@ -148,6 +148,14 @@ Once connected, the app keeps a Google account signed in indefinitely: it stores
 
 The Accounts page shows the exact Google error and the matching fix on any account that needs reconnecting.
 
+### New permissions and switched-off APIs
+
+Google never adds a permission silently: a new scope always needs one consent click. The app works out what each connection needs and asks only for that:
+
+- **Missing permissions.** If a connection is linked to Google Ads clients or Business Profile locations but its grant lacks that scope (or lacks Search Console, Indexing or Analytics for the sites using it), **Settings → Google Accounts** lists what's missing and why, with an **Update permissions** button. It opens Google's consent screen for that account, keeps everything already granted and adds the rest. Nothing is disconnected and the refresh token keeps renewing.
+- **Switched-off APIs.** Every 30 minutes, and whenever you open that page, the app checks the APIs each connection uses (Search Console, Analytics Admin, Google Ads, Business Profile). Anything Google reports as disabled gets a Cloud console link and a **Switch them on for me** button. That button starts a one-off sign-in that asks for Cloud access, uses it once to enable the APIs, and keeps nothing. The saved connection never carries the Cloud scope, so Workspace Cloud session control can't expire it. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.
+- **Alerts.** A banner on every page says when a connection needs attention. Each workspace also gets a notification (event *Google connection problems*) when a connection needs reconnecting, a permission or an API, sent once per change rather than every hour.
+
 ## How indexing works
 
 Each scheduled run reads a site's configured sitemap and any additional `Sitemap:` entries in `robots.txt`. It compares the current URLs and `lastmod` values with the previous run, then submits only new or changed content where the receiving service supports it.

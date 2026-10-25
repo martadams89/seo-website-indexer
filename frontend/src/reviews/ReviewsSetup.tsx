@@ -3,7 +3,7 @@ import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, Plus, Shield
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
 import { errorMessage } from '../ads/api';
-import { openGoogleConsent, useGoogleAuthSuccess } from '../ads/googleConnect';
+import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from '../ads/googleConnect';
 import { reviewsApi, type ConnectionStatus, type ReviewsSetup } from './api';
 import { LinkLocationsModal } from './ReviewsLocations';
 
@@ -17,6 +17,8 @@ const API_LABEL: Record<ConnectionStatus['api'], { text: string; tone: 'ok' | 'w
   unchecked: { text: 'Not checked', tone: 'info' },
 };
 
+const BUSINESS_SERVICES = ['mybusinessaccountmanagement.googleapis.com', 'mybusinessbusinessinformation.googleapis.com', 'mybusiness.googleapis.com', 'businessprofileperformance.googleapis.com'];
+
 export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   setup: ReviewsSetup | null; canManage: boolean; reload: (fresh?: boolean) => Promise<void>; onLinked: () => void;
 }) {
@@ -28,6 +30,12 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   const [autoSetup, setAutoSetup] = useState(false);
   const refreshAfterConsent = useCallback(() => { void reload(true); }, [reload]);
   useGoogleAuthSuccess(refreshAfterConsent);
+  useApisEnabled(useCallback(result => {
+    toast(result.ok ? 'success' : 'warning', result.ok
+      ? 'Business Profile APIs switched on. Google can take a few minutes to apply it.'
+      : `Couldn't switch on ${result.skipped.join(', ') || 'the APIs'}. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.`);
+    void reload(true);
+  }, [reload, toast]));
 
   function copy(value: string) {
     navigator.clipboard.writeText(value);
@@ -44,9 +52,14 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   async function enableApis(conn: ConnectionStatus) {
     setBusy(`enable:${conn.id}`);
     try {
-      const result = await reviewsApi.enableApi(conn.id);
-      toast(result.ok ? 'success' : 'warning', result.message);
-      await reload(true);
+      if (conn.has_cloud_scope) {
+        const result = await reviewsApi.enableApi(conn.id);
+        toast(result.ok ? 'success' : 'warning', result.message);
+        await reload(true);
+      } else {
+        // One-off sign-in; the popup reports back through useApisEnabled.
+        await openApiEnable(conn.id, BUSINESS_SERVICES);
+      }
     } catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }
@@ -55,7 +68,7 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   const s = setup.steps;
   const steps = [
     { done: s.google_connected && s.business_scope, title: 'Connect Google with Business Profile access', detail: 'Sign in as a Google user who is an owner or manager of your clients\' Business Profiles.' },
-    { done: s.api_enabled, title: `Enable the Business Profile APIs${setup.project ? ` on project ${setup.project}` : ''}`, detail: 'Done automatically when you allow Cloud access while connecting, or with one click below.' },
+    { done: s.api_enabled, title: `Enable the Business Profile APIs${setup.project ? ` on project ${setup.project}` : ''}`, detail: 'One click below (a one-off Google sign-in; the saved connection keeps no Cloud access), or by hand in the Cloud console.' },
     { done: s.access_approved, title: 'Get the project approved by Google', detail: 'Google only serves these APIs to approved projects. Apply once; approval usually takes a few days.' },
     { done: s.locations_linked, title: 'Link your clients\' locations', detail: 'Every location the connected users manage is listed for you to pick.' },
   ];
@@ -121,8 +134,8 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
                       <KeyRound size={13} /> {conn.needs_reauth || conn.api === 'needs_reauth' ? 'Reconnect' : 'Add Business Profile access'}
                     </button>
                   )}
-                  {conn.api === 'api_disabled' && conn.has_cloud_scope && (
-                    <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApis(conn)}><Zap size={13} /> Enable automatically</button>
+                  {conn.api === 'api_disabled' && (
+                    <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApis(conn)} title="Switches the APIs on with a one-off Google sign-in; the saved connection keeps no Cloud access"><Zap size={13} /> Switch on for me</button>
                   )}
                   {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={setup.links.enable_apis} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
                 </div>
@@ -134,8 +147,8 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
         <label className="autosetup-row">
           <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
           <div>
-            <strong>Let the app enable the Business Profile APIs</strong>
-            <div className="text-dim">Asks Google for Cloud access so the APIs are switched on for you. Managed Google Workspace accounts may then have to sign in again every few hours — leave it unticked and use the Cloud console link instead if that happens.</div>
+            <strong>Also keep Cloud access on this connection</strong>
+            <div className="text-dim">Not needed to switch the APIs on: "Switch on for me" does that with a one-off sign-in. Keeping Cloud access lets the app enable APIs without asking, but managed Google Workspace accounts can then be signed out every few hours by Google Cloud session control.</div>
           </div>
         </label>
         <div className="ads-row-actions">

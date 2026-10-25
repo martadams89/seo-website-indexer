@@ -8,6 +8,16 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261025_03_google_oauth_state_purpose',
+    description: 'Let a Google sign-in be a one-off API enable flow that stores no connection',
+    up(db) {
+      db.exec(`
+        ALTER TABLE google_oauth_states ADD COLUMN purpose TEXT;
+        ALTER TABLE google_oauth_states ADD COLUMN payload TEXT;
+      `);
+    },
+  },
+  {
     id: '20261021_01_ads_ga4_property',
     description: 'Link a GA4 property to each Google Ads client so the AI routine can read its analytics',
     up(db) {
