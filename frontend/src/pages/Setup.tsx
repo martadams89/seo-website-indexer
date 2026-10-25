@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Smartphone, ChevronRight, Copy, Check, ExternalLink, Key } from 'lucide-react';
-import { api } from '../api';
+import { ShieldCheck, Smartphone, ChevronRight, Copy, Check, ExternalLink, Key, X, UserCheck } from 'lucide-react';
+import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
+import { useWorkspace } from '../workspace/WorkspaceContext';
+import { skipSetup } from '../workspace/setupSkip';
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
 
@@ -10,6 +12,7 @@ type Step = 'welcome' | 'creds' | 'auth' | 'done';
 
 export default function SetupPage() {
   const { status, refresh } = useApp();
+  const { workspaces, active, activeId, switchWorkspace } = useWorkspace();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>('welcome');
@@ -19,6 +22,11 @@ export default function SetupPage() {
   const [dfError, setDfError]               = useState('');
   const [copied, setCopied]                 = useState(false);
   const [authChecking, setAuthChecking]     = useState(false);
+  // Google logins this person connected in another workspace, ready to reuse here.
+  const [myAccounts, setMyAccounts]         = useState<GoogleAccount[]>([]);
+  const [reusingId, setReusingId]           = useState<string | null>(null);
+  const reusable = myAccounts.filter(a => !a.available_in_workspace);
+  const canConnect = !!active?.permissions?.manage_integrations;
 
   const hasBuiltin = status?.auth?.hasBuiltinCredentials ?? false;
   const redirectUri = window.location.origin + '/api/auth/google/callback';
@@ -29,6 +37,29 @@ export default function SetupPage() {
       setStep('done');
     }
   }, [status]);
+
+  useEffect(() => {
+    api.getMyAccounts().then(setMyAccounts).catch(() => setMyAccounts([]));
+  }, [activeId]);
+
+  // Leave the wizard; an empty workspace stops sending this browser back here.
+  function leaveSetup(to = '/') {
+    skipSetup(activeId);
+    navigate(to);
+  }
+
+  async function reuseAccount(account: GoogleAccount) {
+    setDfError('');
+    setReusingId(account.id);
+    try {
+      await api.shareAccountWithWorkspace(account.id);
+      await refresh();
+      setStep('done');
+    } catch (e) {
+      setDfError(String(e).replace('Error: ', ''));
+    }
+    setReusingId(null);
+  }
 
   // Listen for callback postMessage
   useEffect(() => {
@@ -153,9 +184,23 @@ export default function SetupPage() {
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
-      <div className="page-header">
-        <h1 className="page-title">Welcome to Organic Command</h1>
-        <p className="page-subtitle">Let's connect your Google account to get started.</p>
+      <div className="page-header flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="page-title">Welcome to Organic Command</h1>
+          <p className="page-subtitle">
+            Connect a Google account to {active ? <strong>{active.name}</strong> : 'this workspace'} to get started. You can also do this later from Settings → Google Accounts.
+          </p>
+        </div>
+        <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+          {workspaces.length > 1 && (
+            <select className="input" aria-label="Switch workspace" value={activeId ?? ''} onChange={e => switchWorkspace(e.target.value)} style={{ width: 'auto' }}>
+              {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          )}
+          <button className="btn btn-secondary" onClick={() => leaveSetup()} title="Go to the dashboard without connecting Google now">
+            <X size={14} /> Skip for now
+          </button>
+        </div>
       </div>
 
       {/* Step indicator */}
@@ -173,6 +218,34 @@ export default function SetupPage() {
       {/* ── Step 1: Welcome / Sign-in ── */}
       {step === 'welcome' && (
         <div className="flex-col gap-4">
+          {reusable.length > 0 && (
+            <div className="card">
+              <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <UserCheck size={18} style={{ color: 'var(--ok)' }} /> Use a Google account you've already connected
+              </h2>
+              <p className="text-secondary text-sm mb-3">
+                Reuse a login from another workspace. There's no need to sign in to Google again, and you stay its owner.
+              </p>
+              {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
+              <div className="member-list">
+                {reusable.map(acc => (
+                  <div className="member-row" key={acc.id}>
+                    <div className="member-info">
+                      <span className="member-name">{acc.email || acc.id}</span>
+                      <span className="member-role">
+                        {acc.needs_reauth ? 'Needs reconnecting after you add it' : `Connected ${acc.created_at ? new Date(acc.created_at).toLocaleDateString() : 'earlier'}`}
+                      </span>
+                    </div>
+                    <button className="btn btn-primary btn-sm" disabled={!canConnect || !!reusingId} onClick={() => reuseAccount(acc)}>
+                      {reusingId === acc.id ? <><span className="spinner" /> Adding…</> : 'Use in this workspace'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-dim mt-3" style={{ fontSize: 12, marginBottom: 0 }}>Or connect a different Google account below.</p>
+            </div>
+          )}
+
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 8 }}>
             This application uses the <strong>Google Search Console API</strong> to submit sitemaps and inspect indexing coverage.
             We authenticate using secure Google OAuth 2.0 Web Application Flow.
@@ -197,7 +270,7 @@ export default function SetupPage() {
                 No complex console setup required.
               </p>
 
-              {dfError && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
+              {dfError && !reusable.length && <div className="alert alert-error mb-3"><div className="alert-content">{formatError(dfError)}</div></div>}
 
               <button
                 className="btn btn-primary btn-lg"
@@ -391,9 +464,14 @@ export default function SetupPage() {
           <div style={{ fontSize: 48, marginBottom: 12 }}>🎉</div>
           <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>You're connected!</h2>
           <p className="text-secondary mb-4">Google authentication is configured. Now add your sites.</p>
-          <button className="btn btn-primary btn-lg" onClick={() => navigate('/sites')}>
-            Add Your First Site →
-          </button>
+          <div className="flex gap-2 justify-center" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-primary btn-lg" onClick={() => navigate('/sites')}>
+              Add Your First Site →
+            </button>
+            <button className="btn btn-secondary btn-lg" onClick={() => navigate('/')}>
+              Go to the dashboard
+            </button>
+          </div>
         </div>
       )}
     </div>
