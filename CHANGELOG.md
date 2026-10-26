@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.50.0](https://github.com/martadams89/seo-website-indexer/compare/v1.49.0...v1.50.0) (2026-10-26)
+
+
+### ✨ Features
+
+* Search Console dimensions option, and scheduled Business Profile posts ([#527](https://github.com/martadams89/seo-website-indexer/issues/527)) ([efff646](https://github.com/martadams89/seo-website-indexer/commit/efff646a1f5a572fa82b5b8a41b272fc8017484d))
+
 ## [1.49.0](https://github.com/martadams89/seo-website-indexer/compare/v1.48.0...v1.49.0) (2026-10-26)
 
 
