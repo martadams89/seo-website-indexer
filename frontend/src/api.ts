@@ -264,7 +264,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string; returnTo?: string } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 

@@ -93,6 +93,7 @@ import {
 } from './auth/google-oauth.js';
 import { connectionUsage, forgetProbe, googleAttentionCount, googleProjects, KNOWN_GOOGLE_SERVICES, probeDisabledApis, servicesFor, workspaceGoogleHealth } from './auth/google-health.js';
 import { healOrphanedReviewLocations } from './reviews/store.js';
+import { googleResultPage } from './auth/google-result-page.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
 import { GOOGLE_INDEXING_CAPABILITIES, oneOffPrompt, recordRequestOutcomes, routinePrompt, siteRequestCandidates, type RequestOutcome } from './indexer/request-indexing.js';
@@ -1419,8 +1420,10 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads, business, only, projectFrom } = (req.body ?? {}) as {
+  const { clientId, clientSecret, autoSetup, accountId, ads, business, only, projectFrom, returnTo } = (req.body ?? {}) as {
     clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
+    /** The dashboard path to come back to if the sign-in has to run in the same tab. */
+    returnTo?: string;
     /** Products to limit the grant to. [] = full scopes. Omitted: a reconnect keeps what the connection had. */
     only?: LimitedProduct[];
     /** Sign a (new) Google user in through the OAuth client an existing connection already uses. */
@@ -1456,7 +1459,8 @@ app.post('/api/auth/google/start', async (req, reply) => {
       business: !!business || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_BUSINESS_SCOPE),
       clientId: reconnect?.client_id ?? source?.client_id ?? clientId,
       clientSecret: reconnect?.client_secret ?? source?.client_secret ?? clientSecret,
-      loginHint: reconnect?.email ?? null,
+      expectEmail: reconnect?.email ?? null,
+      returnTo,
     });
     return { authorizationUrl };
   } catch (e) {
@@ -1466,24 +1470,18 @@ app.post('/api/auth/google/start', async (req, reply) => {
 
 app.get('/api/auth/google/callback', async (req, reply) => {
   const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
+  // Read the state first so even a cancelled sign-in can find its way back.
+  const pending = state ? consumeGoogleOAuthState(state) : null;
+  const returnTo = pending?.payload?.returnTo ?? null;
+  const openerOrigin = pending ? new URL(pending.redirectUri).origin : null;
   if (error) {
-    return reply.type('text/html').send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="utf-8">
-          <title>Authentication Failed</title>
-        </head>
-        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
-          <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
-          <h2 style="color: white; margin-bottom: 8px;">Authentication Failed</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${escapeHtml(error)}</p>
-          <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
-        </body>
-      </html>
-    `);
+    return reply.type('text/html').send(googleResultPage({
+      ok: false, title: error === 'access_denied' ? 'Google sign-in cancelled' : 'Google sign-in failed',
+      message: error === 'access_denied' ? 'Nothing was changed. Start again and choose the Google account you want.' : error,
+      post: null, openerOrigin, returnTo,
+    }));
   }
-  
+
   if (!code) {
     return reply.status(400).send({ error: 'Authorization code is required' });
   }
@@ -1491,7 +1489,6 @@ app.get('/api/auth/google/callback', async (req, reply) => {
   // State is an opaque, single-use nonce backed by an encrypted DB row. It
   // binds the exchange to one user, workspace, redirect URI and client secret;
   // two people can connect concurrently without sharing process-global state.
-  const pending = state ? consumeGoogleOAuthState(state) : null;
   if (!pending) return reply.status(400).send({ error: 'This Google authorization request is invalid or has expired. Start again from Settings.' });
   const pendingUser = getUserById(pending.userId);
   if (!pendingUser || pendingUser.disabled || !canAccessWorkspace(pendingUser, pending.workspaceId)) {
@@ -1500,7 +1497,6 @@ app.get('/api/auth/google/callback', async (req, reply) => {
 
   if (pending.purpose === 'enable_apis') {
     // One-off: switch the APIs on with a short-lived Cloud token and keep nothing.
-    const openerOrigin = new URL(pending.redirectUri).origin;
     let result: { enabled: string[]; skipped: string[] } = { enabled: [], skipped: [] };
     let failure: string | null = null;
     try {
@@ -1509,71 +1505,32 @@ app.get('/api/auth/google/callback', async (req, reply) => {
       if (pending.payload?.accountId) forgetProbe(pending.payload.accountId);
     } catch (e) { failure = e instanceof Error ? e.message : String(e); }
     const ok = !failure && !result.skipped.length;
-    return reply.type('text/html').send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head><meta charset="utf-8"><title>${ok ? 'APIs enabled' : 'Some APIs could not be enabled'}</title></head>
-        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #e2e8f0; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
-          <div style="font-size: 48px; margin-bottom: 20px;">${ok ? '✅' : '⚠️'}</div>
-          <h2 style="color: white; margin-bottom: 8px;">${ok ? 'Google APIs switched on' : 'Some APIs could not be switched on'}</h2>
-          <p style="color: #94a3b8; font-size: 14px; max-width: 520px;">${escapeHtml(failure ?? (ok
-            ? `Enabled ${result.enabled.length} API(s). This one-off sign-in kept no Cloud access, so your saved connection is unchanged.`
-            : `Not enabled: ${result.skipped.join(', ')}. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.`))}</p>
-          <script>
-            if (window.opener) window.opener.postMessage({ type: 'GOOGLE_APIS_ENABLED', ok: ${ok}, enabled: ${JSON.stringify(result.enabled)}, skipped: ${JSON.stringify(result.skipped)} }, ${JSON.stringify(openerOrigin)});
-            ${ok ? 'setTimeout(() => window.close(), 1500);' : ''}
-          </script>
-          <button onclick="window.close()" style="margin-top: 16px; background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close</button>
-        </body>
-      </html>
-    `);
+    return reply.type('text/html').send(googleResultPage({
+      ok, title: ok ? 'Google APIs switched on' : 'Some APIs could not be switched on',
+      message: failure ?? (ok
+        ? `Enabled ${result.enabled.length} API(s). This one-off sign-in kept no Cloud access, so your saved connection is unchanged.`
+        : `Not enabled: ${result.skipped.join(', ')}. The Google account you chose needs the Service Usage Admin (or Owner/Editor) role on the project.`),
+      post: { type: 'GOOGLE_APIS_ENABLED', ok, enabled: result.enabled, skipped: result.skipped }, openerOrigin, returnTo, autoClose: ok,
+    }));
   }
 
   try {
-    await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
-      { clientId: pending.clientId, clientSecret: pending.clientSecret });
+    const connected = await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
+      { clientId: pending.clientId, clientSecret: pending.clientSecret }, { expectEmail: pending.payload?.expectEmail ?? null });
     // Reconnecting after a Disconnect leaves Ads accounts pointing at nothing;
     // re-attach them to this login straight away when that's unambiguous.
     try { healOrphanedAdsAccounts(pending.workspaceId); } catch (e) { req.log.warn({ err: e }, 'Ads relink after Google connect failed'); }
     try { healOrphanedReviewLocations(pending.workspaceId); } catch (e) { req.log.warn({ err: e }, 'Business Profile relink after Google connect failed'); }
-    const openerOrigin = new URL(pending.redirectUri).origin;
-    return reply.type('text/html').send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="utf-8">
-          <title>Authentication Successful</title>
-        </head>
-        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #00e676; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
-          <div style="font-size: 48px; margin-bottom: 20px;">🎉</div>
-          <h2 style="color: white; margin-bottom: 8px;">Authenticated Successfully!</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">Your Google account is now securely connected. You can return to the dashboard.</p>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS' }, ${JSON.stringify(openerOrigin)});
-            }
-            setTimeout(() => window.close(), 1500);
-          </script>
-          <button onclick="window.close()" style="background: #00e676; color: #12131a; border: none; padding: 10px 24px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: opacity 0.2s;">Done</button>
-        </body>
-      </html>
-    `);
+    return reply.type('text/html').send(googleResultPage({
+      ok: true, title: `Connected ${connected.email}`,
+      message: 'The Google account is connected and keeps itself signed in. You can return to the dashboard.',
+      post: { type: 'GOOGLE_AUTH_SUCCESS', email: connected.email, accountId: connected.accountId }, openerOrigin, returnTo, autoClose: true,
+    }));
   } catch (e) {
-    return reply.type('text/html').send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="utf-8">
-          <title>Authentication Failed</title>
-        </head>
-        <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #12131a; color: #ff5e5e; padding: 40px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 80vh;">
-          <div style="font-size: 48px; margin-bottom: 20px;">❌</div>
-          <h2 style="color: white; margin-bottom: 8px;">Token Exchange Failed</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin-bottom: 24px;">${escapeHtml(e)}</p>
-          <button onclick="window.close()" style="background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close Window</button>
-        </body>
-      </html>
-    `);
+    return reply.type('text/html').send(googleResultPage({
+      ok: false, title: 'Google account not connected', message: e instanceof Error ? e.message : String(e),
+      post: { type: 'GOOGLE_AUTH_FAILED', error: e instanceof Error ? e.message : String(e) }, openerOrigin, returnTo,
+    }));
   }
 });
 
@@ -1598,7 +1555,7 @@ app.get('/api/auth/google/projects', async (req) => {
 app.post('/api/auth/google/enable-apis/start', async (req, reply) => {
   const ws = currentWorkspace(req);
   if (!ws) return reply.status(400).send({ error: 'No active workspace.' });
-  const { accountId, services: asked } = (req.body ?? {}) as { accountId?: string; services?: unknown };
+  const { accountId, services: asked, returnTo } = (req.body ?? {}) as { accountId?: string; services?: unknown; returnTo?: string };
   const account = getGoogleAccountsForWorkspace(ws).find(a => a.id === accountId);
   if (!account) return reply.status(404).send({ error: 'Google connection not found in this workspace.' });
   // A setup page can name the APIs it's about to need (e.g. Google Ads before any client is linked).
@@ -1607,7 +1564,7 @@ app.post('/api/auth/google/enable-apis/start', async (req, reply) => {
   const services = [...new Set([...requested, ...(disabled.length ? disabled : requested.length ? [] : servicesFor(account))])];
   if (!services.length) return reply.status(400).send({ error: 'Nothing to enable: this connection isn\'t used by any site, Ads client or Business Profile location yet.' });
   try {
-    const authorizationUrl = createApiEnableAuthorization({ userId: currentUser(req).id, workspaceId: ws, redirectUri: `${browserOrigin(req)}/api/auth/google/callback`, account, services });
+    const authorizationUrl = createApiEnableAuthorization({ userId: currentUser(req).id, workspaceId: ws, redirectUri: `${browserOrigin(req)}/api/auth/google/callback`, account, services, returnTo });
     return { authorizationUrl, services };
   } catch (e) {
     return reply.status(400).send({ error: e instanceof Error ? e.message : String(e) });
@@ -2601,7 +2558,7 @@ app.post('/api/auth/bing/start', async (req, reply) => {
 
 app.get('/api/auth/bing/callback', async (req, reply) => {
   const { code, error, state } = req.query as { code?: string; error?: string; state?: string };
-  if (error) return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection cancelled</h2><p>${escapeHtml(error)}</p><button onclick="window.close()">Close</button></div></body></html>`);
+  if (error) return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection cancelled</h2><p>${escapeHtml(error)}</p><button onclick="window.opener ? window.close() : location.replace('/settings?tab=keys')">Close</button></div></body></html>`);
   const pending = state ? consumeBingOAuthState(state) : null;
   if (!code || !pending) return reply.code(400).send({ error: 'This Bing authorization request is invalid or expired.' });
   const pendingUser = getUserById(pending.user_id);
@@ -2616,9 +2573,9 @@ app.get('/api/auth/bing/callback', async (req, reply) => {
     const account = addBingOAuthAccount(pending.workspace_id, pending.name, { access_token: tokens.access_token, refresh_token: tokens.refresh_token, expires_in: tokens.expires_in });
     recordAuditEvent({ actorUserId: pending.user_id, workspaceId: pending.workspace_id, action: 'bing_oauth.connected', detail: { accountId: account.id } });
     const openerOrigin = new URL(pending.redirect_uri).origin;
-    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#74e6b2;display:grid;place-items:center;height:90vh"><div><h2>Bing connected</h2><p>You can return to Organic Command.</p></div><script>if(window.opener)window.opener.postMessage({type:'BING_AUTH_SUCCESS'},${JSON.stringify(openerOrigin)});setTimeout(()=>window.close(),1200)</script></body></html>`);
+    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#74e6b2;display:grid;place-items:center;height:90vh"><div><h2>Bing connected</h2><p>You can return to Organic Command.</p></div><script>if(window.opener){window.opener.postMessage({type:'BING_AUTH_SUCCESS'},${JSON.stringify(openerOrigin)});setTimeout(()=>window.close(),1200)}else{setTimeout(()=>location.replace('/settings?tab=keys'),1200)}</script></body></html>`);
   } catch (failure) {
-    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection failed</h2><p>${escapeHtml(failure instanceof Error ? failure.message : failure)}</p><button onclick="window.close()">Close</button></div></body></html>`);
+    return reply.type('text/html').send(`<html><body style="font:16px system-ui;background:#10121a;color:#ff7272;display:grid;place-items:center;height:90vh"><div><h2>Bing connection failed</h2><p>${escapeHtml(failure instanceof Error ? failure.message : failure)}</p><button onclick="window.opener ? window.close() : location.replace('/settings?tab=keys')">Close</button></div></body></html>`);
   }
 });
 

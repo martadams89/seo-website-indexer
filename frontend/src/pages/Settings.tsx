@@ -8,6 +8,7 @@ import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapabili
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
+import { openGoogleWindow } from '../ads/googleConnect';
 
 type Tab = 'account' | 'workspace' | 'all-workspaces' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
 
@@ -1140,9 +1141,8 @@ function BingAccounts() {
   async function connectOAuth() {
     setConnecting(true);
     try {
-      const { authorizationUrl } = await api.startBingOAuth(bingName.trim() || 'Bing OAuth');
-      const popup = window.open(authorizationUrl, 'bing-oauth', 'width=600,height=760,noopener=false');
-      if (!popup) throw new Error('Allow popups to connect Bing.');
+      // Opened during the click so browsers don't block it; Microsoft lets you pick the account.
+      await openGoogleWindow('bing-oauth', async () => (await api.startBingOAuth(bingName.trim() || 'Bing OAuth')).authorizationUrl, 'Opening Microsoft sign-in…');
     } catch (error) { toast('error', error instanceof Error ? error.message : 'Could not start Bing OAuth'); setConnecting(false); }
   }
   useEffect(() => {
