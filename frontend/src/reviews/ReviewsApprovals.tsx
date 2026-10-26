@@ -4,18 +4,10 @@ import { useToast } from '../AppContext';
 import { errorMessage } from '../ads/api';
 import { reviewsApi, type ProfileChange, type ReplyPlan, type Review } from './api';
 import { Stars } from './ReviewsInbox';
+import { PLAN_STATUS as STATUS } from './format';
 
-type Row = ReplyPlan & { review: Review | null; location_title: string | null };
-
-const STATUS: Record<ReplyPlan['status'], { label: string; tone: string }> = {
-  needs_approval: { label: 'Waiting for approval', tone: 'warn' },
-  blocked: { label: 'Blocked by rules', tone: 'error' },
-  publishing: { label: 'Publishing', tone: 'info' },
-  published: { label: 'Published', tone: 'ok' },
-  rejected: { label: 'Rejected', tone: 'info' },
-  failed: { label: 'Google refused it', tone: 'error' },
-  superseded: { label: 'Replaced', tone: 'info' },
-};
+export type ReplyRow = ReplyPlan & { review: Review | null; location_title: string | null };
+type Row = ReplyRow;
 
 export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; reload: () => Promise<void> }) {
   const [waiting, setWaiting] = useState<Row[]>([]);
@@ -103,12 +95,14 @@ const when = (value: string) => new Date(value.replace(' ', 'T') + (value.includ
 
 const KIND_LABEL: Record<ProfileChange['kind'], string> = { profile: 'Profile edit', post: 'New post', post_delete: 'Delete post', photo: 'New photo', photo_delete: 'Delete photo' };
 
-function ChangeCard({ change, canManage, onDone }: { change: ProfileChange; canManage: boolean; onDone: () => Promise<void> }) {
+/** A Business Profile change; the buttons only show while it waits for a decision. */
+export function ChangeCard({ change, canManage, onDone }: { change: ProfileChange; canManage: boolean; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const photo = change.kind === 'photo' ? (change.payload.photo as { sourceUrl?: string } | undefined)?.sourceUrl : undefined;
   const postPhoto = change.kind === 'post' ? (change.payload.post as { media?: Array<{ sourceUrl?: string }> } | undefined)?.media?.[0]?.sourceUrl : undefined;
   const postText = change.kind === 'post' ? (change.payload.post as { summary?: string } | undefined)?.summary : undefined;
+  const waiting = change.status === 'needs_approval';
 
   async function decide(approve: boolean) {
     setBusy(true);
@@ -122,20 +116,22 @@ function ChangeCard({ change, canManage, onDone }: { change: ProfileChange; canM
 
   return (
     <article className="review-card">
-      <header><span className="badge badge-info">{KIND_LABEL[change.kind]}</span><small>{change.location_title ?? ''} · {when(change.created_at)}</small></header>
+      <header><span className="badge badge-info">{KIND_LABEL[change.kind]}</span>{waiting ? null : <span className={`badge badge-${STATUS[change.status].tone}`}>{STATUS[change.status].label}</span>}<small>{change.location_title ?? ''} · {when(change.created_at)}</small></header>
       <p>{change.summary}</p>
       {postText && postText.length > 120 && <p className="muted">{postText}</p>}
       {(photo || postPhoto) && <img className="gbp-change-photo" src={photo ?? postPhoto} alt="Proposed" loading="lazy" />}
       <div className="review-draft"><Bot size={13} /> {change.source === 'mcp' ? 'AI assistant' : 'Draft'}: {change.findings.map(f => f.message).join(' ') || 'Waiting for approval.'}{change.rationale ? ` Rationale: ${change.rationale}` : ''}</div>
-      <div className="ads-row-actions">
+      {change.error && <p className="ads-error-line">{change.error}</p>}
+      {waiting && <div className="ads-row-actions">
         <button className="btn btn-ghost btn-sm" disabled={!canManage || busy} onClick={() => decide(false)}><X size={13} /> Reject</button>
         <button className="btn btn-primary btn-sm" disabled={!canManage || busy} onClick={() => decide(true)}><Check size={13} /> Approve and publish</button>
-      </div>
+      </div>}
     </article>
   );
 }
 
-function ApprovalCard({ row, canManage, onDone }: { row: Row; canManage: boolean; onDone: () => Promise<void> }) {
+/** A proposed review reply (editable before publishing); the buttons only show while it waits for a decision. */
+export function ApprovalCard({ row, canManage, onDone }: { row: Row; canManage: boolean; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [text, setText] = useState(row.text ?? '');
   const [busy, setBusy] = useState(false);
@@ -151,23 +147,28 @@ function ApprovalCard({ row, canManage, onDone }: { row: Row; canManage: boolean
   }
 
   const r = row.review;
+  const waiting = row.status === 'needs_approval';
   return (
     <article className="review-card">
       <header>
         {r && <Stars rating={r.rating} />}
         <strong>{r?.anonymous ? 'Anonymous' : r?.reviewer_name ?? 'Google user'}</strong>
         <small>{row.location_title ?? ''}</small>
+        {!waiting && <span className={`badge badge-${STATUS[row.status].tone}`}>{STATUS[row.status].label}</span>}
       </header>
       {r && <p className={r.comment ? '' : 'muted'}>{r.comment ?? 'Rating only — no text.'}</p>}
       {row.previous_reply && <div className="review-reply"><div className="review-reply-head"><span>Current reply</span></div><p>{row.previous_reply}</p></div>}
       <div className="review-draft"><Bot size={13} /> {row.source === 'mcp' ? 'AI assistant' : 'Draft'} — {row.findings.map(f => f.message).join(' ') || 'Waiting for approval.'}{row.rationale ? ` Rationale: ${row.rationale}` : ''}</div>
       {row.action === 'delete'
-        ? <p><b>Proposed:</b> delete the current reply.</p>
-        : <textarea className="input" rows={4} value={text} onChange={e => setText(e.target.value)} aria-label="Reply to approve" disabled={!canManage} />}
-      <div className="ads-row-actions">
+        ? <p><b>{waiting ? 'Proposed' : 'Asked'}:</b> delete the current reply.</p>
+        : waiting
+          ? <textarea className="input" rows={4} value={text} onChange={e => setText(e.target.value)} aria-label="Reply to approve" disabled={!canManage} />
+          : <div className="review-reply"><div className="review-reply-head"><span>Reply</span></div><p>{row.text}</p></div>}
+      {row.error && <p className="ads-error-line">{row.error}</p>}
+      {waiting && <div className="ads-row-actions">
         <button className="btn btn-ghost btn-sm" disabled={!canManage || busy} onClick={() => decide(false)}><X size={13} /> Reject</button>
         <button className="btn btn-primary btn-sm" disabled={!canManage || busy || (row.action === 'reply' && !text.trim())} onClick={() => decide(true)}><Check size={13} /> {row.action === 'delete' ? 'Approve deletion' : text !== row.text ? 'Publish edited reply' : 'Approve and publish'}</button>
-      </div>
+      </div>}
     </article>
   );
 }

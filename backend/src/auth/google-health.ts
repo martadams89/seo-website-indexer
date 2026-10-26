@@ -14,6 +14,8 @@ import {
   getAllGoogleAccounts, getDb, getGoogleAccountsForOwner, getGoogleAccountsForWorkspace, getSetting, isGoogleAccountAvailableToWorkspace, setSetting, type GoogleAccount,
 } from '../db/database.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
+import { listOAuthClients } from './oauth-clients.js';
+import { workspaceLink } from '../utils/links.js';
 import {
   CLOUD_PLATFORM_SCOPE, GOOGLE_ADS_SCOPE, GOOGLE_ANALYTICS_SCOPE, GOOGLE_BUSINESS_SCOPE, getAccessTokenForAccount, isBuiltinClient, limitedTo,
   type LimitedProduct,
@@ -85,9 +87,12 @@ export function connectionUsage(account: GoogleAccount): { sites: number; ads_cl
 export interface GoogleProject {
   /** Cloud project number (from the OAuth client id), when Google's client ids carry one. */
   project: string | null;
-  /** A connection holding this OAuth client: pass it as projectFrom to sign another Google user in through it. */
+  /** Pass as projectFrom to sign a Google user in through this OAuth client: a connection id, or client:<id> for a saved client. */
   source_id: string;
   builtin: boolean;
+  /** The saved OAuth client for this project, if one was saved (it can be renamed or removed). */
+  saved_client_id: string | null;
+  label: string | null;
   connections: Array<{ id: string; email: string | null; limited_to: LimitedProduct[] | null; in_workspace: boolean } & ReturnType<typeof connectionUsage>>;
 }
 
@@ -102,14 +107,22 @@ export function googleProjects(workspaceId: string, userId: string): GoogleProje
   for (const a of [...getGoogleAccountsForWorkspace(workspaceId), ...getGoogleAccountsForOwner(userId)]) byId.set(a.id, a);
   const groups = new Map<string, GoogleAccount[]>();
   for (const a of byId.values()) if (a.client_id) groups.set(a.client_id, [...(groups.get(a.client_id) ?? []), a]);
-  return [...groups.entries()].map(([clientId, accounts]) => {
+  const saved = listOAuthClients(workspaceId, userId);
+  const fromConnections: GoogleProject[] = [...groups.entries()].map(([clientId, accounts]) => {
     const inWorkspace = (a: GoogleAccount) => isGoogleAccountAvailableToWorkspace(a.id, workspaceId);
     const source = accounts.find(a => inWorkspace(a) && !a.needs_reauth) ?? accounts.find(a => !a.needs_reauth) ?? accounts[0];
+    const savedClient = saved.find(c => c.client_id === clientId) ?? null;
     return {
       project: projectOf(clientId), source_id: source.id, builtin: isBuiltinClient(clientId),
+      saved_client_id: savedClient?.id ?? null, label: savedClient?.label ?? null,
       connections: accounts.map(a => ({ id: a.id, email: a.email, limited_to: limitedTo(a.granted_scopes), in_workspace: inWorkspace(a), ...connectionUsage(a) })),
     };
   }).sort((a, b) => b.connections.filter(c => c.in_workspace).length - a.connections.filter(c => c.in_workspace).length);
+  // Saved clients nobody has signed in through yet (for example after a cancelled sign-in).
+  const unused: GoogleProject[] = saved.filter(c => !groups.has(c.client_id)).map(c => ({
+    project: projectOf(c.client_id), source_id: `client:${c.id}`, builtin: isBuiltinClient(c.client_id), saved_client_id: c.id, label: c.label, connections: [],
+  }));
+  return [...fromConnections, ...unused];
 }
 
 /** Permissions the connection's current uses need but its grant lacks. Pure apart from the usage lookup. */
@@ -244,7 +257,7 @@ export async function notifyGoogleConnectionProblems(force = false): Promise<num
   if (!force && Date.now() - lastCheck < CHECK_EVERY_MS) return 0;
   lastCheck = Date.now();
   let sent = 0;
-  const origin = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : null;
+
   for (const account of getAllGoogleAccounts()) {
     const h = await connectionHealth(account, { probe: true }).catch(() => null);
     if (!h) continue;
@@ -262,8 +275,10 @@ export async function notifyGoogleConnectionProblems(force = false): Promise<num
     if (!problems.length) continue;
     for (const workspaceId of usage(account).workspaces) {
       if (!notificationEventEnabled(workspaceId, 'google_connection')) continue;
+      const link = workspaceLink(workspaceId, '/settings?tab=google');
       const ok = await sendWorkspaceNotification(workspaceId, `Google connection needs attention — ${account.email ?? account.id}`,
-        `${problems.map(p => `• ${p}`).join('\n')}\n\nFix it in one click: ${origin ? `${origin}/settings?tab=google` : 'Settings → Google Accounts'}`, 'google_connection').catch(() => false);
+        `${problems.map(p => `• ${p}`).join('\n')}${link ? '' : '\n\nFix it under Settings → Google Accounts.'}`, 'google_connection',
+        { links: link ? [{ label: 'Fix it in one click', url: link }] : [] }).catch(() => false);
       if (ok) sent++;
     }
   }

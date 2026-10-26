@@ -10,6 +10,8 @@
  */
 import type { User } from '../auth/users.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
+import { workspaceLink } from '../utils/links.js';
+import { queueApprovalAlert } from '../utils/approval-alerts.js';
 import {
   createLocalPost, createMedia, deleteLocalPost, deleteMedia, getGoogleUpdated, getLocationDetails, listLocalPosts, listMedia, patchLocation,
   ReviewsApiError, type LocalPost, type LocationDetails, type MediaItem, type PhotoCategory,
@@ -164,10 +166,10 @@ export async function checkGoogleUpdates(location: ReviewLocation, opts: { notif
   updateLocation(location.id, { google_updates: updates, google_updates_checked_at: new Date().toISOString() });
   if (opts.notify && updates.mask && updates.mask !== previous && location.profile_rules.alert_google_updates
     && notificationEventEnabled(location.workspace_id, 'profile_alerts')) {
-    const origin = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : null;
+    const link = workspaceLink(location.workspace_id, `/reviews?tab=profile&location=${location.id}`);
     await sendWorkspaceNotification(location.workspace_id, `Google changed the Business Profile — ${location.title ?? location.location_name}`,
-      `Google now shows a different ${updates.fields.join(', ')} from what you set. Accept Google's version or keep yours.${origin ? `\n\nReview: ${origin}/reviews?tab=profile&location=${location.id}` : ''}`,
-      'profile_alerts').catch(() => false);
+      `Google now shows a different ${updates.fields.join(', ')} from what you set. Accept Google's version or keep yours.`,
+      'profile_alerts', { links: link ? [{ label: 'Review the changes', url: link }] : [] }).catch(() => false);
   }
   return updates;
 }
@@ -293,6 +295,14 @@ export async function submitChange(input: {
     rationale: input.rationale?.trim().slice(0, 2000) || null, source: input.source, created_by: input.user.id, findings,
     status: decision === 'publish' ? 'publishing' : decision,
   });
+  if (decision === 'needs_approval' && input.source === 'mcp') {
+    const kind: Record<ChangeKind, string> = { profile: 'Profile edit', post: 'New post', post_delete: 'Delete a post', photo: 'New photo', photo_delete: 'Delete a photo' };
+    queueApprovalAlert(input.location.workspace_id, 'review_approvals', {
+      headline: `${kind[change.kind]} — ${input.location.title ?? input.location.location_name}`,
+      detail: [change.summary, findings.map(f => f.message).join(' ')].filter(Boolean).join('\n'),
+      path: `/approve/business/${change.id}`,
+    });
+  }
   if (decision !== 'publish') return change;
   return publish(change, input.location);
 }

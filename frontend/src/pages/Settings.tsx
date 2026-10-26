@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus, Send, Loader2, CheckCircle2, XCircle, MessageSquare, AtSign, Webhook } from 'lucide-react';
+import { Save, LogOut, KeyRound, Bell, Clock, User, ExternalLink, ShieldCheck, Copy, Check, Building2, Users, Trash2, Fingerprint, Plus, Send, Loader2 } from 'lucide-react';
 import { useAuth } from '../auth/AuthGate';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { useApp } from '../AppContext';
-import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type AdminUserDetail, type BingAccount, type CurrentUser, type PasskeyInfo, type NotificationDelivery, type NotifyChannel, type NotifyChannelResult } from '../api';
+import { api, type WorkspaceMember, type WorkspaceInvite, type WorkspaceCapability, WORKSPACE_CAPABILITIES, type AdminWorkspaceSummary, type AdminUserDetail, type BingAccount, type CurrentUser, type PasskeyInfo } from '../api';
 import { ModelPicker } from '../components/ModelPicker';
 import AccountsPage from './Accounts';
 import { registerPasskey } from '../auth/webauthn';
 import { openGoogleWindow } from '../ads/googleConnect';
+import { NotificationsTab } from '../notifications/NotificationsTab';
 
 type Tab = 'account' | 'workspace' | 'all-workspaces' | 'users' | 'schedule' | 'google' | 'keys' | 'notify';
 
@@ -405,7 +406,7 @@ function WorkspaceTab() {
       await api.deleteWorkspace(active.id);
       await refreshWorkspaces();
       const next = workspaces.find(w => w.id !== active.id);
-      if (next) switchWorkspace(next.id);
+      if (next) switchWorkspace(next.id, next.slug);
     } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
     setDeleting(false);
   }
@@ -901,220 +902,6 @@ function AllWorkspacesTab() {
       </div>
       {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? 'var(--ok)' : 'var(--error)' }}>{msg.text}</div>}
     </div>
-  );
-}
-
-// ── Notifications tab: each provider is a first-class, separately-configured channel ──
-interface NotifyField { key: string; label: string; placeholder?: string; secret?: boolean }
-interface NotifyProvider { id: NotifyChannel; name: string; icon: typeof Bell; blurb: string; fields: NotifyField[]; steps: Array<{ text: string; href?: string; linkLabel?: string }> }
-
-const NOTIFY_PROVIDERS: NotifyProvider[] = [
-  {
-    id: 'slack', name: 'Slack', icon: MessageSquare,
-    blurb: 'Post run summaries and alerts into a Slack channel via an Incoming Webhook.',
-    fields: [{ key: 'notify_slack_webhook', label: 'Incoming Webhook URL', placeholder: 'https://hooks.slack.com/services/…' }],
-    steps: [
-      { text: 'Create a Slack app and add an Incoming Webhook, or use a legacy webhook.', href: 'https://api.slack.com/messaging/webhooks', linkLabel: 'Slack Incoming Webhooks' },
-      { text: 'Pick the channel to post to and copy the webhook URL.' },
-    ],
-  },
-  {
-    id: 'discord', name: 'Discord', icon: MessageSquare,
-    blurb: 'Post to a Discord channel via a channel webhook.',
-    fields: [{ key: 'notify_discord_webhook', label: 'Webhook URL', placeholder: 'https://discord.com/api/webhooks/…' }],
-    steps: [
-      { text: 'Channel → Edit Channel → Integrations → Webhooks → New Webhook.' },
-      { text: 'Copy the webhook URL.' },
-    ],
-  },
-  {
-    id: 'ntfy', name: 'ntfy', icon: Bell,
-    blurb: 'Push to your phone/desktop via ntfy (self-hosted or ntfy.sh). Free, no account needed.',
-    fields: [
-      { key: 'notify_ntfy_topic', label: 'Topic', placeholder: 'my-seo-alerts (or a full https://…/topic URL)' },
-      { key: 'notify_ntfy_server', label: 'Server', placeholder: 'https://ntfy.sh (default)' },
-      { key: 'notify_ntfy_token', label: 'Access token (optional)', placeholder: 'tk_… for protected topics', secret: true },
-    ],
-    steps: [
-      { text: 'Pick a hard-to-guess topic name and subscribe to it in the ntfy app.', href: 'https://ntfy.sh/', linkLabel: 'ntfy.sh' },
-      { text: 'For a private/self-hosted server, set the server URL and an access token.' },
-    ],
-  },
-  {
-    id: 'telegram', name: 'Telegram', icon: Send,
-    blurb: 'Message yourself or a group through a Telegram bot.',
-    fields: [
-      { key: 'notify_telegram_token', label: 'Bot token', placeholder: '123456:ABC-DEF…', secret: true },
-      { key: 'notify_telegram_chat', label: 'Chat ID', placeholder: 'e.g. 123456789 or -100… for groups' },
-    ],
-    steps: [
-      { text: 'Create a bot with @BotFather and copy its token.', href: 'https://t.me/BotFather', linkLabel: '@BotFather' },
-      { text: 'Message your bot once, then get your chat id from https://api.telegram.org/bot<token>/getUpdates.' },
-    ],
-  },
-  {
-    id: 'webhook', name: 'Generic webhook', icon: Webhook,
-    blurb: 'POST a JSON {title, body} to any endpoint. (Slack/Discord/ntfy URLs here are still auto-detected for backwards compatibility.)',
-    fields: [{ key: 'notify_webhook_url', label: 'Webhook URL', placeholder: 'https://example.com/hook' }],
-    steps: [{ text: 'Your endpoint receives a POST with a JSON body: {"title": "…", "body": "…"}.' }],
-  },
-  {
-    id: 'email', name: 'Email', icon: AtSign,
-    blurb: 'Email run summaries and alerts. Requires SMTP to be configured on the server (SMTP_HOST env).',
-    fields: [{ key: 'notify_email_to', label: 'Send to', placeholder: 'you@example.com, ops@example.com' }],
-    steps: [{ text: 'Set the SMTP_* environment variables on the container (see the README), then add recipient addresses here.' }],
-  },
-];
-
-function NotificationsTab() {
-  const { active } = useWorkspace();
-  const canManage = !!active?.permissions?.manage_notifications;
-  const [vals, setVals] = useState<Record<string, string>>({});
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [results, setResults] = useState<NotifyChannelResult[] | null>(null);
-  const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
-
-  useEffect(() => {
-    api.getNotifyConfig().then(rec => {
-      const keys = [...NOTIFY_PROVIDERS.flatMap(p => p.fields.map(f => f.key)), 'notify_run_complete', 'notify_run_failed', 'notify_citation_changes', 'notify_playbook_ready', 'notify_review_alerts', 'notify_google_connection', 'notify_profile_alerts'];
-      const next: Record<string, string> = {};
-      for (const k of keys) next[k] = rec[k] ?? '';
-      setVals(next);
-      api.getNotificationDeliveries().then(setDeliveries).catch(() => setDeliveries([]));
-    }).finally(() => setLoaded(true));
-  }, [active?.id]);
-
-  function set(key: string, v: string) { setVals(prev => ({ ...prev, [key]: v })); setSaved(false); }
-
-  async function save() {
-    setSaving(true);
-    try { await api.saveNotifyConfig(vals); setSaved(true); setTimeout(() => setSaved(false), 3000); }
-    finally { setSaving(false); }
-  }
-  async function sendTest() {
-    setTesting(true); setResults(null);
-    try { await save(); const r = await api.testNotifications(); setResults(r.results); setDeliveries(await api.getNotificationDeliveries()); }
-    finally { setTesting(false); }
-  }
-
-  const providerConfigured = (p: NotifyProvider) =>
-    p.id === 'telegram'
-      ? !!(vals.notify_telegram_token && vals.notify_telegram_chat)
-      : !!vals[p.fields[0].key];
-
-  if (!loaded) return <div className="card"><div className="empty-note">Loading…</div></div>;
-
-  return (
-    <>
-      <div className="card mb-4">
-        <div className="card-title"><Bell size={13} /> Notifications{active ? ` — ${active.name}` : ''}</div>
-        <p className="text-dim" style={{ fontSize: 12 }}>
-          These channels belong to the <strong>{active?.name ?? 'current'}</strong> workspace — each workspace notifies its own places.
-          Select which operational events fan out to <strong>all</strong> configured channels. Delivery attempts are retained below for troubleshooting.
-          {!canManage && <> <em>You can view these, but a workspace admin has revoked notification management for your role.</em></>}
-        </p>
-      </div>
-
-      <div className="notification-events mb-4">
-        {[
-          ['notify_run_complete', 'Successful runs', 'A workspace run finishes normally.'],
-          ['notify_run_failed', 'Failed or stopped runs', 'A run fails, is stopped, or cannot complete.'],
-          ['notify_citation_changes', 'AI citation movement', 'A tracked answer engine gains or loses your domain.'],
-          ['notify_playbook_ready', 'Ranking playbook ready', 'Weekly summary of new ranking opportunities and their estimated upside.'],
-          ['notify_review_alerts', 'Google review alerts', 'A new low-rated Google review arrives, or Google rejects a reply (threshold set per location).'],
-          ['notify_profile_alerts', 'Business Profile changes', 'Google, or someone using "Suggest an edit", changed a Business Profile you manage (checked daily, sent once per change).'],
-          ['notify_google_connection', 'Google connection problems', 'A Google connection needs reconnecting, a new permission, or a Google API switched on. Sent once per change.'],
-        ].map(([key, label, description]) => (
-          <label key={key}>
-            <input type="checkbox" checked={vals[key] !== 'false'} disabled={!canManage} onChange={event => set(key, event.target.checked ? 'true' : 'false')} />
-            <span><strong>{label}</strong><small>{description}</small></span>
-          </label>
-        ))}
-      </div>
-
-      {NOTIFY_PROVIDERS.map(p => (
-        <details key={p.id} className="key-guide" open={providerConfigured(p)}>
-          <summary>
-            <p.icon size={14} />
-            <span className="key-guide-label">{p.name}</span>
-            {providerConfigured(p)
-              ? <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>configured</span>
-              : <span className="badge" style={{ marginLeft: 'auto' }}>off</span>}
-          </summary>
-          <div className="key-guide-body">
-            <p className="text-dim" style={{ fontSize: 12, margin: '0 0 8px' }}>{p.blurb}</p>
-            {p.fields.map(f => (
-              <div className="input-group mb-2" key={f.key}>
-                <label className="input-label">{f.label}</label>
-                <input
-                  className="input"
-                  type={f.secret ? 'password' : 'text'}
-                  autoComplete="off"
-                  placeholder={f.placeholder}
-                  value={vals[f.key] ?? ''}
-                  onChange={e => set(f.key, e.target.value)}
-                />
-              </div>
-            ))}
-            <ol className="key-guide-steps">
-              {p.steps.map((s, i) => (
-                <li key={i}>{s.text}{s.href && <> <a href={s.href} target="_blank" rel="noopener noreferrer" className="key-guide-link"><ExternalLink size={10} /> {s.linkLabel ?? s.href}</a></>}</li>
-              ))}
-            </ol>
-          </div>
-        </details>
-      ))}
-
-      <div className="flex items-center gap-3" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" disabled={saving || !canManage} onClick={save}>
-          {saving ? <><Loader2 className="spin" size={13} /> Saving…</> : saved ? <><Save size={13} /> Saved ✓</> : <><Save size={13} /> Save channels</>}
-        </button>
-        <button className="btn btn-secondary" disabled={testing || !canManage} onClick={sendTest}>
-          {testing ? <><Loader2 className="spin" size={13} /> Sending…</> : <><Send size={13} /> Save & send test</>}
-        </button>
-      </div>
-
-      {results && (
-        <div className="card mt-3">
-          <div className="card-title">Test results</div>
-          {results.length === 0 ? (
-            <div className="empty-note">No channels configured yet — add one above and save.</div>
-          ) : (
-            <div className="member-list">
-              {results.map(r => (
-                <div key={r.channel} className="member-row">
-                  <div className="member-info">
-                    <span className="member-name" style={{ textTransform: 'capitalize' }}>{r.channel}</span>
-                    {r.error && <span className="member-role" style={{ color: 'var(--error)' }}>{r.error}</span>}
-                  </div>
-                  {r.ok
-                    ? <CheckCircle2 size={16} style={{ color: 'var(--ok)' }} />
-                    : <XCircle size={16} style={{ color: 'var(--error)' }} />}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="card mt-3">
-        <div className="card-title"><Clock size={13} /> Recent deliveries</div>
-        {deliveries.length === 0 ? <div className="empty-note">No notification attempts recorded for this workspace yet.</div> : (
-          <div className="delivery-list">
-            {deliveries.slice(0, 20).map(delivery => (
-              <div key={delivery.id}>
-                <span className={`delivery-status ${delivery.status}`} />
-                <span><strong>{delivery.title}</strong><small>{delivery.event_type.replaceAll('_', ' ')} · {new Date(`${delivery.created_at}Z`).toLocaleString()}{delivery.error ? ` · ${delivery.error}` : ''}</small></span>
-                <span className="badge">{delivery.channel}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
   );
 }
 

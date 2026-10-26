@@ -10,11 +10,41 @@ import { effectiveSetting, getDb } from '../db/database.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import type { User } from './users.js';
 
-export interface Workspace { id: string; name: string; owner_user_id: string | null; created_at: string }
+export interface Workspace { id: string; name: string; owner_user_id: string | null; created_at: string; slug?: string | null }
+
+/** "Acme Roofing Ltd" → "acme-roofing-ltd": the workspace's part of dashboard URLs (/w/<slug>/…). */
+export function slugify(name: string): string {
+  return String(name ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/g, '') || 'workspace';
+}
+
+function uniqueSlug(name: string, exceptId?: string): string {
+  const base = slugify(name);
+  const taken = (slug: string) => !!getDb().prepare('SELECT 1 FROM workspaces WHERE slug = ? AND id <> ?').get(slug, exceptId ?? '');
+  let slug = base;
+  for (let n = 2; taken(slug); n++) slug = `${base}-${n}`;
+  return slug;
+}
+
+/** The workspace's URL slug, creating one if it has none yet. Stays the same when the workspace is renamed, so old links keep working. */
+export function workspaceSlug(id: string): string {
+  const row = getDb().prepare('SELECT name, slug FROM workspaces WHERE id = ?').get(id) as { name: string; slug: string | null } | undefined;
+  if (!row) return id;
+  if (row.slug) return row.slug;
+  const slug = uniqueSlug(row.name, id);
+  getDb().prepare('UPDATE workspaces SET slug = ? WHERE id = ?').run(slug, id);
+  return slug;
+}
+
+/** A workspace by its id or URL slug. */
+export function findWorkspaceByRef(ref: string): Workspace | undefined {
+  return getDb().prepare('SELECT * FROM workspaces WHERE id = ? OR slug = ?').get(ref, ref.toLowerCase()) as Workspace | undefined;
+}
 
 export function createWorkspace(name: string, ownerUserId: string): Workspace {
   const id = randomUUID();
-  getDb().prepare('INSERT INTO workspaces(id, name, owner_user_id) VALUES(?,?,?)').run(id, name.trim() || 'Workspace', ownerUserId);
+  const clean = name.trim() || 'Workspace';
+  getDb().prepare('INSERT INTO workspaces(id, name, owner_user_id, slug) VALUES(?,?,?,?)').run(id, clean, ownerUserId, uniqueSlug(clean));
   return getDb().prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as Workspace;
 }
 

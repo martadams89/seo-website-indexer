@@ -48,6 +48,8 @@ export async function openGoogleWindow(name: string, getUrl: () => Promise<strin
 
 export async function openGoogleConsent(options: {
   accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean; business?: boolean;
+  /** A name for a newly entered OAuth client, saved with it (e.g. 'Ads – Basic access'). */
+  clientLabel?: string;
   /** Limit the grant to these products; [] asks for a full connection. */
   only?: Array<'ads' | 'business'>;
   /** Sign a new Google user in through the OAuth client this existing connection uses. */

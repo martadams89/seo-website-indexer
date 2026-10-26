@@ -7,7 +7,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getGoogleAccountsForWorkspace, getWorkspaceSetting, setWorkspaceSetting } from '../db/database.js';
-import { getWorkspace } from '../auth/workspaces.js';
+import { getWorkspace, workspaceSlug } from '../auth/workspaces.js';
 import { recordAuditEvent, type User } from '../auth/users.js';
 import { publicOrigin } from '../utils/origin.js';
 import { ReviewsApiError } from './client.js';
@@ -195,6 +195,12 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
       .map(c => ({ ...c, location_title: getLocation(c.location_id)?.title ?? null }));
   }));
 
+  app.get('/api/reviews/changes/:id', handle(async (req) => {
+    const item = getChange((req.params as { id: string }).id);
+    if (!item || item.workspace_id !== workspace(req)) throw Object.assign(new Error('Change not found.'), { statusCode: 404 });
+    return { ...item, location_title: getLocation(item.location_id)?.title ?? null };
+  }));
+
   app.post('/api/reviews/changes/:id/approve', handle(async (req) => {
     const item = getChange((req.params as { id: string }).id);
     if (!item || item.workspace_id !== workspace(req)) throw Object.assign(new Error('Change not found.'), { statusCode: 404 });
@@ -247,6 +253,13 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
       .map(p => ({ ...p, review: getReview(p.review_id), location_title: getLocation(p.location_id)?.title ?? null }));
   }));
 
+  // One reply plan, with its review and location, for the approval page that notification links open.
+  app.get('/api/reviews/replies/:id', handle(async (req) => {
+    const plan = getReplyPlan((req.params as { id: string }).id);
+    if (!plan || plan.workspace_id !== workspace(req)) throw Object.assign(new Error('Reply not found.'), { statusCode: 404 });
+    return { ...plan, review: getReview(plan.review_id), location_title: getLocation(plan.location_id)?.title ?? null };
+  }));
+
   app.post('/api/reviews/replies/:id/approve', handle(async (req) => {
     const plan = getReplyPlan((req.params as { id: string }).id);
     if (!plan || plan.workspace_id !== workspace(req)) throw Object.assign(new Error('Reply not found.'), { statusCode: 404 });
@@ -286,7 +299,7 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
     setWorkspaceSetting(ws, ROUTINE_KEY, JSON.stringify({ settings, location_ids: ids, connector_name: connectorName }));
     const origin = publicOrigin(req);
     return buildReviewRoutinePrompt({
-      settings, locations, connectorName, endpoint: `${origin}/mcp`, dashboardUrl: `${origin}/reviews?tab=approvals`,
+      settings, locations, connectorName, endpoint: `${origin}/mcp`, dashboardUrl: `${origin}/w/${encodeURIComponent(workspaceSlug(ws))}/reviews?tab=approvals`,
       workspaceName: getWorkspace(ws)?.name ?? null,
     });
   }));

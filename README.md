@@ -130,7 +130,7 @@ Connections are configured in the dashboard and scoped to the active workspace u
 | Analytics and performance | Google Analytics 4, PageSpeed and CrUX, Cloudflare, Plausible, Matomo |
 | AI visibility | OpenAI, Anthropic, Gemini, Perplexity, xAI, Brave Search |
 | Publishing | WordPress, Shopify, Webflow |
-| Notifications | Slack, Discord, ntfy, Telegram, email, generic webhooks |
+| Notifications | Email (with named lists), WhatsApp, Slack, Discord, ntfy, Telegram, generic webhooks; per-event routing and links to approve or reject AI proposals |
 | Other data | Server-log ingestion and external rank feeds through the API |
 
 Workspace-specific API keys override any platform default set by a super-admin. This allows one installation to use shared keys, client-owned keys or a mixture of both.
@@ -205,6 +205,8 @@ Most settings live in the dashboard. These environment variables control the con
 | `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Redirect hosts/schemes MCP clients may use (e.g. `chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1`). |
 | `SSO_GOOGLE_*`, `SSO_OIDC_*` | unset | Optional Google or generic OpenID Connect sign-in. |
 | `SMTP_*` | unset | Optional email delivery and password-reset links. |
+| `NOTIFY_BATCH_SECONDS` | `60` | How long approval notifications are gathered before one message is sent. `0` sends each straight away. |
+| `WHATSAPP_GRAPH_VERSION` | `v23.0` | Meta Graph API version for WhatsApp notifications. |
 
 The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, recovery, update and backup instructions.
 

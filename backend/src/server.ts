@@ -94,6 +94,8 @@ import {
 import { connectionUsage, forgetProbe, googleAttentionCount, googleProjects, KNOWN_GOOGLE_SERVICES, probeDisabledApis, servicesFor, workspaceGoogleHealth } from './auth/google-health.js';
 import { healOrphanedReviewLocations } from './reviews/store.js';
 import { googleResultPage } from './auth/google-result-page.js';
+import { rememberAppOrigin, workspaceLink } from './utils/links.js';
+import { deleteOAuthClient, getOAuthClient, oauthClientCredentials, saveOAuthClient } from './auth/oauth-clients.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
 import { GOOGLE_INDEXING_CAPABILITIES, oneOffPrompt, recordRequestOutcomes, routinePrompt, siteRequestCandidates, type RequestOutcome } from './indexer/request-indexing.js';
@@ -141,9 +143,9 @@ import {
   createPasswordReset, consumePasswordReset, recordAuditEvent, listAuditEvents, type User,
 } from './auth/users.js';
 import { emailConfigured, sendEmail } from './utils/email.js';
-import { sendTestNotification, configuredChannels, listNotificationDeliveries, NOTIFY_KEYS } from './utils/notify.js';
+import { sendTestNotification, configuredChannels, listNotificationDeliveries, NOTIFY_KEYS, normalizeEmailLists, normalizeRoutes } from './utils/notify.js';
 import {
-  createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces,
+  createWorkspace, getWorkspace, renameWorkspace, deleteWorkspace, accessibleWorkspaces, workspaceSlug,
   canAccessWorkspace, canManageWorkspace, canAccessSiteInWorkspace, bootstrapUserWorkspace,
   listWorkspaceMembers, addWorkspaceMember, removeWorkspaceMember, reassignOwnedWorkspaces,
   addBingAccount, addBingOAuthAccount, bingCredentialForSite, listBingAccounts, removeBingAccount, bingAccountWorkspace,
@@ -405,7 +407,7 @@ function capabilityForPath(path: string): Capability | null {
     return 'manage_sites';
   }
   if (path.startsWith('/api/auth/accounts') || path.startsWith('/api/auth/clear') || path.startsWith('/api/auth/save-credentials')
-    || path.startsWith('/api/auth/google/start') || path.startsWith('/api/auth/google/enable-apis') || path.startsWith('/api/auth/bing/start')
+    || path.startsWith('/api/auth/google/start') || path.startsWith('/api/auth/google/enable-apis') || path.startsWith('/api/auth/google/clients') || path.startsWith('/api/auth/bing/start')
     || path.startsWith('/api/bing/accounts') || path === '/api/workspace/keys'
     || path === '/api/ai/models' || path.startsWith('/api/ai/provision/')) {
     return 'manage_integrations';
@@ -553,6 +555,8 @@ app.get('/api/healthz', async (_req, reply) => {
 // ── Status ────────────────────────────────────────────────────────────────────
 
 app.get('/api/status', async (req) => {
+  // Remember where the dashboard is served from, for links in notifications sent by background jobs.
+  rememberAppOrigin(publicOrigin(req));
   // Everything is tenant-scoped: a user sees THEIR active workspace's run state,
   // auth status and totals, not the whole install's. A run (or Google account)
   // in another workspace is invisible.
@@ -843,6 +847,7 @@ app.get('/api/workspaces', async (req) => {
   return accessibleWorkspaces(user).map(w => ({
     id: w.id,
     name: w.name,
+    slug: workspaceSlug(w.id),
     created_at: w.created_at,
     is_owner: w.owner_user_id === user.id,
     is_active: w.id === active,
@@ -866,7 +871,7 @@ app.post('/api/workspaces', async (req, reply) => {
   if (!name?.trim()) return reply.status(400).send({ error: 'name is required.' });
   const ws = createWorkspace(name, currentUser(req).id);
   recordAuditEvent({ actorUserId: auditActor(req).id, workspaceId: ws.id, action: 'workspace.created', ipAddress: requestIp(req) });
-  return { id: ws.id, name: ws.name, created_at: ws.created_at, is_owner: true };
+  return { id: ws.id, name: ws.name, slug: ws.slug ?? workspaceSlug(ws.id), created_at: ws.created_at, is_owner: true };
 });
 
 app.patch('/api/workspaces/:id', async (req, reply) => {
@@ -1261,6 +1266,7 @@ app.get('/api/invites/:token', async (req, reply) => {
   return {
     email: invite.email,
     workspaceName: invite.workspace_name,
+    workspaceSlug: workspaceSlug(invite.workspace_id),
     role: invite.role,
     hasAccount: !!getUserByEmail(invite.email),
   };
@@ -1420,8 +1426,8 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads, business, only, projectFrom, returnTo } = (req.body ?? {}) as {
-    clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
+  const { clientId, clientSecret, clientLabel, autoSetup, accountId, ads, business, only, projectFrom, returnTo } = (req.body ?? {}) as {
+    clientId?: string; clientSecret?: string; clientLabel?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
     /** The dashboard path to come back to if the sign-in has to run in the same tab. */
     returnTo?: string;
     /** Products to limit the grant to. [] = full scopes. Omitted: a reconnect keeps what the connection had. */
@@ -1436,13 +1442,23 @@ app.post('/api/auth/google/start', async (req, reply) => {
       return reply.status(404).send({ error: 'Account not found' });
     }
   }
-  // Reusing a project: the OAuth client stays on the server; the browser only names the connection that holds it.
-  let source: ReturnType<typeof getGoogleAccountById> = null;
-  if (projectFrom && !reconnect) {
-    source = getGoogleAccountById(projectFrom);
-    if (!source || (!isGoogleAccountAvailableToWorkspace(source.id, workspaceId) && source.owner_user_id !== user.id && !user.is_super_admin)) {
+  // Reusing a project: the OAuth client stays on the server; the browser only names the connection (or saved client) that holds it.
+  let source: { client_id: string; client_secret: string } | null = null;
+  if (projectFrom && !reconnect && projectFrom.startsWith('client:')) {
+    const saved = getOAuthClient(projectFrom.slice('client:'.length));
+    const creds = saved && (saved.workspace_id === workspaceId || saved.owner_user_id === user.id || user.is_super_admin) ? oauthClientCredentials(saved.id) : null;
+    if (!creds) return reply.status(404).send({ error: 'That saved Google Cloud project isn\'t available in this workspace.' });
+    source = { client_id: creds.clientId, client_secret: creds.clientSecret };
+  } else if (projectFrom && !reconnect) {
+    const account = getGoogleAccountById(projectFrom);
+    if (!account || (!isGoogleAccountAvailableToWorkspace(account.id, workspaceId) && account.owner_user_id !== user.id && !user.is_super_admin)) {
       return reply.status(404).send({ error: 'That Google Cloud project isn\'t available in this workspace.' });
     }
+    source = account;
+  } else if (!reconnect && clientId?.trim() && clientSecret?.trim()) {
+    // A client typed into the form is saved now, so a cancelled or failed sign-in doesn't lose it.
+    try { saveOAuthClient({ workspaceId, userId: user.id, clientId, clientSecret, label: clientLabel }); }
+    catch (e) { return reply.status(400).send({ error: e instanceof Error ? e.message : String(e) }); }
   }
   const origin = browserOrigin(req);
   try {
@@ -1543,6 +1559,23 @@ app.get('/api/auth/google/health', async (req) => {
   if (!ws) return [];
   const q = req.query as { probe?: string; fresh?: string };
   return workspaceGoogleHealth(ws, { probe: q.probe === '1' || q.probe === 'true', fresh: q.fresh === '1' || q.fresh === 'true' });
+});
+
+// Save an OAuth client (Cloud project) without signing in yet; rename or forget one.
+app.post('/api/auth/google/clients', async (req, reply) => {
+  const ws = requireWorkspace(req);
+  const { clientId, clientSecret, label } = (req.body ?? {}) as { clientId?: string; clientSecret?: string; label?: string };
+  try { return saveOAuthClient({ workspaceId: ws, userId: currentUser(req).id, clientId: String(clientId ?? ''), clientSecret: String(clientSecret ?? ''), label }); }
+  catch (e) { return reply.status(400).send({ error: e instanceof Error ? e.message : String(e) }); }
+});
+
+app.delete('/api/auth/google/clients/:id', async (req, reply) => {
+  const ws = requireWorkspace(req);
+  const user = currentUser(req);
+  const saved = getOAuthClient((req.params as { id: string }).id);
+  if (!saved || (saved.workspace_id !== ws && saved.owner_user_id !== user.id && !user.is_super_admin)) return reply.status(404).send({ error: 'Saved project not found.' });
+  deleteOAuthClient(saved.id);
+  return { ok: true };
 });
 
 // Cloud projects (OAuth clients) a new Google user can be signed in through without re-entering a client id and secret.
@@ -2024,10 +2057,13 @@ app.get('/api/notifications/status', async (req) => {
 
 // The active workspace's channel config values (URLs/topics are shown so the
 // owner can edit them; there are no separate platform notification defaults).
+const NOTIFY_SECRET_KEYS = new Set(['notify_slack_webhook', 'notify_discord_webhook', 'notify_ntfy_token', 'notify_telegram_token', 'notify_webhook_url', 'notify_whatsapp_token']);
 app.get('/api/notifications/config', async (req) => {
   const wsId = currentWorkspace(req);
   const vals = wsId ? getWorkspaceSettings(wsId) : {};
-  return Object.fromEntries(NOTIFY_KEYS.map(k => [k, vals[k] ?? '']));
+  // Members who can't change notifications see that a token or webhook is set, not the secret itself.
+  const canManage = !!wsId && hasCapability(currentUser(req), wsId, 'manage_notifications');
+  return Object.fromEntries(NOTIFY_KEYS.map(k => [k, !canManage && NOTIFY_SECRET_KEYS.has(k) && vals[k] ? '••••••••' : vals[k] ?? '']));
 });
 
 app.put('/api/notifications/config', async (req, reply) => {
@@ -2044,6 +2080,13 @@ app.put('/api/notifications/config', async (req, reply) => {
     try { validateOutboundUrl(body.notify_ntfy_topic, { label: 'ntfy topic URL' }); }
     catch (error) { return reply.status(400).send({ error: error instanceof Error ? error.message : 'ntfy topic URL is invalid.' }); }
   }
+  // Structured values are stored cleaned up, so a bad list can never break delivery.
+  const raw = body as Record<string, unknown>;
+  if (raw.notify_email_lists !== undefined) body.notify_email_lists = JSON.stringify(normalizeEmailLists(raw.notify_email_lists));
+  if (raw.notify_routes !== undefined) body.notify_routes = JSON.stringify(normalizeRoutes(raw.notify_routes));
+  if (body.notify_whatsapp_phone_id?.trim() && !/^\d{6,}$/.test(body.notify_whatsapp_phone_id.trim())) {
+    return reply.status(400).send({ error: 'The WhatsApp phone number ID is the numeric ID from Meta (WhatsApp → API Setup), not the phone number itself.' });
+  }
   for (const key of NOTIFY_KEYS) {
     if (body[key] !== undefined) setWorkspaceSetting(wsId, key, String(body[key]));
   }
@@ -2053,7 +2096,7 @@ app.put('/api/notifications/config', async (req, reply) => {
 // Fire a test at the active workspace's channels; report per-channel results.
 app.post('/api/notifications/test', async (req) => {
   const wsId = currentWorkspace(req);
-  const results = wsId ? await sendTestNotification(wsId) : [];
+  const results = wsId ? await sendTestNotification(wsId, workspaceLink(wsId, '/') ?? publicOrigin(req)) : [];
   return { results };
 });
 

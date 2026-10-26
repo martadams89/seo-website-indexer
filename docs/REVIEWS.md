@@ -25,7 +25,7 @@ Replies and posts only work on verified locations; Google refuses them for unver
 Google approves the Business Profile APIs per Cloud project, and the approval often ends up on a different project from the one you use for Search Console, or with a different Google user. The app handles both:
 
 - **A different Google user.** Under **Setup → Connect Business Profile separately**, pick a **Google Cloud project** you already use and sign in. The app reuses that project's OAuth client, so there's nothing to re-enter; choose the other user on Google's screen.
-- **The same Google user, another project.** Choose **Another project (enter its OAuth client)** and enter that project's client ID and secret once (a *Web application* client with the redirect URI the page shows). A Google user can be connected once per project, so Search Console keeps using its connection and your locations use this one. Each connection shows its project number on the Setup tab and under **Settings → Google Accounts**.
+- **The same Google user, another project.** Choose **Another project (enter its OAuth client)** and enter that project's client ID and secret once (a *Web application* client with the redirect URI the page shows). The client is saved for the workspace, with an optional name, so later sign-ins pick it from the list; **Save project for later** keeps it without signing in. A Google user can be connected once per project, so Search Console keeps using its connection and your locations use this one. Each connection shows its project number on the Setup tab and under **Settings → Google Accounts**.
 - **Business Profile only.** Tick **Only ask Google for Business Profile access** (on by default for another project). The consent screen then shows just Business Profile and the email address, so that project doesn't need Search Console or Analytics configured. These connections are never offered to sites for Search Console.
 - **Moving locations.** Open a location's settings on **Locations & rules** and pick another connection, or use **Use this connection** in **Find and link locations**. The app checks that the new connection can see the location and read its reviews before it switches; reviews, rules, brief and history stay.
 
@@ -85,6 +85,9 @@ Under **Settings → Notifications**:
 
 - **Google review alerts**: a new review at or below a location's alert threshold arrives, or Google rejects a reply (with the policy reason). Each sync sends at most one message per location and lists up to eight reviews.
 - **Business Profile changes**: Google, or someone using *Suggest an edit*, changed a profile. Checked daily, sent once per change.
+- **Business Profile approvals**: an AI assistant proposed a reply, profile edit, post or photo that the location's rules hold for a person. The message links straight to it; the page shows the review and the proposed reply (editable) with **Approve** and **Reject**. Proposals made close together arrive as one message.
+
+Send these to email, WhatsApp, Slack and the other channels, and choose which channel or email list gets which event. See [notifications](INTEGRATIONS.md#notifications).
 
 ## Working with an AI assistant
 
