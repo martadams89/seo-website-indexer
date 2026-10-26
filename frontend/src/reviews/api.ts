@@ -143,8 +143,10 @@ export interface ChecklistItem { id: string; label: string; status: 'done' | 'wa
 export type ChangeKind = 'profile' | 'post' | 'post_delete' | 'photo' | 'photo_delete';
 export interface ProfileChange {
   id: string; location_id: string; kind: ChangeKind; payload: Record<string, unknown>; summary: string; rationale: string | null;
-  source: 'dashboard' | 'mcp'; status: 'needs_approval' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
+  source: 'dashboard' | 'mcp'; status: 'needs_approval' | 'scheduled' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
   findings: ReplyFinding[]; decided_at: string | null; published_at: string | null; error: string | null; result: Record<string, unknown> | null; created_at: string;
+  /** A post held until this time (UTC ISO), then published by the server. */
+  publish_at?: string | null;
   location_title?: string | null;
 }
 
@@ -241,7 +243,8 @@ export const reviewsApi = {
   checkGoogleUpdates: (id: string) => apiFetch<GoogleUpdates>(`/api/reviews/locations/${id}/google-updates/check`, { method: 'POST', ...json({}) }),
   resolveGoogleUpdates: (id: string, keep: 'google' | 'mine') => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/google-updates/resolve`, { method: 'POST', ...json({ keep }) }),
   posts: (id: string, fresh = false) => apiFetch<BusinessPost[]>(`/api/reviews/locations/${id}/posts${fresh ? '?fresh=1' : ''}`),
-  createPost: (id: string, post: PostDraft) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/posts`, { method: 'POST', ...json(post) }),
+  /** `publishAt` (ISO time) holds the post and publishes it then. */
+  createPost: (id: string, post: PostDraft & { publishAt?: string }) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/posts`, { method: 'POST', ...json(post) }),
   deletePost: (id: string, name: string) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/posts?name=${encodeURIComponent(name)}`, { method: 'DELETE' }),
   photos: (id: string, fresh = false) => apiFetch<{ total: number; photos: BusinessPhoto[] }>(`/api/reviews/locations/${id}/photos${fresh ? '?fresh=1' : ''}`),
   addPhoto: (id: string, photo: { url: string; category: string; description?: string }) => apiFetch<ProfileChange>(`/api/reviews/locations/${id}/photos`, { method: 'POST', ...json(photo) }),

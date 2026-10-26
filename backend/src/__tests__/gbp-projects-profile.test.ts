@@ -337,6 +337,67 @@ describe('Business Profile editing, posts and photos', () => {
     expect(held.next_step).toContain(`/w/${m.ws.workspaceSlug(loc().workspace_id)}/approve/business/${held.change_id}`);
   });
 
+  it('schedules posts, publishes them when they fall due, and lets them be cancelled', async () => {
+    m.store.updateLocation(loc().id, { profile_rules: { ...loc().profile_rules, posts: 'auto' } });
+    const ctx = ctxFor(owner.user.id);
+    const postCalls = () => calls.filter(c => c.method === 'POST' && c.url.endsWith('/localPosts')).length;
+    const before = postCalls();
+    const inAnHour = new Date(Date.now() + 3_600_000).toISOString();
+    const later = await m.tools.runTool(ctx, 'business_create_post', { location: loc().id, summary: 'Gutter cleaning slots open next week.', publishAt: inAnHour }) as { status: string; change_id: string; publish_at: string; next_step: string };
+    expect(later).toMatchObject({ status: 'scheduled', publish_at: inAnHour });
+    expect(later.next_step).toMatch(/business_cancel_scheduled_post/);
+    expect(postCalls()).toBe(before);
+
+    const listed = await m.tools.runTool(ctx, 'business_list_posts', { location: loc().id }) as { scheduled: Array<{ change_id: string }> };
+    expect(listed.scheduled.map(p => p.change_id)).toEqual([later.change_id]);
+
+    // Not due yet: nothing goes out. Due: it publishes, once.
+    expect(await m.profile.publishDueScheduledChanges(new Date())).toBe(0);
+    expect(await m.profile.publishDueScheduledChanges(new Date(Date.now() + 2 * 3_600_000))).toBe(1);
+    expect(m.store.getChange(later.change_id)?.status).toBe('published');
+    expect(postCalls()).toBe(before + 1);
+    expect(await m.profile.publishDueScheduledChanges(new Date(Date.now() + 2 * 3_600_000))).toBe(0);
+
+    // Cancelling before it goes out; a published post can't be "cancelled".
+    const cancelMe = await m.tools.runTool(ctx, 'business_create_post', { location: loc().id, summary: 'Winter roof checks from December.', publishAt: inAnHour }) as { change_id: string };
+    expect(await m.tools.runTool(ctx, 'business_cancel_scheduled_post', { changeId: cancelMe.change_id })).toMatchObject({ status: 'rejected' });
+    await expect(m.tools.runTool(ctx, 'business_cancel_scheduled_post', { changeId: later.change_id })).rejects.toThrow(/business_delete_post/);
+    expect(await m.profile.publishDueScheduledChanges(new Date(Date.now() + 2 * 3_600_000))).toBe(0);
+
+    // Bad times are explained; only posts can be scheduled.
+    await expect(m.tools.runTool(ctx, 'business_create_post', { location: loc().id, summary: 'Too late', publishAt: '2020-01-01T09:00:00Z' })).rejects.toThrow(/already passed/);
+    await expect(m.profile.submitChange({ location: loc(), change: { kind: 'photo', photo: { url: 'https://roof.example/x.jpg' } }, user: owner.user, source: 'dashboard', publishAt: inAnHour })).rejects.toThrow(/Only posts/);
+  });
+
+  it('keeps the schedule when a post needs approval first', async () => {
+    m.store.updateLocation(loc().id, { profile_rules: { ...loc().profile_rules, posts: 'approval' } });
+    const ctx = ctxFor(owner.user.id);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    const held = await m.tools.runTool(ctx, 'business_create_post', { location: loc().id, summary: 'Open on Saturday for emergency repairs.', publishAt: tomorrow }) as { status: string; change_id: string; next_step: string };
+    expect(held.status).toBe('needs_approval');
+    expect(held.next_step).toContain(`publishes at ${tomorrow}`);
+    expect((await m.profile.approveChange(held.change_id, owner.user)).status).toBe('scheduled');
+
+    // Approved after its time has passed: it goes out straight away.
+    const past = await m.profile.submitChange({ location: loc(), change: { kind: 'post', post: { summary: 'Thanks to everyone who came to the open day.' } }, user: owner.user, source: 'mcp', publishAt: new Date(Date.now() + 120_000).toISOString() });
+    expect(past.status).toBe('needs_approval');
+    m.db.getDb().prepare('UPDATE gbp_changes SET publish_at=? WHERE id=?').run(new Date(Date.now() - 60_000).toISOString(), past.id);
+    expect((await m.profile.approveChange(past.id, owner.user)).status).toBe('published');
+
+    // A person on the dashboard can schedule too.
+    const mine = await m.profile.submitChange({ location: loc(), change: { kind: 'post', post: { summary: 'Christmas opening hours are on our website.' } }, user: owner.user, source: 'dashboard', publishAt: tomorrow });
+    expect(mine.status).toBe('scheduled');
+  });
+
+  it('works out a publish time, or none for now', () => {
+    const now = Date.parse('2026-10-27T10:00:00Z');
+    expect(m.profile.schedulePublishAt(undefined, now)).toBeNull();
+    expect(m.profile.schedulePublishAt('2026-10-27T10:00:30Z', now)).toBeNull();
+    expect(m.profile.schedulePublishAt('2026-10-28T09:00:00+01:00', now)).toBe('2026-10-28T08:00:00.000Z');
+    expect(() => m.profile.schedulePublishAt('next tuesday', now)).toThrow(/valid date/);
+    expect(() => m.profile.schedulePublishAt('2027-12-01T09:00:00Z', now)).toThrow(/a year ahead/);
+  });
+
   it('blocks everything when the location turns assistants off', async () => {
     m.store.updateLocation(loc().id, { profile_rules: { profile: 'off', posts: 'off', photos: 'off', alert_google_updates: true } });
     const ctx = ctxFor(owner.user.id);

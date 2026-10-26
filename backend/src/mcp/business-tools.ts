@@ -10,10 +10,10 @@
 import { z } from 'zod';
 import { assertCanReply, resolveLocation } from '../reviews/access.js';
 import { DAYS, type PostInput, type ProfileEdit, type SpecialHours } from '../reviews/profile-rules.js';
-import { checkGoogleUpdates, existingMedia, getPhotos, getPosts, getProfile, profileOverview, submitChange, type ChangeInput, type PhotoView } from '../reviews/profile-service.js';
+import { checkGoogleUpdates, existingMedia, getPhotos, getPosts, getProfile, profileOverview, rejectChange, submitChange, type ChangeInput, type PhotoView } from '../reviews/profile-service.js';
 import { workspaceSlug } from '../auth/workspaces.js';
 import { PHOTO_CATEGORIES } from '../reviews/client.js';
-import { listChanges, type ChangeStatus, type ProfileChange, type ReviewLocation } from '../reviews/store.js';
+import { getChange, listChanges, type ChangeStatus, type ProfileChange, type ReviewLocation } from '../reviews/store.js';
 import type { McpContext, ToolDef } from './tools.js';
 
 const LOCATION = z.string().describe('The location: its id from reviews_list_locations (or its exact title).');
@@ -35,13 +35,14 @@ function presentChange(ctx: McpContext, c: ProfileChange) {
   const link = ctx.origin ? `${ctx.origin}/w/${encodeURIComponent(workspaceSlug(c.workspace_id))}/approve/business/${c.id}` : null;
   const next: Record<ChangeStatus, string> = {
     published: 'Published to Google. Profile edits can take a few minutes to show (and Google sometimes reviews them first); posts and photos are checked by Google before they go live.',
-    needs_approval: `Waiting for a person to approve it on the dashboard${link ? ` (${link})` : ''}. Don't resubmit it to get around a rule.`,
+    needs_approval: `Waiting for a person to approve it on the dashboard${link ? ` (${link})` : ''}.${c.publish_at ? ` Once approved it publishes at ${c.publish_at}.` : ''} Don't resubmit it to get around a rule.`,
+    scheduled: `Scheduled: the server publishes it to Google at ${c.publish_at ?? 'the chosen time'} (UTC). Cancel it before then with business_cancel_scheduled_post if plans change.`,
     blocked: 'Blocked by this location\'s settings. Report it; a person must change the profile rules or make the change on the dashboard.',
     publishing: 'Being published right now.',
     rejected: 'A person rejected this change.',
     failed: 'Google refused the change. Read the error; fix the input if it was a mistake, otherwise report it.',
   };
-  return { change_id: c.id, kind: c.kind, status: c.status, summary: c.summary, findings: c.findings, error: c.error, result: c.result, next_step: next[c.status] };
+  return { change_id: c.id, kind: c.kind, status: c.status, summary: c.summary, ...(c.publish_at ? { publish_at: c.publish_at } : {}), findings: c.findings, error: c.error, result: c.result, next_step: next[c.status] };
 }
 
 const MEDIA_FORMAT = z.enum(['photo', 'video']).optional().describe('Worked out from the file extension when left out (.mp4, .mov… are videos).');
@@ -73,7 +74,10 @@ async function addMedia(ctx: McpContext, loc: ReviewLocation, item: { url: strin
 
 async function change(ctx: McpContext, ref: unknown, input: ChangeInput, args: Record<string, unknown>) {
   const loc = writable(ctx, ref);
-  const result = await submitChange({ location: loc, change: input, user: ctx.user, source: 'mcp', rationale: args.rationale as string | undefined, publish: args.publish as boolean | undefined });
+  const result = await submitChange({
+    location: loc, change: input, user: ctx.user, source: 'mcp', rationale: args.rationale as string | undefined, publish: args.publish as boolean | undefined,
+    publishAt: args.publishAt as string | undefined,
+  });
   return presentChange(ctx, result);
 }
 
@@ -142,20 +146,25 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_list_posts',
     title: 'List Business Profile posts',
-    description: 'The location\'s posts (updates, events and offers), newest first, with Google\'s state (LIVE, PROCESSING or REJECTED) and links.',
+    description: 'The location\'s posts (updates, events and offers), newest first, with Google\'s state (LIVE, PROCESSING or REJECTED) and links, plus posts scheduled to publish later (soonest first) and any waiting for approval.',
     scope: 'mcp:read',
     inputShape: { location: LOCATION, limit: z.number().int().min(1).max(100).optional() },
     annotations: READ,
     handler: async (ctx, args) => {
       const loc = resolveLocation(ctx.workspaceIds, args.location);
       const posts = await getPosts(loc);
-      return { location: loc.title, total: posts.length, posts: posts.slice(0, (args.limit as number | undefined) ?? 20) };
+      const upcoming = (status: ChangeStatus) => listChanges({ workspaceIds: [loc.workspace_id], locationId: loc.id, kind: 'post', status, limit: 100 }).map(c => presentChange(ctx, c));
+      return {
+        location: loc.title, total: posts.length, posts: posts.slice(0, (args.limit as number | undefined) ?? 20),
+        scheduled: upcoming('scheduled').sort((a, b) => String(a.publish_at).localeCompare(String(b.publish_at))),
+        waiting_for_approval: upcoming('needs_approval'),
+      };
     },
   },
   {
     name: 'business_create_post',
     title: 'Publish a Business Profile post',
-    description: 'Post an update (STANDARD), EVENT or OFFER to the profile, optionally with a photo (public https URL) and a button. Text up to 1,500 characters and no phone numbers (Google rejects them; use the CALL button). Events and offers need a title and start/end dates. Offers always wait for approval; otherwise the location\'s profile rules decide.',
+    description: 'Post an update (STANDARD), EVENT or OFFER to the profile, optionally with a photo (public https URL) and a button, now or at a set time (publishAt). Text up to 1,500 characters and no phone numbers (Google rejects them; use the CALL button). Events and offers need a title and start/end dates. Offers always wait for approval; otherwise the location\'s profile rules decide. A scheduled post that needs approval waits for it, then publishes at its time (or straight away if the time has passed by then).',
     scope: 'reviews:write',
     inputShape: {
       location: LOCATION,
@@ -173,13 +182,29 @@ export const BUSINESS_TOOLS: ToolDef[] = [
       redeem_url: z.string().url().optional(),
       terms: z.string().max(5000).optional(),
       language: z.string().max(10).optional().describe('Language code, default "en".'),
+      publishAt: z.string().datetime({ offset: true }).optional().describe('Publish at this time instead of now, with a time zone, e.g. "2026-11-03T09:00:00+00:00" (up to a year ahead). Google has no scheduling, so the server holds the post and publishes it then.'),
       rationale: RATIONALE,
       publish: PUBLISH,
     },
     annotations: WRITE,
     handler: async (ctx, args) => {
-      const { location: ref, rationale: _r, publish: _p, ...post } = args;
+      const { location: ref, rationale: _r, publish: _p, publishAt: _at, ...post } = args;
       return change(ctx, ref, { kind: 'post', post: post as PostInput }, args);
+    },
+  },
+  {
+    name: 'business_cancel_scheduled_post',
+    title: 'Cancel a scheduled post',
+    description: 'Cancel a post that is scheduled for later, or still waiting for approval, before it goes out (change_id from business_create_post or business_list_posts). Posts already published need business_delete_post instead.',
+    scope: 'reviews:write',
+    inputShape: { changeId: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    handler: async (ctx, args) => {
+      const existing = getChange(String(args.changeId));
+      if (!existing || existing.kind !== 'post' || !ctx.workspaceIds.includes(existing.workspace_id)) throw new Error('Scheduled post not found.');
+      writable(ctx, existing.location_id);
+      if (!['scheduled', 'needs_approval'].includes(existing.status)) throw new Error(`This post is ${existing.status.replace('_', ' ')}, so there's nothing to cancel.${existing.status === 'published' ? ' Use business_delete_post to remove it from Google.' : ''}`);
+      return presentChange(ctx, rejectChange(existing.id, ctx.user));
     },
   },
   {
@@ -266,11 +291,11 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_list_changes',
     title: 'List Business Profile changes',
-    description: 'Profile edits, posts and photos made or proposed through this app (by people and assistants), newest first. Use status "needs_approval" for what is waiting.',
+    description: 'Profile edits, posts and photos made or proposed through this app (by people and assistants), newest first. Use status "needs_approval" for what is waiting and "scheduled" for posts due to publish later.',
     scope: 'mcp:read',
     inputShape: {
       location: LOCATION.optional(),
-      status: z.enum(['needs_approval', 'blocked', 'published', 'rejected', 'failed']).optional(),
+      status: z.enum(['needs_approval', 'scheduled', 'blocked', 'published', 'rejected', 'failed']).optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
     annotations: READ,

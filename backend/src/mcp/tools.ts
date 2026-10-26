@@ -18,7 +18,7 @@ import {
 import { getUserById, type User } from '../auth/users.js';
 import { accessibleWorkspaces, canAccessSiteInWorkspace, canEditWorkspace, hasCapability, workspaceRole } from '../auth/workspaces.js';
 import { inspectGoogleUrl } from '../indexer/google.js';
-import { getGooglePerformance, getGoogleDimension, getGoogleQueryPages } from '../indexer/performance.js';
+import { getGooglePerformance, getGoogleDimension, getGoogleQueryPages, GSC_DIMENSIONS, GSC_SEARCH_TYPES, type GscDimension } from '../indexer/performance.js';
 import { checkSiteHygiene } from '../indexer/hygiene.js';
 import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
@@ -169,16 +169,20 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'get_query_page_performance',
-    title: 'Get search terms and pages together',
-    description: 'Search Console clicks, impressions, CTR and position by search term AND page together, live from Google, for the last N days or any start/end dates: which pages rank for which terms (keyword cannibalisation, the terms each page gets). Filter with query/page "contains" text. Rows come most-clicked first; page through with startRow (next_start_row). fresh=true includes the last couple of days that Google is still finalising. Google leaves out very rare search terms, so rows add up to less than site totals.',
+    title: 'Get Search Console performance by any dimensions',
+    description: 'Search Console clicks, impressions, CTR and position, live from Google, for the last N days or any start/end dates, broken down by the dimensions you choose. Default ["query","page"]: search terms and pages together (keyword cannibalisation, the terms each page gets). ["page"], ["query"] or ["date"] give totals by page, by search term or by day; mix any of query, page, date, country and device; [] gives the site\'s totals. searchAppearance works on its own only. Filter with query/page "contains" text and country/device. Rows come most-clicked first (by date when date is a dimension); page through with startRow (next_start_row). fresh=true includes the last couple of days that Google is still finalising. Google leaves out very rare search terms, so breakdowns by search term add up to less than the totals.',
     scope: 'mcp:read',
     inputShape: {
       siteId: z.string(),
       days: z.number().int().min(1).max(480).optional().describe('Last N days (default 28). Ignored when start and end are given.'),
       start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      dimensions: z.array(z.enum(GSC_DIMENSIONS)).max(5).optional().describe('What to break the numbers down by. Default ["query","page"]. Examples: ["page"], ["query"], ["date"], ["date","page"], [] for totals.'),
       query: z.string().max(200).optional().describe('Only search terms containing this text.'),
       page: z.string().max(500).optional().describe('Only pages whose URL contains this text.'),
+      country: z.string().regex(/^[a-zA-Z]{3}$/).optional().describe('Only this country: ISO 3166-1 alpha-3 code, e.g. "gbr".'),
+      device: z.enum(['desktop', 'mobile', 'tablet']).optional(),
+      searchType: z.enum(GSC_SEARCH_TYPES).optional().describe('Default web.'),
       limit: z.number().int().min(1).max(5000).optional().describe('Rows per call (default 500).'),
       startRow: z.number().int().min(0).optional(),
       fresh: z.boolean().optional(),
@@ -186,7 +190,10 @@ export const TOOLS: ToolDef[] = [
     annotations: { readOnlyHint: true, openWorldHint: true },
     handler: (ctx, args) => getGoogleQueryPages(requireSite(ctx, String(args.siteId)), {
       days: args.days as number | undefined, start: args.start as string | undefined, end: args.end as string | undefined,
+      dimensions: args.dimensions as GscDimension[] | undefined,
       query: args.query as string | undefined, page: args.page as string | undefined,
+      country: args.country as string | undefined, device: args.device as string | undefined,
+      searchType: args.searchType as (typeof GSC_SEARCH_TYPES)[number] | undefined,
       limit: args.limit as number | undefined, startRow: args.startRow as number | undefined, fresh: args.fresh as boolean | undefined,
     }),
   },

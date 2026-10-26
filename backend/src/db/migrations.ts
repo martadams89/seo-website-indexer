@@ -8,6 +8,16 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261027_02_scheduled_business_posts',
+    description: 'Business Profile posts scheduled for later: the time to publish, and the queue the scheduler reads',
+    up(db) {
+      db.exec(`
+        ALTER TABLE gbp_changes ADD COLUMN publish_at TEXT;
+        CREATE INDEX idx_gbp_changes_scheduled ON gbp_changes(status, publish_at);
+      `);
+    },
+  },
+  {
     id: '20261027_01_google_connect_invites',
     description: 'Links that let a client connect their own Google account (Business Profile) through the agency\'s approved Cloud project',
     up(db) {

@@ -101,3 +101,4 @@
 }
 
 .client-link-created { margin: 4px 0 12px; }
+.gbp-schedule-line { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--accent); font-size: 12px; font-weight: 600; }
