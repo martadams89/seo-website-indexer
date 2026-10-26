@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.49.0](https://github.com/martadams89/seo-website-indexer/compare/v1.48.0...v1.49.0) (2026-10-26)
+
+
+### ✨ Features
+
+* Business Profile photos and videos over MCP, connector access you can change, and search terms with pages ([#525](https://github.com/martadams89/seo-website-indexer/issues/525)) ([5298464](https://github.com/martadams89/seo-website-indexer/commit/52984648e6268037cec4c56738de5f611bd2765a))
+
 ## [1.48.0](https://github.com/martadams89/seo-website-indexer/compare/v1.47.0...v1.48.0) (2026-10-26)
 
 
