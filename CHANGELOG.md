@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.48.0](https://github.com/martadams89/seo-website-indexer/compare/v1.47.0...v1.48.0) (2026-10-26)
+
+
+### ✨ Features
+
+* Business Profile connect links so clients connect their own Google account through your approved project ([#523](https://github.com/martadams89/seo-website-indexer/issues/523)) ([7f496f9](https://github.com/martadams89/seo-website-indexer/commit/7f496f974a31b12d9574fa3f7437f24c006c7b9b))
+
 ## [1.47.0](https://github.com/martadams89/seo-website-indexer/compare/v1.46.1...v1.47.0) (2026-10-26)
 
 
