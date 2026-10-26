@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.46.0](https://github.com/martadams89/seo-website-indexer/compare/v1.45.1...v1.46.0) (2026-10-26)
+
+
+### ✨ Features
+
+* Business Profile on its own Google account or Cloud project, plus profile editing, posts, photos and Google-suggested edits ([7d72b23](https://github.com/martadams89/seo-website-indexer/commit/7d72b23456e748eda36775c0c76121374ac5bdf1))
+* reuse saved Cloud projects when connecting Google, and per-product connections for Google Ads ([7d72b23](https://github.com/martadams89/seo-website-indexer/commit/7d72b23456e748eda36775c0c76121374ac5bdf1))
+
 ## [1.45.1](https://github.com/martadams89/seo-website-indexer/compare/v1.45.0...v1.45.1) (2026-10-25)
 
 
