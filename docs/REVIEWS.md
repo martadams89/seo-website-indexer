@@ -106,6 +106,8 @@ Send these to email, WhatsApp, Slack and the other channels, and choose which ch
 
 Connect an MCP-capable assistant (see [Connect an AI assistant](GOOGLE_ADS.md#connect-an-ai-assistant)) and tick **Manage Google Business Profile** on the sign-in screen, or **Business Profile** on a personal token. Reading only needs the default read permission.
 
+An assistant only sees the tools its connection is allowed to use. If it says it has no tool to reply to reviews or add photos, the connection was approved read-only (the default when the app doesn't ask for anything specific). Open **Business Profile → Setup → Connect an AI assistant**, click **Change access** on the app, tick **Business Profile changes**, save, and start a new chat. There's no need to disconnect it. The connection also tells the assistant what it's missing and where to change it.
+
 **Business Profile → AI routine** asks how often to run, how far back to look and whether replies may publish within the rules or should all be drafts, then builds a prompt to paste into a scheduled task in your assistant.
 
 | Tool | Permission | What it does |
@@ -122,7 +124,7 @@ Connect an MCP-capable assistant (see [Connect an AI assistant](GOOGLE_ADS.md#co
 | `business_get_profile` | read | The profile, completeness checklist, Google-suggested edits, AI rules and changes waiting for approval. |
 | `business_check_google_updates` | read | Ask Google now which fields it shows differently. |
 | `business_list_posts` | read | Posts with Google's state and links. |
-| `business_list_photos` | read | Photos with category and views. |
+| `business_list_photos` | read | Photos and videos with category, views and the address each was added from. |
 | `business_list_changes` | read | Profile edits, posts and photos made or proposed through the app. |
 | `reviews_reply` | reviews:write | Publish a reply within the rules, or queue it for approval (`publish: false` always queues). |
 | `reviews_delete_reply` | reviews:write | Ask to delete a reply (always needs approval). |
@@ -131,10 +133,21 @@ Connect an MCP-capable assistant (see [Connect an AI assistant](GOOGLE_ADS.md#co
 | `business_update_profile` | reviews:write | Change the description, phone, website, weekly hours, or add and remove special hours. |
 | `business_create_post` | reviews:write | Post an update, event or offer, with an optional photo and button. |
 | `business_delete_post` | reviews:write | Ask to delete a post (always needs approval). |
-| `business_add_photo` | reviews:write | Add a photo from a public URL. |
+| `business_add_photo` | reviews:write | Add one photo or video from a direct link. |
+| `business_add_media` | reviews:write | Add up to 25 photos and videos in one go, with a result per item. |
 | `business_delete_photo` | reviews:write | Ask to delete a photo (always needs approval). |
 
 Workspace viewers stay read-only whatever their token allows, and editors need the **Manage Google Business Profile** permission to reply, post, edit or approve.
+
+### Photos and videos from other tools
+
+An assistant can copy a team's job photos and videos into the gallery from anywhere it can get a direct link, for example media in a social media scheduler such as Mixpost, a shared drive or a CDN. Google downloads each file from its link, so the link must point at the file itself and be publicly reachable.
+
+- **Before Google sees it,** each link is checked: a web page instead of the file, a missing or private file, the wrong type, or a size outside Google's limits fails with a reason. Photos must be JPG or PNG, 10 KB to 5 MB and at least 250×250 pixels (720×720 or larger looks best). Videos can be up to 30 seconds and 75 MB, at 720p or higher.
+- **Videos** are recognised by their extension (`.mp4`, `.mov`…) or `format: "video"`. They can't be the cover, profile or logo.
+- **Repeats are skipped.** An address already added through the app, or that Google reports for a photo added with another tool, isn't sent again; neither is an address listed twice in one request. Pass `allowDuplicates: true` to add it anyway.
+- **Rules still apply.** The location's photo rule decides whether each item publishes or waits. Waiting items arrive as one notification, and **Approvals & history** has **Approve all** for a batch of photos and videos.
+- Google checks every photo and video itself and can still reject or hide one, for example a blurry image, a photo of a screen or one showing personal details.
 
 ## Troubleshooting
 

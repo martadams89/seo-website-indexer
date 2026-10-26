@@ -73,7 +73,7 @@ describe('posts and photos', () => {
   });
 
   it('checks photo URLs and categories, and holds brand photos', () => {
-    expect(validatePhoto({ url: 'https://roof.example/a.jpg' })).toEqual({ sourceUrl: 'https://roof.example/a.jpg', category: 'ADDITIONAL' });
+    expect(validatePhoto({ url: 'https://roof.example/a.jpg' })).toEqual({ sourceUrl: 'https://roof.example/a.jpg', category: 'ADDITIONAL', mediaFormat: 'PHOTO' });
     expect(() => validatePhoto({ url: 'file:///tmp/a.jpg' })).toThrow(/https/);
     expect(() => validatePhoto({ url: 'https://roof.example/a.jpg', category: 'SELFIE' as never })).toThrow(/category/);
     expect(evaluatePhoto({ ...DEFAULT_PROFILE_RULES, photos: 'auto' }, { category: 'COVER' }).map(f => f.code)).toEqual(['identity_photo']);

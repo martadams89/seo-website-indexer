@@ -74,6 +74,7 @@ The MCP server exposes the playbook and the search analysis around it, so a conn
 - `get_playbook_opportunity` — one opportunity in full, including any saved draft.
 - `set_playbook_opportunity_status` (needs `mcp:write`) — mark an opportunity done once the change is live, so its effect is measured, or dismiss it.
 - `compare_periods` — any period vs the one before or the same dates last year, by query, page, country or device.
+- `get_query_page_performance` — search terms and pages together, live from Search Console, for any dates: which pages rank for which terms (cannibalisation) and the terms each page gets. Filter by "contains" text, page through with `startRow`, and pass `fresh: true` to include the last couple of days Google is still finalising.
 - `list_content_groups`, `save_content_group`, `delete_content_group` — performance by section of the site, and managing the URL rules that define each group.
 - `list_tracked_queries`, `track_query` — keywords whose Google position is tracked.
 - `get_alerts` — recent index drops, schema or `llms.txt` drift, hygiene, quota and citation alerts across your workspaces.

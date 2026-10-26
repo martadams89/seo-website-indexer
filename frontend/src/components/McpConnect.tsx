@@ -200,19 +200,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
       </div>
 
       <div className="automation-list">
-        {apps.map(app => (
-          <article key={app.id}>
-            <Link2 />
-            <div>
-              <strong>{app.client_name}</strong>
-              <small>{app.scopes.map(s => SCOPE_LABEL[s] ?? s).join(', ')}</small>
-              <span>{app.last_used_at ? `Last used ${new Date(app.last_used_at).toLocaleString()}` : `Connected ${new Date(app.created_at).toLocaleString()}`}</span>
-            </div>
-            <button className="btn-icon btn-icon-ghost" aria-label={`Disconnect ${app.client_name}`} onClick={() => api.revokeConnectedApp(app.id).then(load)}>
-              <Trash2 size={13} />
-            </button>
-          </article>
-        ))}
+        {apps.map(app => <ConnectedAppRow key={app.id} app={app} onChanged={load} />)}
         {!apps.length && <div className="ops-empty compact">No connected apps yet.</div>}
       </div>
 
@@ -320,5 +308,56 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
         </>
       )}
     </section>
+  );
+}
+
+/** A connected AI app: what it may do, with a way to change that without reconnecting it. */
+function ConnectedAppRow({ app, onChanged }: { app: ConnectedApp; onChanged: () => Promise<void> }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [scopes, setScopes] = useState<string[]>(app.scopes);
+  const [busy, setBusy] = useState(false);
+  const toggle = (scope: string) => setScopes(prev => prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api.updateConnectedApp(app.id, scopes);
+      toast('success', `Access changed. Start a new chat in ${app.client_name} to see the tools.`);
+      setEditing(false);
+      await onChanged();
+    } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  }
+
+  return (
+    <article>
+      <Link2 />
+      <div>
+        <strong>{app.client_name}</strong>
+        <small>{app.scopes.map(s => SCOPE_LABEL[s] ?? s).join(', ')}</small>
+        <span>{app.last_used_at ? `Last used ${new Date(app.last_used_at).toLocaleString()}` : `Connected ${new Date(app.created_at).toLocaleString()}`}</span>
+        {editing && (
+          <div className="mcp-scope-edit" role="group" aria-label={`Access for ${app.client_name}`}>
+            {Object.entries(SCOPE_LABEL).map(([scope, label]) => (
+              <label key={scope}>
+                <input type="checkbox" checked={scope === 'mcp:read' || scopes.includes(scope)} disabled={scope === 'mcp:read' || busy} onChange={() => toggle(scope)} />
+                {label}
+              </label>
+            ))}
+            <span className="mcp-scope-actions">
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={save}>Save</button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setEditing(false); setScopes(app.scopes); }}>Cancel</button>
+            </span>
+          </div>
+        )}
+      </div>
+      <span className="mcp-app-actions">
+        {!editing && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Change access</button>}
+        <button className="btn-icon btn-icon-ghost" aria-label={`Disconnect ${app.client_name}`} onClick={() => api.revokeConnectedApp(app.id).then(onChanged)}>
+          <Trash2 size={13} />
+        </button>
+      </span>
+    </article>
   );
 }

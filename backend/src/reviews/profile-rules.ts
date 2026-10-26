@@ -357,15 +357,29 @@ export function evaluatePost(rules: ProfileRules, post: LocalPost): ReplyFinding
 
 // ── Photos ───────────────────────────────────────────────────────────────────
 
-export interface PhotoInput { url: string; category?: PhotoCategory; description?: string }
+export type MediaFormat = 'PHOTO' | 'VIDEO';
+/** A photo or a video. `format` is worked out from the file extension when it isn't given. */
+export interface PhotoInput { url: string; category?: PhotoCategory; description?: string; format?: 'photo' | 'video' | MediaFormat }
 
-export function validatePhoto(input: PhotoInput): { sourceUrl: string; category: PhotoCategory; description?: string } {
+const VIDEO_FILE = /\.(mp4|m4v|mov|avi|wmv|webm|mpe?g|3gp)(?:[?#]|$)/i;
+
+/** PHOTO or VIDEO: as asked, otherwise by the file extension in the address. */
+export function mediaFormatOf(url: string, format?: string | null): MediaFormat {
+  const asked = String(format ?? '').toUpperCase();
+  if (asked === 'PHOTO' || asked === 'VIDEO') return asked;
+  return VIDEO_FILE.test(url) ? 'VIDEO' : 'PHOTO';
+}
+
+export function validatePhoto(input: PhotoInput): { sourceUrl: string; category: PhotoCategory; description?: string; mediaFormat: MediaFormat } {
   const sourceUrl = String(input.url ?? '').trim();
-  if (!isHttpUrl(sourceUrl)) throw new ProfileInputError('The photo must be a public image address starting with https:// (Google downloads it from there).');
+  const mediaFormat = mediaFormatOf(sourceUrl, input.format);
+  const noun = mediaFormat === 'VIDEO' ? 'video' : 'photo';
+  if (!isHttpUrl(sourceUrl)) throw new ProfileInputError(`The ${noun} must be a public address starting with https:// (Google downloads it from there).`);
   const category = (String(input.category ?? 'ADDITIONAL').toUpperCase()) as PhotoCategory;
-  if (!PHOTO_CATEGORIES.includes(category)) throw new ProfileInputError(`The photo category must be one of ${PHOTO_CATEGORIES.join(', ')}.`);
+  if (!PHOTO_CATEGORIES.includes(category)) throw new ProfileInputError(`The ${noun} category must be one of ${PHOTO_CATEGORIES.join(', ')}.`);
+  if (mediaFormat === 'VIDEO' && ['COVER', 'PROFILE', 'LOGO'].includes(category)) throw new ProfileInputError('A video can\'t be the cover, profile or logo. Use AT_WORK, TEAMS, EXTERIOR, INTERIOR, PRODUCT or ADDITIONAL.');
   const description = input.description ? String(input.description).trim().slice(0, 500) : undefined;
-  return { sourceUrl, category, ...(description ? { description } : {}) };
+  return { sourceUrl, category, mediaFormat, ...(description ? { description } : {}) };
 }
 
 export function evaluatePhoto(rules: ProfileRules, photo: { category: PhotoCategory }): ReplyFinding[] {

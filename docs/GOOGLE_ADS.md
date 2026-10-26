@@ -170,6 +170,8 @@ For clients that can only send a fixed header (for example workflow tools), crea
 
 A token (OAuth or personal) reaches every workspace its owner can reach, and never more than the owner could do in the dashboard: viewers stay read-only, editors need the **Manage Google Ads** capability, and workspace MFA requirements apply.
 
+An assistant only sees the tools its permissions allow, so a connection approved with read access alone has no change tools. To add **Google Ads changes**, **Business Profile changes** or **SEO actions** later, click **Change access** on the app under **Connect an AI assistant**, tick them and save; the app picks the change up on its next request, and a new chat shows the tools. The connection also tells the assistant which permissions it's missing.
+
 ## The AI routine
 
 Open **Google Ads → AI routine** and answer:

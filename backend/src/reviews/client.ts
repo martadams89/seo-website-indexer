@@ -410,11 +410,11 @@ export async function listMedia(googleAccountId: string, parent: string, limit =
   return { items: items.slice(0, limit), total };
 }
 
-/** Add a photo from a public URL; Google fetches and processes it. */
-export async function createMedia(googleAccountId: string, parent: string, input: { sourceUrl: string; category: PhotoCategory; description?: string }): Promise<MediaItem> {
+/** Add a photo or video from a public URL; Google fetches and processes it. */
+export async function createMedia(googleAccountId: string, parent: string, input: { sourceUrl: string; category: PhotoCategory; description?: string; mediaFormat?: 'PHOTO' | 'VIDEO' }): Promise<MediaItem> {
   return call<MediaItem>(googleAccountId, `${REVIEWS_BASE}/${parent}/media`, {
     method: 'POST',
-    body: { mediaFormat: 'PHOTO', locationAssociation: { category: input.category }, sourceUrl: input.sourceUrl, ...(input.description ? { description: input.description } : {}) },
+    body: { mediaFormat: input.mediaFormat ?? 'PHOTO', locationAssociation: { category: input.category }, sourceUrl: input.sourceUrl, ...(input.description ? { description: input.description } : {}) },
   });
 }
 

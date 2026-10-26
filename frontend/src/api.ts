@@ -435,6 +435,8 @@ export const api = {
   revokeMcpToken: (id: string) => apiFetch<{ ok: boolean }>(`/api/mcp/tokens/${id}`, { method: 'DELETE' }),
   getConnectedApps: () => apiFetch<Array<{ id: string; client_name: string; scopes: string[]; created_at: string; last_used_at: string | null }>>('/api/oauth/apps'),
   revokeConnectedApp: (id: string) => apiFetch<{ ok: boolean }>(`/api/oauth/apps/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Change what a connected app may do; it picks the new access up on its next request (a new chat shows the tools). */
+  updateConnectedApp: (id: string, scopes: string[]) => apiFetch<{ ok: boolean; scopes: string[] }>(`/api/oauth/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ scopes }) }),
   getOAuthRequest: (id: string) => apiFetch<{ id: string; client_name: string; client_domain: string | null; redirect_host: string; requested_scopes: string[]; scopes: Array<{ id: string; label: string; description: string }>; user: { email: string; name: string | null }; workspaces: string[] }>(`/api/oauth/requests/${encodeURIComponent(id)}`),
   decideOAuthRequest: (id: string, approve: boolean, scopes: string[]) => apiFetch<{ redirect: string }>(`/api/oauth/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ approve, scopes }) }),
   getContentActions: () => apiFetch<ContentAction[]>('/api/platform/content/actions'),

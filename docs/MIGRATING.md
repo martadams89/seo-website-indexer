@@ -43,4 +43,6 @@ You have two MCP servers connected: "OpenGSC" (the old tool) and "SEO Website In
 Finish with a table per site: content groups copied, keywords copied, clicks and impressions in each tool, and anything I need to do by hand.
 ```
 
+Data pulls that read search terms per page from OpenGSC (keyword lists per page, cannibalisation checks) can use `get_query_page_performance` instead. It returns search terms and pages together for any dates, filtered and paged, straight from Search Console. Pass `fresh: true` to include the latest, not yet final, days.
+
 Content groups and tracked keywords can also be added by hand: **Insights → Search → Content groups → Add group**, and the tracked keywords panel on the same page.

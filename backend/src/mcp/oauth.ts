@@ -433,6 +433,23 @@ export function revokeConnectedApp(userId: string, grantId: string): boolean {
   return true;
 }
 
+/**
+ * Change what a connected app may do, without disconnecting it. Its current
+ * access token is ended, so its next request renews with the new access
+ * (an AI chat that's already open keeps the tool list it started with).
+ */
+export function updateConnectedAppScopes(userId: string, grantId: string, wanted: unknown): string[] | null {
+  const row = getDb().prepare('SELECT id FROM mcp_oauth_grants WHERE id=? AND user_id=? AND revoked_at IS NULL').get(grantId, userId);
+  if (!row) return null;
+  const scopes = new Set<McpScope>(['mcp:read']);
+  for (const s of Array.isArray(wanted) ? wanted.map(String) : []) if ((MCP_SCOPES as readonly string[]).includes(s)) scopes.add(s as McpScope);
+  const list = MCP_SCOPES.filter(s => scopes.has(s));
+  const db = getDb();
+  db.prepare('UPDATE mcp_oauth_grants SET scopes=? WHERE id=?').run(JSON.stringify(list), grantId);
+  db.prepare("UPDATE mcp_tokens SET revoked_at=datetime('now') WHERE oauth_grant_id=? AND revoked_at IS NULL").run(grantId);
+  return list;
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 const OAUTH_RATE_LIMIT = { config: { rateLimit: { max: parseInt(process.env.OAUTH_RATE_LIMIT_MAX ?? '30', 10), timeWindow: '1 minute' } } };
@@ -562,6 +579,15 @@ export function registerMcpOAuthApiRoutes(app: FastifyInstance, currentUser: (re
     if (!removed) return reply.status(404).send({ error: 'OAuth client not found.' });
     recordAuditEvent({ actorUserId: user.id, action: 'mcp.oauth.client_deleted', detail: { clientId: id } });
     return { ok: true };
+  });
+
+  app.patch('/api/oauth/apps/:id', async (req, reply) => {
+    const user = currentUser(req);
+    const id = (req.params as { id: string }).id;
+    const scopes = updateConnectedAppScopes(user.id, id, ((req.body ?? {}) as { scopes?: unknown }).scopes);
+    if (!scopes) return reply.status(404).send({ error: 'Connected app not found.' });
+    recordAuditEvent({ actorUserId: user.id, action: 'mcp.oauth.scopes_changed', detail: { grantId: id, scopes } });
+    return { ok: true, scopes };
   });
 
   app.delete('/api/oauth/apps/:id', async (req, reply) => {

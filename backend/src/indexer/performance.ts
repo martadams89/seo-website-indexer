@@ -120,6 +120,54 @@ export async function getGoogleDimension(
   }
 }
 
+export interface QueryPageOptions {
+  /** Last N days, unless start and end are given. */
+  days?: number; start?: string; end?: string;
+  /** Only search terms / pages containing this text. */
+  query?: string; page?: string;
+  limit?: number; startRow?: number;
+  /** Include the last couple of days, which Google is still finalising. */
+  fresh?: boolean;
+}
+
+/**
+ * Search terms and pages together, live from Search Console, for any dates:
+ * which pages rank for which terms (keyword cannibalisation, per-page term
+ * lists). Rows come most-clicked first; page through with startRow. Google
+ * leaves out very rare search terms, so the rows add up to less than the totals.
+ */
+export async function getGoogleQueryPages(site: Site, opts: QueryPageOptions = {}) {
+  if (!site.google_account_id) return { available: false, reason: 'No Google account linked to this site.', rows: [] };
+  let token: string;
+  try {
+    token = await getAccessTokenForAccount(site.google_account_id);
+  } catch (e) {
+    return { available: false, reason: `Google auth error: ${e instanceof Error ? e.message : e}`, rows: [] };
+  }
+  const range = opts.start && opts.end ? { startDate: opts.start, endDate: opts.end } : rangeDates(Math.max(1, Math.min(480, opts.days ?? 28)));
+  if (range.startDate > range.endDate) return { available: false, reason: 'start must be on or before end.', rows: [] };
+  const limit = Math.max(1, Math.min(5000, Math.round(opts.limit ?? 500)));
+  const startRow = Math.max(0, Math.round(opts.startRow ?? 0));
+  const filters = [
+    ...(opts.query?.trim() ? [{ dimension: 'query', operator: 'contains', expression: opts.query.trim() }] : []),
+    ...(opts.page?.trim() ? [{ dimension: 'page', operator: 'contains', expression: opts.page.trim() }] : []),
+  ];
+  try {
+    const rows = await gscQuery(token, site.gsc_url, {
+      ...range, dimensions: ['query', 'page'], rowLimit: limit, startRow, dataState: opts.fresh ? 'all' : 'final',
+      ...(filters.length ? { dimensionFilterGroups: [{ groupType: 'and', filters }] } : {}),
+    });
+    return {
+      available: true, start: range.startDate, end: range.endDate, data: opts.fresh ? 'all' : 'final',
+      rows: rows.map(r => ({ query: r.keys?.[0] ?? '', page: r.keys?.[1] ?? '', clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position })),
+      /** Pass as startRow for the next page; null when this was the last. */
+      next_start_row: rows.length === limit ? startRow + limit : null,
+    };
+  } catch (e) {
+    return { available: false, reason: e instanceof Error ? e.message : String(e), rows: [] };
+  }
+}
+
 export interface DailyQueryRow { date: string; query: string; clicks: number; impressions: number; position: number }
 
 // Per-day, per-query GSC rows — the raw material for query-position-over-time

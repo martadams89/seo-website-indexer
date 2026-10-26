@@ -22,8 +22,9 @@ import {
   type PhotoInput, type PostInput, type ProfileEdit, type ProfileView,
 } from './profile-rules.js';
 import type { ReplyFinding } from './rules.js';
+import { checkMediaSource } from './media-check.js';
 import {
-  getChange, getLocation, insertChange, listAllEnabledLocations, listChanges, locationStats, transitionChange, updateLocation,
+  findMediaChangeBySource, getChange, getLocation, insertChange, listAllEnabledLocations, listChanges, locationStats, transitionChange, updateLocation,
   type ChangeKind, type GoogleUpdates, type ProfileChange, type ReviewLocation,
 } from './store.js';
 
@@ -95,6 +96,8 @@ export async function getPosts(location: ReviewLocation, opts: { fresh?: boolean
 export interface PhotoView {
   name: string; category: string; url: string | null; thumbnail: string | null; description: string | null;
   created: string | null; views: number | null; width: number | null; height: number | null; format: string;
+  /** The address it was added from, when Google reports it. */
+  source: string | null;
 }
 
 function toPhotoView(m: MediaItem): PhotoView {
@@ -102,6 +105,7 @@ function toPhotoView(m: MediaItem): PhotoView {
     name: m.name ?? '', category: m.locationAssociation?.category ?? 'ADDITIONAL', url: m.googleUrl ?? null, thumbnail: m.thumbnailUrl ?? m.googleUrl ?? null,
     description: m.description ?? null, created: m.createTime ?? null, views: m.insights?.viewCount ? Number(m.insights.viewCount) : null,
     width: m.dimensions?.widthPixels ?? null, height: m.dimensions?.heightPixels ?? null, format: m.mediaFormat ?? 'PHOTO',
+    source: m.sourceUrl ?? null,
   };
 }
 
@@ -109,6 +113,19 @@ export async function getPhotos(location: ReviewLocation, opts: { fresh?: boolea
   const media = await cached(`${location.id}:photos`, !!opts.fresh, () => listMedia(connectionOf(location), parentOf(location)));
   const photos = media.items.map(toPhotoView).sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
   return { total: media.total ?? photos.length, photos };
+}
+
+/**
+ * Whether this address was already added to the location: through this app
+ * (published or waiting), or any other way when Google reports the address.
+ */
+export async function existingMedia(location: ReviewLocation, sourceUrl: string, photos?: PhotoView[]): Promise<{ via: 'app' | 'google'; change_id?: string; status?: string; added: string | null } | null> {
+  const change = findMediaChangeBySource(location.id, sourceUrl);
+  if (change) return { via: 'app', change_id: change.id, status: change.status, added: change.created_at };
+  // Fresh: a photo added minutes ago (here or with another tool) must count.
+  const list = photos ?? (await getPhotos(location, { fresh: true }).catch(() => null))?.photos ?? [];
+  const match = list.find(p => p.source === sourceUrl);
+  return match ? { via: 'google', added: match.created } : null;
 }
 
 /** The profile, its checklist, Google-suggested edits and what's waiting for approval. */
@@ -214,7 +231,14 @@ async function prepare(location: ReviewLocation, input: ChangeInput, source: 'da
       }
       case 'photo': {
         const photo = validatePhoto(input.photo);
-        return { payload: { photo }, summary: `${photo.category.toLowerCase().replace(/_/g, ' ')} photo from ${photo.sourceUrl}`, findings: source === 'mcp' ? evaluatePhoto(rules, photo) : [] };
+        // A link to a web page, a missing file or the wrong size fails here, with a reason, rather than at Google.
+        const check = await checkMediaSource(photo.sourceUrl, photo.mediaFormat);
+        const noun = photo.mediaFormat === 'VIDEO' ? 'video' : 'photo';
+        return {
+          payload: { photo: { ...photo, ...(check.bytes ? { bytes: check.bytes } : {}) } },
+          summary: `${photo.category.toLowerCase().replace(/_/g, ' ')} ${noun} from ${photo.sourceUrl}`,
+          findings: source === 'mcp' ? evaluatePhoto(rules, photo) : [],
+        };
       }
       case 'post_delete': {
         if (!String(input.post_name).startsWith(`${parent}/localPosts/`)) throw new ProfileInputError('That post doesn\'t belong to this location. Use a post name from the posts list.');
@@ -252,8 +276,8 @@ async function apply(change: ProfileChange, location: ReviewLocation): Promise<R
       forget(location.id);
       return { deleted: p.post_name };
     case 'photo': {
-      const photo = p.photo as { sourceUrl: string; category: PhotoCategory; description?: string };
-      const created = await createMedia(account, parent, photo);
+      const photo = p.photo as { sourceUrl: string; category: PhotoCategory; description?: string; mediaFormat?: 'PHOTO' | 'VIDEO' };
+      const created = await createMedia(account, parent, { sourceUrl: photo.sourceUrl, category: photo.category, description: photo.description, mediaFormat: photo.mediaFormat });
       forget(location.id);
       return { name: created.name ?? null, url: created.googleUrl ?? null };
     }
