@@ -65,7 +65,8 @@ export default function OAuthConsentPage() {
             <p className="consent-meta">
               Applies to {request.workspaces.length === 1 ? 'your workspace' : `all ${request.workspaces.length} workspaces you can access`}
               {request.workspaces.length ? ` (${request.workspaces.slice(0, 6).join(', ')}${request.workspaces.length > 6 ? '…' : ''})` : ''}.
-              Your own role in each workspace still limits what it can do. You can disconnect it any time under Governance &amp; usage.
+              Your own role in each workspace still limits what it can do. Tools for anything you leave unticked are hidden from the app;
+              you can change its access later (<b>Change access</b> under Connect an AI assistant) or disconnect it under Governance &amp; usage.
             </p>
             <div className="consent-actions">
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => decide(false)}>Deny</button>

@@ -530,15 +530,33 @@ export async function runTool(ctx: McpContext, name: string, args: Record<string
   return tool.handler(ctx, args);
 }
 
+/** What each write scope unlocks, for telling an assistant why tools are missing. */
+const SCOPE_ABILITY: Record<Exclude<McpScope, 'mcp:read'>, string> = {
+  'mcp:write': 'submit URLs for indexing, start indexing runs or refresh performance snapshots ("Run SEO actions")',
+  'ads:write': 'propose or apply Google Ads changes ("Manage Google Ads")',
+  'reviews:write': 'reply to Google reviews, or add Business Profile photos, videos, posts and profile edits ("Manage Google Business Profile")',
+};
+
+/** Server instructions, including what this connection can't do and how a person can allow it. */
+export function serverInstructions(ctx: Pick<McpContext, 'scopes'>): string {
+  const missing = (Object.keys(SCOPE_ABILITY) as Array<keyof typeof SCOPE_ABILITY>).filter(s => !ctx.scopes.includes(s));
+  return [
+    'Read and act on your SEO Website Indexer data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness and AI citations. Site ids come from list_sites.',
+    'Google Ads tools start with ads_. Start with ads_list_clients, then ads_get_client_brief for the client\'s budget, goals and guardrails. Use ads_get_resource_metadata before writing GAQL for ads_search/ads_query.',
+    'Every Google Ads change tool validates the change with Google and returns a change plan: apply "pending" plans with ads_apply_change; "needs_approval" plans wait for a person on the dashboard. Never try to split a change to get around a guardrail.',
+    'Google Business Profile tools start with reviews_ and business_. Add a day\'s photos and videos with business_add_media (it skips addresses already added).',
+    ...(missing.length ? [
+      `This connection was not given access to ${missing.map(s => SCOPE_ABILITY[s]).join('; or ')}, so those tools are hidden from it. `
+      + 'If the person asks for one of these, tell them: on the SEO Website Indexer dashboard, open Business Profile → Setup (or Google Ads → Setup), find this app under "Connect an AI assistant", click "Change access", tick it and save, then start a new chat. (Or disconnect and reconnect the connector and tick it on the consent screen.)',
+    ] : []),
+  ].join(' ');
+}
+
 /** Build a fully-wired MCP server exposing exactly the tools this token may use. */
 export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
     { name: 'seo-website-indexer', version: 'mcp-2' },
-    { instructions: [
-      'Read and act on your SEO Website Indexer data: sites, Search Console performance, URL inspection, indexing, hygiene, AI-agent readiness and AI citations. Site ids come from list_sites.',
-      'Google Ads tools start with ads_. Start with ads_list_clients, then ads_get_client_brief for the client\'s budget, goals and guardrails. Use ads_get_resource_metadata before writing GAQL for ads_search/ads_query.',
-      'Every Google Ads change tool validates the change with Google and returns a change plan: apply "pending" plans with ads_apply_change; "needs_approval" plans wait for a person on the dashboard. Never try to split a change to get around a guardrail.',
-    ].join(' ') },
+    { instructions: serverInstructions(ctx) },
   );
   for (const tool of toolsForContext(ctx)) {
     server.registerTool(

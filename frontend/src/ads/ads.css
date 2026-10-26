@@ -218,3 +218,9 @@
 .ads-cli-schedule > summary { color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer; }
 .ads-cli-schedule .mcp-code { margin-top: 8px; }
 .ads-connection-name { display: block; margin-top: 2px; }
+/* Connected AI apps: change what each may do */
+.automation-list .mcp-app-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; overflow: visible; white-space: nowrap; }
+.automation-list .mcp-scope-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+.automation-list .mcp-scope-edit label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.automation-list .mcp-scope-edit input { accent-color: var(--accent); }
+.automation-list .mcp-scope-actions { display: flex; gap: 6px; width: 100%; overflow: visible; }

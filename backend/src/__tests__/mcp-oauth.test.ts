@@ -118,6 +118,28 @@ describe('MCP OAuth', () => {
     expect((await tokenRequest({ grant_type: 'authorization_code', client_id: body.client_id, code, code_verifier: verifier })).json().error).toBe('invalid_grant');
   });
 
+  it('changes a connected app\'s access without reconnecting it', async () => {
+    const { body } = await register();
+    const first = (await tokenRequest({ grant_type: 'authorization_code', client_id: body.client_id, code: await codeFor(body.client_id, ['mcp:read']), code_verifier: verifier })).json() as { access_token: string; refresh_token: string };
+    const grant = oauth.listConnectedApps(userId).find(a => a.scopes.join() === 'mcp:read')!;
+    expect(oauth.updateConnectedAppScopes('someone-else', grant.id, ['reviews:write'])).toBeNull();
+    expect(oauth.updateConnectedAppScopes(userId, grant.id, ['reviews:write', 'not-a-scope'])).toEqual(['mcp:read', 'reviews:write']);
+    // The token it holds stops working, so its next request renews with the new access.
+    expect(tokens.authenticateMcpToken(first.access_token)).toBeNull();
+    const renewed = (await tokenRequest({ grant_type: 'refresh_token', client_id: body.client_id, refresh_token: first.refresh_token })).json() as { access_token: string; scope: string };
+    expect(renewed.scope).toBe('mcp:read reviews:write');
+    expect(tokens.authenticateMcpToken(renewed.access_token)!.scopes.sort()).toEqual(['mcp:read', 'reviews:write']);
+  });
+
+  it('tells an assistant which tools are hidden and how a person can allow them', async () => {
+    const { serverInstructions } = await import('../mcp/tools.js');
+    const readOnly = serverInstructions({ scopes: ['mcp:read'] });
+    expect(readOnly).toMatch(/reply to Google reviews, or add Business Profile photos, videos, posts/);
+    expect(readOnly).toMatch(/Change access/);
+    const full = serverInstructions({ scopes: ['mcp:read', 'mcp:write', 'ads:write', 'reviews:write'] });
+    expect(full).not.toMatch(/hidden/);
+  });
+
   it('rotates refresh tokens and revokes the whole grant', async () => {
     const { body } = await register();
     const first = (await tokenRequest({ grant_type: 'authorization_code', client_id: body.client_id, code: await codeFor(body.client_id, ['mcp:read']), code_verifier: verifier })).json() as { access_token: string; refresh_token: string };

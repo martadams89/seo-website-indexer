@@ -24,9 +24,26 @@ export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; re
     })
     .catch(e => setError(errorMessage(e))), []);
   const waitingChanges = changes.filter(c => c.status === 'needs_approval');
+  const waitingMedia = waitingChanges.filter(c => c.kind === 'photo');
+  const toast = useToast();
+  const [approvingAll, setApprovingAll] = useState(false);
   const changeHistory = changes.filter(c => c.status !== 'needs_approval').slice(0, 50);
   useEffect(() => { void load(); }, [load]);
   const changed = async () => { await Promise.all([load(), reload()]); };
+
+  /** A day's photos from an assistant can be dozens of items: publish them in one go. */
+  async function approveAllMedia() {
+    if (!confirm(`Publish all ${waitingMedia.length} photos and videos to Google?`)) return;
+    setApprovingAll(true);
+    let published = 0; const failed: string[] = [];
+    for (const c of waitingMedia) {
+      try { const r = await reviewsApi.approveChange(c.id); if (r.status === 'published') published++; else failed.push(r.error ?? c.summary); }
+      catch (e) { failed.push(errorMessage(e)); }
+    }
+    toast(failed.length ? 'error' : 'success', failed.length ? `Published ${published}; ${failed.length} failed: ${failed[0]}` : `Published ${published} to Google`);
+    setApprovingAll(false);
+    await changed();
+  }
 
   return (
     <div className="ads-setup">
@@ -39,7 +56,12 @@ export function ReviewsApprovals({ canManage, reload }: { canManage: boolean; re
         </div>
       </section>
       <section className="ops-card">
-        <div className="ops-card-head"><div><span className="eyebrow">Business Profile</span><h2>Profile edits, posts and photos waiting for you</h2></div><Store size={18} /></div>
+        <div className="ops-card-head">
+          <div><span className="eyebrow">Business Profile</span><h2>Profile edits, posts and photos waiting for you</h2></div>
+          {waitingMedia.length > 1
+            ? <button type="button" className="btn btn-primary btn-sm" disabled={!canManage || approvingAll} onClick={approveAllMedia}><CheckCheck size={13} /> {approvingAll ? 'Publishing…' : `Approve all ${waitingMedia.length} photos and videos`}</button>
+            : <Store size={18} />}
+        </div>
         <div className="review-list">
           {waitingChanges.map(change => <ChangeCard key={change.id} change={change} canManage={canManage} onDone={changed} />)}
           {!waitingChanges.length && <div className="ops-empty compact"><Check /><strong>Nothing waiting</strong><span>Profile changes an AI assistant can't publish on its own appear here.</span></div>}
@@ -99,7 +121,9 @@ const KIND_LABEL: Record<ProfileChange['kind'], string> = { profile: 'Profile ed
 export function ChangeCard({ change, canManage, onDone }: { change: ProfileChange; canManage: boolean; onDone: () => Promise<void> }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const photo = change.kind === 'photo' ? (change.payload.photo as { sourceUrl?: string } | undefined)?.sourceUrl : undefined;
+  const media = change.kind === 'photo' ? change.payload.photo as { sourceUrl?: string; mediaFormat?: string } | undefined : undefined;
+  const photo = media?.mediaFormat === 'VIDEO' ? undefined : media?.sourceUrl;
+  const video = media?.mediaFormat === 'VIDEO' ? media.sourceUrl : undefined;
   const postPhoto = change.kind === 'post' ? (change.payload.post as { media?: Array<{ sourceUrl?: string }> } | undefined)?.media?.[0]?.sourceUrl : undefined;
   const postText = change.kind === 'post' ? (change.payload.post as { summary?: string } | undefined)?.summary : undefined;
   const waiting = change.status === 'needs_approval';
@@ -116,10 +140,11 @@ export function ChangeCard({ change, canManage, onDone }: { change: ProfileChang
 
   return (
     <article className="review-card">
-      <header><span className="badge badge-info">{KIND_LABEL[change.kind]}</span>{waiting ? null : <span className={`badge badge-${STATUS[change.status].tone}`}>{STATUS[change.status].label}</span>}<small>{change.location_title ?? ''} · {when(change.created_at)}</small></header>
+      <header><span className="badge badge-info">{video ? 'New video' : KIND_LABEL[change.kind]}</span>{waiting ? null : <span className={`badge badge-${STATUS[change.status].tone}`}>{STATUS[change.status].label}</span>}<small>{change.location_title ?? ''} · {when(change.created_at)}</small></header>
       <p>{change.summary}</p>
       {postText && postText.length > 120 && <p className="muted">{postText}</p>}
       {(photo || postPhoto) && <img className="gbp-change-photo" src={photo ?? postPhoto} alt="Proposed" loading="lazy" />}
+      {video && <video className="gbp-change-photo" src={video} controls preload="metadata" aria-label="Proposed video" />}
       <div className="review-draft"><Bot size={13} /> {change.source === 'mcp' ? 'AI assistant' : 'Draft'}: {change.findings.map(f => f.message).join(' ') || 'Waiting for approval.'}{change.rationale ? ` Rationale: ${change.rationale}` : ''}</div>
       {change.error && <p className="ads-error-line">{change.error}</p>}
       {waiting && <div className="ads-row-actions">

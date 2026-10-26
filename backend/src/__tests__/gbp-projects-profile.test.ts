@@ -294,6 +294,49 @@ describe('Business Profile editing, posts and photos', () => {
     expect(logo.status).toBe('needs_approval');
   });
 
+  it('adds a batch of photos and videos, skipping repeats and explaining bad links', async () => {
+    m.store.updateLocation(loc().id, { profile_rules: { ...loc().profile_rules, photos: 'auto' } });
+    const ctx = ctxFor(owner.user.id);
+    const { __setMediaProbeForTests } = await import('../reviews/media-check.js');
+    __setMediaProbeForTests(async (url) => url.includes('page')
+      ? new Response(null, { status: 200, headers: { 'content-type': 'text/html' } })
+      : new Response(null, { status: 200, headers: { 'content-type': url.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg', 'content-length': '400000' } }));
+    try {
+      const batch = await m.tools.runTool(ctx, 'business_add_media', { location: loc().id, rationale: 'Today\'s jobs', items: [
+        { url: 'https://cdn.roof.example/job-1.jpg', category: 'AT_WORK' },
+        { url: 'https://cdn.roof.example/job-1.jpg', category: 'AT_WORK' },
+        { url: 'https://cdn.roof.example/van.mp4', category: 'AT_WORK', description: 'Ridge repair' },
+        { url: 'https://cdn.roof.example/post/page', category: 'AT_WORK' },
+        { url: 'https://roof.example/team.jpg', category: 'TEAMS' },
+      ] }) as { totals: Record<string, number>; items: Array<{ url: string; status: string; error?: string; via?: string }> };
+      expect(batch.totals).toMatchObject({ published: 2, skipped_duplicate: 2, invalid: 1 });
+      expect(batch.items.map(i => i.status)).toEqual(['published', 'skipped_duplicate', 'published', 'invalid', 'skipped_duplicate']);
+      expect(batch.items[3].error).toMatch(/web page/);
+      expect(batch.items[4].via).toBe('app'); // added by the earlier test
+      expect(calls.filter(c => c.method === 'POST' && c.url.endsWith('/media')).map(c => c.body).slice(-2)).toEqual([
+        { mediaFormat: 'PHOTO', locationAssociation: { category: 'AT_WORK' }, sourceUrl: 'https://cdn.roof.example/job-1.jpg' },
+        { mediaFormat: 'VIDEO', locationAssociation: { category: 'AT_WORK' }, sourceUrl: 'https://cdn.roof.example/van.mp4', description: 'Ridge repair' },
+      ]);
+
+      // Running the same batch again sends nothing.
+      const again = await m.tools.runTool(ctx, 'business_add_media', { location: loc().id, items: [{ url: 'https://cdn.roof.example/job-1.jpg' }, { url: 'https://cdn.roof.example/van.mp4' }] }) as { totals: Record<string, number> };
+      expect(again.totals.skipped_duplicate).toBe(2);
+      // Photos added some other way are recognised by the address Google reports.
+      media.unshift({ name: 'accounts/900/locations/333/media/porter', mediaFormat: 'PHOTO', sourceUrl: 'https://cdn.roof.example/porter.jpg', locationAssociation: { category: 'AT_WORK' } });
+      const single = await m.tools.runTool(ctx, 'business_add_photo', { location: loc().id, url: 'https://cdn.roof.example/porter.jpg', category: 'AT_WORK' }) as { status: string; via: string };
+      expect(single).toMatchObject({ status: 'skipped_duplicate', via: 'google' });
+    } finally {
+      __setMediaProbeForTests(null);
+    }
+  });
+
+  it('links an approval straight to the change in its workspace', async () => {
+    m.store.updateLocation(loc().id, { profile_rules: { ...loc().profile_rules, photos: 'approval' } });
+    const held = await m.tools.runTool(ctxFor(owner.user.id), 'business_add_photo', { location: loc().id, url: 'https://cdn.roof.example/held.jpg' }) as { status: string; change_id: string; next_step: string };
+    expect(held.status).toBe('needs_approval');
+    expect(held.next_step).toContain(`/w/${m.ws.workspaceSlug(loc().workspace_id)}/approve/business/${held.change_id}`);
+  });
+
   it('blocks everything when the location turns assistants off', async () => {
     m.store.updateLocation(loc().id, { profile_rules: { profile: 'off', posts: 'off', photos: 'off', alert_google_updates: true } });
     const ctx = ctxFor(owner.user.id);

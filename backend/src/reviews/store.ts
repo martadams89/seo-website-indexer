@@ -400,6 +400,13 @@ export function insertChange(input: Pick<ProfileChange, 'workspace_id' | 'locati
   return getChange(id)!;
 }
 
+/** The latest photo or video added (or waiting) from this address at this location, if any. */
+export function findMediaChangeBySource(locationId: string, sourceUrl: string): ProfileChange | null {
+  const row = getDb().prepare(`SELECT * FROM gbp_changes WHERE location_id=? AND kind='photo' AND json_extract(payload, '$.photo.sourceUrl')=?
+    AND status IN ('published','publishing','needs_approval') ORDER BY created_at DESC LIMIT 1`).get(locationId, sourceUrl) as ChangeRow | undefined;
+  return row ? toChange(row) : null;
+}
+
 export function getChange(id: string): ProfileChange | null {
   const row = getDb().prepare('SELECT * FROM gbp_changes WHERE id=?').get(id) as ChangeRow | undefined;
   return row ? toChange(row) : null;
