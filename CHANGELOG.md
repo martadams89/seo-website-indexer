@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.47.0](https://github.com/martadams89/seo-website-indexer/compare/v1.46.1...v1.47.0) (2026-10-26)
+
+
+### ✨ Features
+
+* approval notifications with deep links, WhatsApp and email lists; workspace in the URL; saved Google projects ([#522](https://github.com/martadams89/seo-website-indexer/issues/522)) ([98f5910](https://github.com/martadams89/seo-website-indexer/commit/98f5910d4881ade1313924db693e760c19eedcf8))
+
+
+### 🧹 Maintenance
+
+* **deps:** update renovatebot/github-action action to v46.3.10 ([#520](https://github.com/martadams89/seo-website-indexer/issues/520)) ([6a0231e](https://github.com/martadams89/seo-website-indexer/commit/6a0231e54e8ebfde23d41f0ab1f88114be421249))
+
 ## [1.46.1](https://github.com/martadams89/seo-website-indexer/compare/v1.46.0...v1.46.1) (2026-10-26)
 
 
