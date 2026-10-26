@@ -7,6 +7,7 @@ import { useWorkspace } from '../workspace/WorkspaceContext';
 import { skipSetup } from '../workspace/setupSkip';
 import { apiFetch } from '../api/client';
 import { GoogleConnectForm } from '../components/GoogleConnectForm';
+import { openGoogleConsent } from '../ads/googleConnect';
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
 
@@ -102,28 +103,9 @@ export default function SetupPage() {
     setDfError('');
     setDfLoading(true);
     try {
-      const { authorizationUrl } = await api.beginGoogleAuth(hasBuiltin ? {} : {
-        clientId: dfClientId.trim(), clientSecret: dfClientSecret.trim(),
-      });
-
-      // 4. Open in popup window
-      const width = 600;
-      const height = 700;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
-      
-      const popup = window.open(
-        authorizationUrl,
-        'google-auth',
-        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
-      );
-
-      if (!popup) {
-        throw new Error(
-          'Popup was blocked by your browser. Please allow popups for this site, or click the Google Authorization link below to authenticate.'
-        );
-      }
-
+      const mode = await openGoogleConsent(hasBuiltin ? {} : { clientId: dfClientId.trim(), clientSecret: dfClientSecret.trim() });
+      // With pop-ups blocked this tab is on its way to Google and comes back to the wizard afterwards.
+      if (mode === 'redirect') return;
       setStep('auth');
     } catch (e) {
       setDfError(String(e).replace('Error: ', ''));

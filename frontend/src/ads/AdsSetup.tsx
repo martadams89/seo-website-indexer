@@ -42,7 +42,8 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
   /** Reconnect, or add Google Ads to, an existing connection (it keeps its project and everything it has). */
   async function connect(accountId: string) {
     setBusy(accountId);
-    try { await openGoogleConsent({ accountId, ads: true }); }
+    const email = setup?.connections.find(c => c.id === accountId)?.email;
+    try { await openGoogleConsent({ accountId, ads: true, note: `Opening Google… choose ${email ?? 'the same Google account'} on the next screen.` }); }
     catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }

@@ -1,8 +1,50 @@
-// Open Google's consent screen in a popup. Used for new connections and to add
-// scopes (e.g. Google Ads) to an existing one without disconnecting it.
+// Google sign-in for every connection flow: new connections, reconnects, added
+// scopes and the one-off API switch-on.
+//
+// Browsers only allow a pop-up opened directly by the click, so the window
+// opens straight away and is pointed at Google once the server has built the
+// sign-in link. If pop-ups are blocked anyway, the sign-in continues in this
+// tab and Google's callback brings the person back here. Google always shows
+// its account chooser (the server never sends a login hint), so with several
+// Google accounts signed in you pick the one you mean every time.
 import { useEffect } from 'react';
 import { api } from '../api';
 import { apiFetch } from '../api/client';
+
+const POPUP_FEATURES = () => {
+  const width = 600;
+  const height = 720;
+  return `width=${width},height=${height},left=${window.screen.width / 2 - width / 2},top=${window.screen.height / 2 - height / 2},status=no,resizable=yes,scrollbars=yes`;
+};
+
+/** Where to come back to when the sign-in has to run in this tab. */
+const here = () => `${window.location.pathname}${window.location.search}`;
+
+/**
+ * Open a Google sign-in window during the click, then load `getUrl()` into it.
+ * Returns 'redirect' when pop-ups are blocked and this tab is going to Google.
+ */
+export async function openGoogleWindow(name: string, getUrl: () => Promise<string>, note = 'Opening Google…'): Promise<'popup' | 'redirect'> {
+  // Must run before any await, or the browser no longer sees it as the click's pop-up.
+  const popup = window.open('', name, POPUP_FEATURES());
+  if (popup) {
+    try {
+      popup.document.title = 'Google sign-in';
+      popup.document.body.style.cssText = 'font:14px system-ui,sans-serif;background:#12131a;color:#e2e8f0;display:grid;place-items:center;height:90vh;margin:0';
+      popup.document.body.textContent = note;
+    } catch { /* another origin already loaded in this named window */ }
+  }
+  let url: string;
+  try { url = await getUrl(); }
+  catch (e) { popup?.close(); throw e; }
+  if (popup && !popup.closed) {
+    popup.location.href = url;
+    popup.focus();
+    return 'popup';
+  }
+  window.location.assign(url);
+  return 'redirect';
+}
 
 export async function openGoogleConsent(options: {
   accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean; business?: boolean;
@@ -10,14 +52,12 @@ export async function openGoogleConsent(options: {
   only?: Array<'ads' | 'business'>;
   /** Sign a new Google user in through the OAuth client this existing connection uses. */
   projectFrom?: string;
-}): Promise<void> {
-  const { authorizationUrl } = await api.beginGoogleAuth(options);
-  const width = 600;
-  const height = 700;
-  const left = window.screen.width / 2 - width / 2;
-  const top = window.screen.height / 2 - height / 2;
-  const popup = window.open(authorizationUrl, 'google-auth', `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`);
-  if (!popup) throw new Error('Your browser blocked the Google sign-in popup. Allow popups for this site and try again.');
+  /** Shown while Google loads, e.g. which account to choose on a reconnect. */
+  note?: string;
+}): Promise<'popup' | 'redirect'> {
+  const { note, ...body } = options;
+  return openGoogleWindow('google-auth', async () => (await api.beginGoogleAuth({ ...body, returnTo: here() })).authorizationUrl,
+    note ?? 'Opening Google… choose the Google account to connect on the next screen.');
 }
 
 /**
@@ -27,13 +67,13 @@ export async function openGoogleConsent(options: {
  * would expire it every few hours).
  */
 export async function openApiEnable(accountId: string, services?: string[]): Promise<string[]> {
-  const started = await apiFetch<{ authorizationUrl: string; services: string[] }>('/api/auth/google/enable-apis/start', { method: 'POST', body: JSON.stringify({ accountId, services }) });
-  const { authorizationUrl } = started;
-  const width = 600;
-  const height = 700;
-  const popup = window.open(authorizationUrl, 'google-enable-apis', `width=${width},height=${height},left=${window.screen.width / 2 - width / 2},top=${window.screen.height / 2 - height / 2},status=no,resizable=yes,scrollbars=yes`);
-  if (!popup) throw new Error('Your browser blocked the Google sign-in popup. Allow popups for this site and try again.');
-  return started.services;
+  let enabling: string[] = services ?? [];
+  await openGoogleWindow('google-enable-apis', async () => {
+    const started = await apiFetch<{ authorizationUrl: string; services: string[] }>('/api/auth/google/enable-apis/start', { method: 'POST', body: JSON.stringify({ accountId, services, returnTo: here() }) });
+    enabling = started.services;
+    return started.authorizationUrl;
+  }, 'Opening Google… choose a Google account that can manage this Cloud project.');
+  return enabling;
 }
 
 /** Run `onDone` when the one-off API enable popup reports back. */

@@ -135,7 +135,9 @@ describe('one-off API enable sign-in', () => {
     }));
     expect(url.searchParams.get('scope')).toBe(m.oauth.CLOUD_PLATFORM_SCOPE);
     expect(url.searchParams.get('access_type')).toBe('online');
-    expect(url.searchParams.get('login_hint')).toBe(acc.email);
+    // Any Google user with rights on the project can do this, so Google's chooser decides, not a hint.
+    expect(url.searchParams.has('login_hint')).toBe(false);
+    expect(url.searchParams.get('prompt')).toContain('select_account');
     const pending = m.oauth.consumeGoogleOAuthState(url.searchParams.get('state')!);
     expect(pending?.purpose).toBe('enable_apis');
     expect(pending?.payload).toEqual({ services: ['googleads.googleapis.com'], accountId: acc.id });

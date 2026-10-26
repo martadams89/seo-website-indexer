@@ -102,6 +102,8 @@ Google publishes no read-only Ads scope, so what may change is decided by the ap
 
 `webmasters` is deliberately not read-only: the application reads Search Console data, submits sitemaps and performs supported inspection/submission actions. `indexing` is used only for sites that opt in to Indexing API recrawl requests. The Google identity must be a verified **owner** of the Search Console property for those calls. Accounts connected before this scope was added keep working for everything else; reconnect them to use the Indexing API. The optional Google API auto-configuration flow also asks for `cloud-platform`; normal day-to-day Search Console and GA4 use does not need that broader scope.
 
+Every Google sign-in asks Google for its account chooser (`prompt=select_account consent`) and sends no `login_hint`, so with several Google accounts signed in you choose each time. A reconnect checks that the chosen account is the one being reconnected and changes nothing if it isn't.
+
 **Settings → Google Accounts** checks each connection against what uses it. Missing scopes get an **Update permissions** button (one consent click that keeps the current grant). APIs Google reports as disabled get a **Switch them on for me** button: a separate one-off sign-in asks for `cloud-platform` with an online-only token, enables the APIs through Service Usage and stores nothing, so the saved connection never carries the Cloud scope. The Google user needs `serviceusage.services.enable` on the project (Service Usage Admin, Editor or Owner).
 
 ### Create the OAuth client

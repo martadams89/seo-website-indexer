@@ -52,7 +52,7 @@ export function GoogleHealth({ canManage, onChanged }: { canManage: boolean; onC
     setBusy(`scopes:${h.id}`);
     // A limited (Ads- or Business-Profile-only) connection that a site now uses needs the full set of scopes.
     const needsCore = h.missing_scopes.some(m => !m.scope.endsWith('/adwords') && !m.scope.endsWith('/business.manage'));
-    try { await openGoogleConsent({ accountId: h.id, ads: h.reconnect_with.ads, business: h.reconnect_with.business, ...(needsCore ? { only: [] } : {}) }); }
+    try { await openGoogleConsent({ accountId: h.id, ads: h.reconnect_with.ads, business: h.reconnect_with.business, ...(needsCore ? { only: [] } : {}), note: `Opening Google… choose ${h.email ?? 'the same Google account'} on the next screen.` }); }
     catch (e) { setMessage({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
     setBusy(null);
   }

@@ -167,15 +167,36 @@ export interface PendingGoogleOAuth {
   redirectUri: string;
   /** 'connect' stores the connection; 'enable_apis' only switches APIs on and keeps nothing. */
   purpose: 'connect' | 'enable_apis';
-  payload: { services?: string[]; accountId?: string } | null;
+  payload: {
+    services?: string[];
+    accountId?: string;
+    /** A reconnect: the Google account it must come back as. */
+    expectEmail?: string;
+    /** Where to send the person back to when the sign-in ran in the same tab (pop-ups blocked). */
+    returnTo?: string;
+  } | null;
 }
+
+/** Only same-site paths are accepted as somewhere to return to after a same-tab sign-in. */
+export function safeReturnTo(value: unknown): string | undefined {
+  const path = typeof value === 'string' ? value.trim() : '';
+  // Plain URL characters only: no scheme, no protocol-relative "//", no quotes or angle brackets.
+  return /^\/(?![/\\])[\w\-./?=&%#:@+,~]*$/.test(path) && path.length <= 500 ? path : undefined;
+}
+
+// Always show Google's account chooser. People run several Google accounts in
+// one browser, and a hint or an existing session must never decide for them.
+const ACCOUNT_CHOOSER = 'select_account consent';
 
 /** Create a concurrency-safe, single-use OAuth handshake and authorization URL. */
 export function createGoogleOAuthAuthorization(opts: {
   userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
-  clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean; business?: boolean;
+  clientId?: string; clientSecret?: string; ads?: boolean; business?: boolean;
   /** Ask only for these products (plus the email that names the connection); empty or omitted means a full connection. */
   only?: LimitedProduct[] | null;
+  /** A reconnect: refuse the sign-in if a different Google account is chosen. */
+  expectEmail?: string | null;
+  returnTo?: string | null;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -184,10 +205,12 @@ export function createGoogleOAuthAuthorization(opts: {
   const expires = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
   const db = getDb();
   db.prepare("DELETE FROM google_oauth_states WHERE julianday(expires_at) < julianday('now')").run();
+  const payload = { ...(opts.expectEmail ? { expectEmail: opts.expectEmail } : {}), ...(safeReturnTo(opts.returnTo) ? { returnTo: safeReturnTo(opts.returnTo) } : {}) };
   db.prepare(`
-    INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
-    VALUES(?,?,?,?,?,?,?)
-  `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
+    INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at, purpose, payload)
+    VALUES(?,?,?,?,?,?,?,?,?)
+  `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires, 'connect',
+    Object.keys(payload).length ? JSON.stringify(payload) : null);
   // A limited connection that is asked for another product keeps its limit and adds that product.
   const only = [...new Set([...(opts.only ?? []), ...(opts.only?.length && opts.ads ? ['ads'] : []), ...(opts.only?.length && opts.business ? ['business'] : [])])]
     .filter((p): p is LimitedProduct => p === 'ads' || p === 'business');
@@ -201,7 +224,7 @@ export function createGoogleOAuthAuthorization(opts: {
     response_type: 'code',
     scope: scopes,
     access_type: 'offline',
-    prompt: 'select_account consent',
+    prompt: ACCOUNT_CHOOSER,
     // No include_granted_scopes: every scope the app needs is requested
     // explicitly above (reconnects carry Ads and Business Profile forward), so incremental auth
     // would only add scopes the user did NOT ask for this time. In particular
@@ -210,7 +233,8 @@ export function createGoogleOAuthAuthorization(opts: {
     // session control (forced reauth every few hours).
     state,
   });
-  if (opts.loginHint) params.set('login_hint', opts.loginHint);
+  // No login_hint, even on a reconnect: Google can use it to skip the chooser.
+  // The callback checks a reconnect came back as the right account instead.
   return `${GOOGLE_AUTHORIZE_URL}?${params.toString()}`;
 }
 
@@ -248,7 +272,7 @@ export function consumeGoogleOAuthState(state: string): PendingGoogleOAuth | nul
  * session-control policy can't start expiring it every few hours.
  */
 export function createApiEnableAuthorization(opts: {
-  userId: string; workspaceId: string; redirectUri: string; account: GoogleAccount; services: string[];
+  userId: string; workspaceId: string; redirectUri: string; account: GoogleAccount; services: string[]; returnTo?: string | null;
 }): string {
   if (!opts.account.client_id || !opts.account.client_secret) throw new Error('This Google connection has no OAuth client to enable APIs with.');
   const state = randomBytes(32).toString('base64url');
@@ -259,17 +283,17 @@ export function createApiEnableAuthorization(opts: {
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at, purpose, payload)
     VALUES(?,?,?,?,?,?,?,?,?)
   `).run(hashState(state), opts.userId, opts.workspaceId, opts.account.client_id, encrypt(opts.account.client_secret), opts.redirectUri, expires,
-    'enable_apis', JSON.stringify({ services: opts.services, accountId: opts.account.id }));
+    'enable_apis', JSON.stringify({ services: opts.services, accountId: opts.account.id, ...(safeReturnTo(opts.returnTo) ? { returnTo: safeReturnTo(opts.returnTo) } : {}) }));
   const params = new URLSearchParams({
     client_id: opts.account.client_id,
     redirect_uri: opts.redirectUri,
     response_type: 'code',
     scope: CLOUD_PLATFORM_SCOPE,
     access_type: 'online',
-    prompt: 'consent',
+    // Any Google user with Service Usage rights on the project can do this, so let them pick.
+    prompt: ACCOUNT_CHOOSER,
     state,
   });
-  if (opts.account.email) params.set('login_hint', opts.account.email);
   return `${GOOGLE_AUTHORIZE_URL}?${params.toString()}`;
 }
 
@@ -322,7 +346,8 @@ export function connectionIdFor(email: string, clientId: string): string {
 export async function exchangeCodeForTokens(
   code: string, redirectUri: string, workspaceId?: string | null, ownerUserId?: string | null,
   credentials?: { clientId: string; clientSecret: string },
-): Promise<string> {
+  opts: { expectEmail?: string | null } = {},
+): Promise<{ accessToken: string; accountId: string; email: string }> {
   const clientId     = credentials?.clientId || _tempClientId || BUILTIN_CLIENT_ID;
   const clientSecret = credentials?.clientSecret || _tempClientSecret || BUILTIN_CLIENT_SECRET;
 
@@ -371,6 +396,13 @@ export async function exchangeCodeForTokens(
   
   // Fetch Google email address to identify account
   const email = await fetchUserEmail(data.access_token);
+  // A reconnect shows the account chooser, so the wrong account can be picked. Change nothing then.
+  if (opts.expectEmail && email.toLowerCase() !== opts.expectEmail.toLowerCase()) {
+    throw new Error(
+      `You chose ${email} on Google's screen, but this was a reconnect for ${opts.expectEmail}, so nothing was changed. `
+      + `Try again and choose ${opts.expectEmail}, or use "Connect account" to add ${email} as its own connection.`
+    );
+  }
 
   // Reject if this Google account already belongs to a different app user.
   // Without this, the upsert below would silently overwrite that tenant's
@@ -444,7 +476,7 @@ export async function exchangeCodeForTokens(
   _tempClientId = null;
   _tempClientSecret = null;
 
-  return data.access_token;
+  return { accessToken: data.access_token, accountId: id, email };
 }
 
 // The project that owns the OAuth client is encoded in the numeric prefix of

@@ -5,6 +5,7 @@ import { useApp } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { GoogleHealth } from '../components/GoogleHealth';
 import { GoogleConnectForm } from '../components/GoogleConnectForm';
+import { openGoogleConsent } from '../ads/googleConnect';
 
 const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 const hasAds = (acc: GoogleAccount) => !!acc.granted_scopes?.split(' ').includes(ADS_SCOPE);
@@ -62,22 +63,8 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
     setReconnectingId(reconnect.id);
     try {
       const ads = opts.ads ?? hasAds(reconnect);
-      const { authorizationUrl } = await api.beginGoogleAuth({ accountId: reconnect.id, ads });
-
-      const width = 600;
-      const height = 700;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
-      
-      const popup = window.open(
-        authorizationUrl,
-        'google-auth',
-        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
-      );
-
-      if (!popup) {
-        throw new Error('Popup was blocked by your browser. Please allow popups for this site.');
-      }
+      // Google shows its account chooser; the callback refuses a different account than this one.
+      await openGoogleConsent({ accountId: reconnect.id, ads, note: `Opening Google… choose ${reconnect.email ?? 'the same Google account'} on the next screen.` });
     } catch (e) {
       setConnectError(String(e).replace('Error: ', ''));
     }
