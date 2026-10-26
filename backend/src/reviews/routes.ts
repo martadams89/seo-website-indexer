@@ -131,8 +131,8 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
 
   // ── Profile, posts and photos ──────────────────────────────────────────────
   const fresh = (req: FastifyRequest) => ['1', 'true'].includes(String((req.query as { fresh?: string }).fresh ?? ''));
-  const change = async (req: FastifyRequest, loc: ReviewLocation, input: ChangeInput) => {
-    const result = await submitChange({ location: loc, change: input, user: actor(req), source: 'dashboard' });
+  const change = async (req: FastifyRequest, loc: ReviewLocation, input: ChangeInput, publishAt?: string | null) => {
+    const result = await submitChange({ location: loc, change: input, user: actor(req), source: 'dashboard', publishAt });
     recordAuditEvent({ actorUserId: actor(req).id, workspaceId: loc.workspace_id, action: `google_business.${input.kind}`, detail: { locationId: loc.id, changeId: result.id, status: result.status, summary: result.summary } });
     if (result.status === 'failed') throw new ReviewsApiError(result.error ?? 'Google refused the change.', 'UNKNOWN');
     return result;
@@ -163,7 +163,9 @@ export function registerReviewsRoutes(app: FastifyInstance): void {
 
   app.post('/api/reviews/locations/:id/posts', handle(async (req) => {
     const loc = locationInWorkspace(req, (req.params as { id: string }).id);
-    return change(req, loc, { kind: 'post', post: (req.body ?? {}) as PostInput });
+    // publishAt (optional): hold the post and publish it then.
+    const { publishAt, ...post } = (req.body ?? {}) as PostInput & { publishAt?: string | null };
+    return change(req, loc, { kind: 'post', post }, publishAt);
   }));
 
   app.delete('/api/reviews/locations/:id/posts', handle(async (req) => {

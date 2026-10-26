@@ -361,7 +361,7 @@ export function supersedeOpenPlans(reviewId: string, exceptId: string): void {
 // ── Profile, post and photo changes ──────────────────────────────────────────
 
 export type ChangeKind = 'profile' | 'post' | 'post_delete' | 'photo' | 'photo_delete';
-export type ChangeStatus = 'needs_approval' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
+export type ChangeStatus = 'needs_approval' | 'scheduled' | 'blocked' | 'publishing' | 'published' | 'rejected' | 'failed';
 
 /**
  * A change to a Business Profile made through the app: profile fields, a new
@@ -379,6 +379,8 @@ export interface ProfileChange {
   source: 'dashboard' | 'mcp';
   created_by: string | null;
   status: ChangeStatus;
+  /** When a scheduled post goes out (UTC ISO); null publishes as soon as it's allowed to. */
+  publish_at: string | null;
   findings: ReplyFinding[];
   decided_by: string | null;
   decided_at: string | null;
@@ -391,12 +393,12 @@ export interface ProfileChange {
 type ChangeRow = Omit<ProfileChange, 'payload' | 'findings' | 'result'> & { payload: string; findings: string; result: string | null };
 const toChange = (row: ChangeRow): ProfileChange => ({ ...row, payload: parse(row.payload, {}), findings: parse(row.findings, []), result: parse(row.result, null) });
 
-export function insertChange(input: Pick<ProfileChange, 'workspace_id' | 'location_id' | 'kind' | 'payload' | 'summary' | 'rationale' | 'source' | 'created_by' | 'status' | 'findings'>): ProfileChange {
+export function insertChange(input: Pick<ProfileChange, 'workspace_id' | 'location_id' | 'kind' | 'payload' | 'summary' | 'rationale' | 'source' | 'created_by' | 'status' | 'findings'> & { publish_at?: string | null }): ProfileChange {
   const id = randomUUID();
-  getDb().prepare(`INSERT INTO gbp_changes(id, workspace_id, location_id, kind, payload, summary, rationale, source, created_by, status, findings)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+  getDb().prepare(`INSERT INTO gbp_changes(id, workspace_id, location_id, kind, payload, summary, rationale, source, created_by, status, findings, publish_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     id, input.workspace_id, input.location_id, input.kind, JSON.stringify(input.payload), input.summary, input.rationale, input.source, input.created_by,
-    input.status, JSON.stringify(input.findings));
+    input.status, JSON.stringify(input.findings), input.publish_at ?? null);
   return getChange(id)!;
 }
 
@@ -435,6 +437,12 @@ export function transitionChange(id: string, from: ChangeStatus[], to: ChangeSta
   if (patch.result !== undefined) { sets.push('result=?'); values.push(patch.result === null ? null : JSON.stringify(patch.result)); }
   if (patch.published) sets.push("published_at=datetime('now')");
   return getDb().prepare(`UPDATE gbp_changes SET ${sets.join(', ')} WHERE id=? AND status IN (${from.map(() => '?').join(',')})`).run(...values, id, ...from).changes > 0;
+}
+
+/** Scheduled changes whose time has come, oldest first. */
+export function dueScheduledChanges(now = new Date(), limit = 20): ProfileChange[] {
+  return (getDb().prepare("SELECT * FROM gbp_changes WHERE status='scheduled' AND publish_at <= ? ORDER BY publish_at, rowid LIMIT ?")
+    .all(now.toISOString(), limit) as ChangeRow[]).map(toChange);
 }
 
 export function countChanges(locationId: string, status: ChangeStatus): number {

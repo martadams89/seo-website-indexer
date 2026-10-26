@@ -120,21 +120,33 @@ export async function getGoogleDimension(
   }
 }
 
+export const GSC_DIMENSIONS = ['query', 'page', 'date', 'country', 'device', 'searchAppearance'] as const;
+export type GscDimension = (typeof GSC_DIMENSIONS)[number];
+export const GSC_SEARCH_TYPES = ['web', 'image', 'video', 'news', 'discover', 'googleNews'] as const;
+
 export interface QueryPageOptions {
   /** Last N days, unless start and end are given. */
   days?: number; start?: string; end?: string;
+  /** What to break the numbers down by (default search term + page); [] gives the site's totals. */
+  dimensions?: GscDimension[];
   /** Only search terms / pages containing this text. */
   query?: string; page?: string;
+  /** Only this country (ISO 3166-1 alpha-3, e.g. "gbr") or device (desktop, mobile, tablet). */
+  country?: string; device?: string;
+  /** Search results type (default web). */
+  searchType?: (typeof GSC_SEARCH_TYPES)[number];
   limit?: number; startRow?: number;
   /** Include the last couple of days, which Google is still finalising. */
   fresh?: boolean;
 }
 
 /**
- * Search terms and pages together, live from Search Console, for any dates:
- * which pages rank for which terms (keyword cannibalisation, per-page term
- * lists). Rows come most-clicked first; page through with startRow. Google
- * leaves out very rare search terms, so the rows add up to less than the totals.
+ * Search Console performance, live from Google, for any dates and any
+ * breakdown: search terms and pages together (the default), or by page, by
+ * search term, by day, by country or device, any mix of them, or none for the
+ * site's totals. Rows come most-clicked first (by date when date is one of the
+ * dimensions); page through with startRow. Google leaves out very rare search
+ * terms from breakdowns that include them, so those rows add up to less than the totals.
  */
 export async function getGoogleQueryPages(site: Site, opts: QueryPageOptions = {}) {
   if (!site.google_account_id) return { available: false, reason: 'No Google account linked to this site.', rows: [] };
@@ -146,20 +158,30 @@ export async function getGoogleQueryPages(site: Site, opts: QueryPageOptions = {
   }
   const range = opts.start && opts.end ? { startDate: opts.start, endDate: opts.end } : rangeDates(Math.max(1, Math.min(480, opts.days ?? 28)));
   if (range.startDate > range.endDate) return { available: false, reason: 'start must be on or before end.', rows: [] };
+  const dimensions = [...new Set(opts.dimensions ?? ['query', 'page'])].filter((d): d is GscDimension => (GSC_DIMENSIONS as readonly string[]).includes(d));
+  if (dimensions.includes('searchAppearance') && dimensions.length > 1) {
+    return { available: false, reason: 'Google only breaks searchAppearance down on its own: ask for ["searchAppearance"] by itself.', rows: [] };
+  }
   const limit = Math.max(1, Math.min(5000, Math.round(opts.limit ?? 500)));
   const startRow = Math.max(0, Math.round(opts.startRow ?? 0));
   const filters = [
     ...(opts.query?.trim() ? [{ dimension: 'query', operator: 'contains', expression: opts.query.trim() }] : []),
     ...(opts.page?.trim() ? [{ dimension: 'page', operator: 'contains', expression: opts.page.trim() }] : []),
+    ...(opts.country?.trim() ? [{ dimension: 'country', operator: 'equals', expression: opts.country.trim().toLowerCase() }] : []),
+    ...(opts.device?.trim() ? [{ dimension: 'device', operator: 'equals', expression: opts.device.trim().toUpperCase() }] : []),
   ];
   try {
     const rows = await gscQuery(token, site.gsc_url, {
-      ...range, dimensions: ['query', 'page'], rowLimit: limit, startRow, dataState: opts.fresh ? 'all' : 'final',
+      ...range, dimensions, rowLimit: limit, startRow, dataState: opts.fresh ? 'all' : 'final',
+      ...(opts.searchType && opts.searchType !== 'web' ? { type: opts.searchType } : {}),
       ...(filters.length ? { dimensionFilterGroups: [{ groupType: 'and', filters }] } : {}),
     });
     return {
-      available: true, start: range.startDate, end: range.endDate, data: opts.fresh ? 'all' : 'final',
-      rows: rows.map(r => ({ query: r.keys?.[0] ?? '', page: r.keys?.[1] ?? '', clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position })),
+      available: true, start: range.startDate, end: range.endDate, data: opts.fresh ? 'all' : 'final', dimensions,
+      rows: rows.map(r => ({
+        ...Object.fromEntries(dimensions.map((d, i) => [d, r.keys?.[i] ?? ''])),
+        clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position,
+      })),
       /** Pass as startRow for the next page; null when this was the last. */
       next_start_row: rows.length === limit ? startRow + limit : null,
     };

@@ -24,7 +24,7 @@ import {
 import type { ReplyFinding } from './rules.js';
 import { checkMediaSource } from './media-check.js';
 import {
-  findMediaChangeBySource, getChange, getLocation, insertChange, listAllEnabledLocations, listChanges, locationStats, transitionChange, updateLocation,
+  dueScheduledChanges, findMediaChangeBySource, getChange, getLocation, insertChange, listAllEnabledLocations, listChanges, locationStats, transitionChange, updateLocation,
   type ChangeKind, type GoogleUpdates, type ProfileChange, type ReviewLocation,
 } from './store.js';
 
@@ -300,14 +300,35 @@ async function publish(change: ProfileChange, location: ReviewLocation): Promise
   return getChange(change.id)!;
 }
 
+const MAX_SCHEDULE_MS = 365 * 86_400_000;
+
+/**
+ * When to publish a post, as a UTC ISO time; null for straight away. Google's
+ * API has no scheduling, so the server holds the post and publishes it then.
+ */
+export function schedulePublishAt(value: unknown, now = Date.now()): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const at = new Date(String(value));
+  if (Number.isNaN(at.getTime())) throw new ProfileInputError('The publish time isn\'t a valid date and time. Use ISO 8601 with a time zone, e.g. 2026-11-03T09:00:00+00:00.');
+  // A minute's grace for clocks and slow forms: anything earlier is a mistake, not "now".
+  if (at.getTime() < now - 60_000) throw new ProfileInputError('That publish time has already passed. Leave it out to publish now.');
+  if (at.getTime() > now + MAX_SCHEDULE_MS) throw new ProfileInputError('Posts can be scheduled up to a year ahead.');
+  return at.getTime() <= now + 60_000 ? null : at.toISOString();
+}
+
 /**
  * Make a change to a location's Business Profile. A person on the dashboard
  * publishes straight away; an assistant's change goes through the location's
  * profile rules. `publish: false` always leaves it waiting for approval.
+ * A post with `publishAt` waits until then (after approval, if it needs one).
  */
 export async function submitChange(input: {
   location: ReviewLocation; change: ChangeInput; user: User; source: 'dashboard' | 'mcp'; rationale?: string | null; publish?: boolean;
+  publishAt?: string | null;
 }): Promise<ProfileChange> {
+  let publishAt: string | null;
+  try { publishAt = schedulePublishAt(input.publishAt); } catch (e) { inputError(e); }
+  if (publishAt && input.change.kind !== 'post') inputError(new ProfileInputError('Only posts can be scheduled.'));
   const { payload, summary, findings: found } = await prepare(input.location, input.change, input.source);
   let findings = found;
   if (input.source === 'mcp' && input.publish === false && !findings.some(f => f.severity === 'blocked')) {
@@ -317,7 +338,7 @@ export async function submitChange(input: {
   const change = insertChange({
     workspace_id: input.location.workspace_id, location_id: input.location.id, kind: input.change.kind as ChangeKind, payload, summary,
     rationale: input.rationale?.trim().slice(0, 2000) || null, source: input.source, created_by: input.user.id, findings,
-    status: decision === 'publish' ? 'publishing' : decision,
+    status: decision === 'publish' ? (publishAt ? 'scheduled' : 'publishing') : decision, publish_at: publishAt,
   });
   if (decision === 'needs_approval' && input.source === 'mcp') {
     const kind: Record<ChangeKind, string> = { profile: 'Profile edit', post: 'New post', post_delete: 'Delete a post', photo: 'New photo', photo_delete: 'Delete a photo' };
@@ -327,8 +348,29 @@ export async function submitChange(input: {
       path: `/approve/business/${change.id}`,
     });
   }
-  if (decision !== 'publish') return change;
+  if (decision !== 'publish' || change.status === 'scheduled') return change;
   return publish(change, input.location);
+}
+
+/** Publish scheduled posts whose time has come (run every minute). Returns how many were tried. */
+export async function publishDueScheduledChanges(now = new Date()): Promise<number> {
+  const due = dueScheduledChanges(now);
+  for (const change of due) {
+    // Claim it first, so two scheduler ticks never publish the same post twice.
+    if (!transitionChange(change.id, ['scheduled'], 'publishing')) continue;
+    const location = getLocation(change.location_id);
+    if (!location?.enabled) {
+      transitionChange(change.id, ['publishing'], 'failed', { error: location ? 'The location is paused, so the scheduled post wasn\'t published.' : 'The location no longer exists.' });
+      continue;
+    }
+    const result = await publish(getChange(change.id)!, location);
+    if (result.status === 'failed' && notificationEventEnabled(location.workspace_id, 'profile_alerts')) {
+      const url = workspaceLink(location.workspace_id, `/approve/business/${change.id}`);
+      void sendWorkspaceNotification(location.workspace_id, `A scheduled post didn't publish — ${location.title ?? location.location_name}`,
+        `${change.summary}\n\nGoogle said: ${result.error ?? 'unknown error'}`, 'profile_alerts', { links: url ? [{ label: 'Open the post', url }] : [] }).catch(() => false);
+    }
+  }
+  return due.length;
 }
 
 export async function approveChange(id: string, user: User): Promise<ProfileChange> {
@@ -336,16 +378,20 @@ export async function approveChange(id: string, user: User): Promise<ProfileChan
   if (!change) throw new ReviewsApiError('Change not found.', 'NOT_FOUND');
   const location = getLocation(change.location_id);
   if (!location) throw new ReviewsApiError('The location for this change no longer exists.', 'NOT_FOUND');
-  if (!transitionChange(change.id, ['needs_approval'], 'publishing', { decided_by: user.id })) {
+  // An approved post with a time still to come waits for it.
+  const later = !!change.publish_at && new Date(change.publish_at).getTime() > Date.now() + 60_000;
+  if (!transitionChange(change.id, ['needs_approval'], later ? 'scheduled' : 'publishing', { decided_by: user.id })) {
     throw new ReviewsApiError(`This change is ${change.status.replace('_', ' ')} and can no longer be approved.`, 'INVALID_REQUEST');
   }
+  if (later) return getChange(change.id)!;
   return publish(getChange(change.id)!, location);
 }
 
 export function rejectChange(id: string, user: User): ProfileChange {
   const change = getChange(id);
   if (!change) throw new ReviewsApiError('Change not found.', 'NOT_FOUND');
-  if (!transitionChange(change.id, ['needs_approval'], 'rejected', { decided_by: user.id })) {
+  // Rejecting a scheduled post cancels it before it goes out.
+  if (!transitionChange(change.id, ['needs_approval', 'scheduled'], 'rejected', { decided_by: user.id })) {
     throw new ReviewsApiError(`This change is ${change.status.replace('_', ' ')} and can no longer be rejected.`, 'INVALID_REQUEST');
   }
   return getChange(change.id)!;

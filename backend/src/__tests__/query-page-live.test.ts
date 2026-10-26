@@ -84,6 +84,36 @@ describe('get_query_page_performance', () => {
     expect(bodies[0]).not.toHaveProperty('dimensionFilterGroups');
   });
 
+  it('breaks the numbers down by the dimensions asked for, or gives totals', async () => {
+    let bodies = stubSearchConsole([
+      { keys: ['2026-10-01'], clicks: 70, impressions: 11000, ctr: 0.0064, position: 12.1 },
+      { keys: ['2026-10-02'], clicks: 78, impressions: 11758, ctr: 0.0066, position: 11.9 },
+    ]);
+    const byDay = await m.tools.runTool(ctx, 'get_query_page_performance', { siteId, dimensions: ['date'], start: '2026-10-01', end: '2026-10-02' }) as { dimensions: string[]; rows: Array<Record<string, unknown>> };
+    expect(byDay.dimensions).toEqual(['date']);
+    expect(byDay.rows[1]).toEqual({ date: '2026-10-02', clicks: 78, impressions: 11758, ctr: 0.0066, position: 11.9 });
+    expect(bodies[0]).toMatchObject({ dimensions: ['date'] });
+
+    bodies = stubSearchConsole([{ keys: ['https://roof.example/leeds', 'gbr', 'MOBILE'], clicks: 9, impressions: 120, ctr: 0.075, position: 4 }]);
+    const mixed = await m.tools.runTool(ctx, 'get_query_page_performance', { siteId, dimensions: ['page', 'country', 'device'], country: 'GBR', device: 'mobile', searchType: 'image' }) as { rows: Array<Record<string, unknown>> };
+    expect(mixed.rows[0]).toMatchObject({ page: 'https://roof.example/leeds', country: 'gbr', device: 'MOBILE', clicks: 9 });
+    expect(bodies[0]).toMatchObject({
+      dimensions: ['page', 'country', 'device'], type: 'image',
+      dimensionFilterGroups: [{ groupType: 'and', filters: [
+        { dimension: 'country', operator: 'equals', expression: 'gbr' },
+        { dimension: 'device', operator: 'equals', expression: 'MOBILE' },
+      ] }],
+    });
+
+    bodies = stubSearchConsole([{ keys: [], clicks: 2104, impressions: 318000, ctr: 0.0066, position: 14.2 }] as never);
+    const totals = await m.tools.runTool(ctx, 'get_query_page_performance', { siteId, dimensions: [], days: 28 }) as { rows: Array<Record<string, unknown>> };
+    expect(totals.rows).toEqual([{ clicks: 2104, impressions: 318000, ctr: 0.0066, position: 14.2 }]);
+    expect(bodies[0]).toMatchObject({ dimensions: [] });
+    expect(bodies[0]).not.toHaveProperty('type');
+
+    expect(await m.tools.runTool(ctx, 'get_query_page_performance', { siteId, dimensions: ['searchAppearance', 'date'] })).toMatchObject({ available: false, reason: expect.stringMatching(/on its own/) });
+  });
+
   it("refuses a backwards range and other workspaces' sites", async () => {
     stubSearchConsole([]);
     expect(await m.tools.runTool(ctx, 'get_query_page_performance', { siteId, start: '2026-10-24', end: '2026-10-01' })).toMatchObject({ available: false, reason: 'start must be on or before end.' });

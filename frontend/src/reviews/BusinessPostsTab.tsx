@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, ExternalLink, Megaphone, RefreshCw, Send, Tag, Trash2 } from 'lucide-react';
+import { CalendarClock, CalendarDays, ExternalLink, Megaphone, RefreshCw, Send, Tag, Trash2, X } from 'lucide-react';
 import { useToast } from '../AppContext';
 import { errorMessage } from '../ads/api';
-import { reviewsApi, type BusinessPost, type PostDraft, type ReviewLocation } from './api';
+import { reviewsApi, type BusinessPost, type PostDraft, type ProfileChange, type ReviewLocation } from './api';
 import { LocationPicker } from './BusinessProfileTab';
-import { changeOutcome } from './format';
+import { changeOutcome, localTime } from './format';
 
 const MAX_POST = 1500;
 const BUTTONS: Array<{ id: string; label: string }> = [
@@ -17,6 +17,9 @@ const PHONE_RE = /(?:\+?\d[\s().-]?){9,}/;
 
 const blank = (): PostDraft => ({ topic: 'STANDARD', summary: '', cta_type: '', cta_url: '', photo_url: '' });
 
+/** "2026-11-03T09:00" for a datetime-local input, in the viewer's time zone. */
+const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
 export function BusinessPostsTab({ locations, locationId, canManage, onPick, reload }: {
   locations: ReviewLocation[]; locationId: string; canManage: boolean; onPick: (id: string) => void; reload: () => Promise<void>;
 }) {
@@ -26,10 +29,18 @@ export function BusinessPostsTab({ locations, locationId, canManage, onPick, rel
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<PostDraft>(blank);
   const [busy, setBusy] = useState<string | null>(null);
+  // Empty: publish now. Otherwise a local date and time to publish at.
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [upcoming, setUpcoming] = useState<ProfileChange[]>([]);
 
-  const load = useCallback((fresh = false) => reviewsApi.posts(location.id, fresh)
-    .then(p => { setPosts(p); setError(''); })
-    .catch(e => { setPosts(null); setError(errorMessage(e)); }), [location.id]);
+  const load = useCallback((fresh = false) => Promise.all([
+    reviewsApi.posts(location.id, fresh)
+      .then(p => { setPosts(p); setError(''); })
+      .catch(e => { setPosts(null); setError(errorMessage(e)); }),
+    reviewsApi.changes('scheduled')
+      .then(c => setUpcoming(c.filter(x => x.location_id === location.id && x.kind === 'post').sort((a, b) => String(a.publish_at).localeCompare(String(b.publish_at)))))
+      .catch(() => setUpcoming([])),
+  ]), [location.id]);
   useEffect(() => { void load(); }, [load]);
 
   const set = <K extends keyof PostDraft>(key: K, value: PostDraft[K]) => setDraft(d => ({ ...d, [key]: value }));
@@ -40,11 +51,20 @@ export function BusinessPostsTab({ locations, locationId, canManage, onPick, rel
     setBusy('publish');
     try {
       const body = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== '' && v !== undefined)) as unknown as PostDraft;
-      const change = await reviewsApi.createPost(location.id, body);
-      toast(change.status === 'published' ? 'success' : 'warning', changeOutcome(change));
+      const change = await reviewsApi.createPost(location.id, { ...body, ...(scheduleAt ? { publishAt: new Date(scheduleAt).toISOString() } : {}) });
+      toast(change.status === 'published' || change.status === 'scheduled' ? 'success' : 'warning', changeOutcome(change));
       setDraft(blank());
+      setScheduleAt('');
       await Promise.all([load(true), reload()]);
     } catch (e) { toast('error', errorMessage(e)); }
+    setBusy(null);
+  }
+
+  async function cancel(change: ProfileChange) {
+    if (!window.confirm('Cancel this scheduled post? It won\'t be published.')) return;
+    setBusy(change.id);
+    try { await reviewsApi.rejectChange(change.id); toast('success', 'Scheduled post cancelled'); await load(); }
+    catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }
 
@@ -91,13 +111,48 @@ export function BusinessPostsTab({ locations, locationId, canManage, onPick, rel
             <label>Redeem online link<input className="input" type="url" value={draft.redeem_url ?? ''} onChange={e => set('redeem_url', e.target.value)} placeholder="https://" /></label>
             <label className="reviews-wide">Terms and conditions<textarea className="input" rows={2} value={draft.terms ?? ''} onChange={e => set('terms', e.target.value)} /></label>
           </>}
+          <label>Publish
+            <select className="input" value={scheduleAt ? 'later' : 'now'} onChange={e => setScheduleAt(e.target.value === 'later' ? localInput(new Date(Date.now() + 86_400_000)) : '')}>
+              <option value="now">Now</option><option value="later">At a set time</option>
+            </select>
+          </label>
+          {scheduleAt && (
+            <label>Date and time (your time zone)
+              <input className="input" type="datetime-local" value={scheduleAt} min={localInput(new Date())} onChange={e => setScheduleAt(e.target.value)} />
+            </label>
+          )}
         </fieldset>
+        {scheduleAt && <p className="ads-hint">Google has no scheduling, so this server holds the post and publishes it at that time. It must be running then.</p>}
         <div className="ads-row-actions">
           <button className="btn btn-primary" disabled={!canManage || busy === 'publish' || phoneInText || (draft.topic === 'STANDARD' ? !draft.summary?.trim() : !draft.event_title?.trim() || !draft.start_date || !draft.end_date)} onClick={publish}>
-            <Send size={14} /> {busy === 'publish' ? 'Posting…' : 'Publish to Google'}
+            {scheduleAt ? <CalendarClock size={14} /> : <Send size={14} />} {busy === 'publish' ? 'Saving…' : scheduleAt ? `Schedule for ${localTime(new Date(scheduleAt).toISOString())}` : 'Publish to Google'}
           </button>
         </div>
       </section>
+
+      {upcoming.length > 0 && (
+        <section className="ops-card">
+          <div className="ops-card-head"><div><span className="eyebrow">Scheduled</span><h2>Posts waiting to go out</h2></div><CalendarClock size={18} /></div>
+          <div className="review-list">
+            {upcoming.map(change => {
+              const post = (change.payload.post ?? {}) as { summary?: string; topicType?: string };
+              return (
+                <article key={change.id} className="review-card gbp-post">
+                  <header>
+                    <span className="badge badge-accent"><CalendarClock size={11} /> {localTime(change.publish_at)}</span>
+                    <span className="badge badge-info">{TOPIC_LABEL[post.topicType ?? 'STANDARD'] ?? 'Update'}</span>
+                    <small>{change.source === 'mcp' ? 'From an AI assistant' : 'From the dashboard'}</small>
+                  </header>
+                  <p>{post.summary ?? change.summary}</p>
+                  <div className="ads-row-actions">
+                    <button className="btn btn-ghost btn-sm" disabled={!canManage || busy === change.id} onClick={() => cancel(change)}><X size={13} /> Cancel</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="ops-card">
         <div className="ops-card-head">

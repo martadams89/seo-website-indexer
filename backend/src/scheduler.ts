@@ -97,6 +97,7 @@ import { snapshotAllPerformance } from './analytics/perf-store.js';
 import { snapshotAllAgentReadiness } from './analytics/agent-readiness-store.js';
 import { sendWorkspaceNotification, configuredChannels, notificationEventEnabled } from './utils/notify.js';
 import { runPlatformAutomation } from './platform/automation.js';
+import { publishDueScheduledChanges } from './reviews/profile-service.js';
 import { readResponseText, safeFetch } from './security/outbound-url.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -135,6 +136,7 @@ const _activeRuns = new Map<string, ActiveRun>(); // keyed by workspaceId
 let _scheduledTask: ReturnType<typeof cron.schedule> | null = null;
 let _platformTask: ReturnType<typeof cron.schedule> | null = null;
 let _tokenKeepAliveTask: ReturnType<typeof cron.schedule> | null = null;
+let _scheduledPostsTask: ReturnType<typeof cron.schedule> | null = null;
 
 /** Is a run active? For a specific workspace, or (no arg) anywhere. */
 export function isRunning(workspaceId?: string | null): boolean {
@@ -1441,6 +1443,13 @@ export function startScheduler(): void {
     catch (error) { console.error('[platform] Automation cycle failed:', error instanceof Error ? error.message : error); }
   });
 
+  // Business Profile posts scheduled for later go out within a minute of their time.
+  if (_scheduledPostsTask) _scheduledPostsTask.stop();
+  _scheduledPostsTask = cron.schedule('* * * * *', async () => {
+    try { await publishDueScheduledChanges(); }
+    catch (error) { console.error('[posts] Scheduled post cycle failed:', error instanceof Error ? error.message : error); }
+  });
+
   // Proactively keep Google access tokens warm so API calls never block on a
   // refresh and a dead grant is surfaced (needs_reauth) within minutes instead
   // of at the next indexing run. Only refreshes tokens near expiry; skips
@@ -1467,6 +1476,10 @@ export function stopScheduler(): void {
   if (_platformTask) {
     _platformTask.stop();
     _platformTask = null;
+  }
+  if (_scheduledPostsTask) {
+    _scheduledPostsTask.stop();
+    _scheduledPostsTask = null;
   }
   if (_tokenKeepAliveTask) {
     _tokenKeepAliveTask.stop();

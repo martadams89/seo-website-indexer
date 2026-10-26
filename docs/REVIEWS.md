@@ -50,6 +50,7 @@ Your project's OAuth consent screen must be set to **External** and **In product
 
 - **Profile.** A completeness checklist (verification, description length, categories, phone, website, opening hours, holiday hours for the next 60 days, photos, logo and cover, recent posts, review replies, fresh reviews, Google-suggested edits) with the next step for each gap. Edit the description (up to 750 characters, no links), phone, website, weekly opening hours (up to three periods a day, overnight periods allowed) and special or holiday hours. Name, categories and address stay in Business Profile Manager, because Google may ask you to verify again after changing them.
 - **Posts.** Publish updates, events and offers with an optional photo and button (Book, Order online, Buy, Learn more, Sign up, Call now). Google rejects posts that contain a phone number, so the composer warns you and the Call now button uses the profile's number. The list shows Google's state for each post: live, processing or rejected.
+- **Scheduled posts.** Set **Publish** to **At a set time** and pick a date and time (in your own time zone, up to a year ahead). Google's API has no scheduling, so this server holds the post and publishes it within a minute of that time; the server must be running then. Scheduled posts are listed under **Posts waiting to go out** on the Posts tab and under **Approvals & history**, each with **Cancel**. A post from an AI assistant that needs approval waits for it first: approving it keeps its time, or publishes it straight away if the time has passed. If Google refuses a scheduled post when it goes out, the workspace gets a *Business Profile changes* notification.
 - **Photos.** Add a photo from a public image address (JPG or PNG, at least 250 × 250 pixels) with a category such as exterior, interior, team, at work or product. The grid shows each photo's views.
 
 ## Rules for AI assistants
@@ -123,7 +124,7 @@ An assistant only sees the tools its connection is allowed to use. If it says it
 | `reviews_list_replies` | read | Replies made through the app, e.g. published ones as house-style examples. |
 | `business_get_profile` | read | The profile, completeness checklist, Google-suggested edits, AI rules and changes waiting for approval. |
 | `business_check_google_updates` | read | Ask Google now which fields it shows differently. |
-| `business_list_posts` | read | Posts with Google's state and links. |
+| `business_list_posts` | read | Posts with Google's state and links, plus posts scheduled for later and any waiting for approval. |
 | `business_list_photos` | read | Photos and videos with category, views and the address each was added from. |
 | `business_list_changes` | read | Profile edits, posts and photos made or proposed through the app. |
 | `reviews_reply` | reviews:write | Publish a reply within the rules, or queue it for approval (`publish: false` always queues). |
@@ -131,7 +132,8 @@ An assistant only sees the tools its connection is allowed to use. If it says it
 | `reviews_update_brief` | reviews:write | Save notes about how replies should sound. |
 | `reviews_link_location` | reviews:write | Link a discovered location. |
 | `business_update_profile` | reviews:write | Change the description, phone, website, weekly hours, or add and remove special hours. |
-| `business_create_post` | reviews:write | Post an update, event or offer, with an optional photo and button. |
+| `business_create_post` | reviews:write | Post an update, event or offer, with an optional photo and button, now or at a set time (`publishAt`, ISO 8601 with a time zone). |
+| `business_cancel_scheduled_post` | reviews:write | Cancel a scheduled post, or one waiting for approval, before it goes out. |
 | `business_delete_post` | reviews:write | Ask to delete a post (always needs approval). |
 | `business_add_photo` | reviews:write | Add one photo or video from a direct link. |
 | `business_add_media` | reviews:write | Add up to 25 photos and videos in one go, with a result per item. |
