@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.46.1](https://github.com/martadams89/seo-website-indexer/compare/v1.46.0...v1.46.1) (2026-10-26)
+
+
+### 🐛 Bug Fixes
+
+* always show Google's account chooser, and open sign-in windows so pop-up blockers allow them ([#518](https://github.com/martadams89/seo-website-indexer/issues/518)) ([ef27bcd](https://github.com/martadams89/seo-website-indexer/commit/ef27bcd58a80bac29ec0d5463ed75d4eba7bb2bc))
+
 ## [1.46.0](https://github.com/martadams89/seo-website-indexer/compare/v1.45.1...v1.46.0) (2026-10-26)
 
 
