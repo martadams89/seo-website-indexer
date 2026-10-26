@@ -1,0 +1,20 @@
+/* The client's Business Profile connect page (public, /connect/<token>). */
+.connect-card { max-width: 480px; text-align: left; }
+.connect-card .auth-logo { display: flex; justify-content: center; color: var(--accent); }
+.connect-card .auth-title, .connect-card .auth-sub { text-align: center; }
+.connect-what { margin: 6px 0 12px; padding-left: 18px; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.connect-note { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.connect-cta { width: 100%; justify-content: center; margin: 4px 0 10px; }
+.connect-fine { display: flex; gap: 6px; align-items: flex-start; margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+.connect-fine svg { flex: 0 0 auto; margin-top: 2px; }
+.connect-error { margin: 10px 0 0; color: var(--error); font-size: 13px; }
+.connect-locations { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 12px; max-height: 360px; overflow-y: auto; }
+.connect-locations label { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); cursor: pointer; }
+.connect-locations label.on { border-color: var(--accent); }
+.connect-locations label.shared { opacity: .75; cursor: default; }
+.connect-locations input { margin-top: 3px; accent-color: var(--accent); }
+.connect-locations span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.connect-locations strong { font-size: 13px; }
+.connect-locations small { display: inline-flex; gap: 4px; align-items: center; color: var(--text-dim); font-size: 12px; }
+.connect-card .alert { margin-bottom: 10px; }
+.connect-card .btn-ghost { width: 100%; justify-content: center; }

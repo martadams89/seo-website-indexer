@@ -21,6 +21,8 @@ export const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g
  */
 export function googleResultPage(opts: {
   ok: boolean; title: string; message: string; post: Record<string, unknown> | null; openerOrigin: string | null; returnTo: string | null; autoClose?: boolean;
+  /** Text of the link back, for pages a non-member lands on (a client's connect link). */
+  backLabel?: string;
 }): string {
   const back = opts.returnTo ?? '/settings?tab=google';
   return `<!DOCTYPE html>
@@ -32,7 +34,7 @@ export function googleResultPage(opts: {
     <p style="color: #94a3b8; font-size: 14px; max-width: 560px; line-height: 1.5;">${escapeHtml(opts.message)}</p>
     <p id="actions" style="margin-top: 16px;">
       <button id="close" onclick="window.close()" style="display: none; background: #252836; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close</button>
-      <a id="back" href="${escapeHtml(back)}" style="display: none; background: #252836; color: white; padding: 10px 20px; border-radius: 6px; font-weight: bold; text-decoration: none;">Back to the dashboard</a>
+      <a id="back" href="${escapeHtml(back)}" style="display: none; background: #252836; color: white; padding: 10px 20px; border-radius: 6px; font-weight: bold; text-decoration: none;">${escapeHtml(opts.backLabel ?? 'Back to the dashboard')}</a>
     </p>
     <script>
       if (window.opener) {

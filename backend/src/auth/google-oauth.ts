@@ -174,6 +174,8 @@ export interface PendingGoogleOAuth {
     expectEmail?: string;
     /** Where to send the person back to when the sign-in ran in the same tab (pop-ups blocked). */
     returnTo?: string;
+    /** A client connecting their own Google account through an agency's link. */
+    inviteId?: string;
   } | null;
 }
 
@@ -197,6 +199,8 @@ export function createGoogleOAuthAuthorization(opts: {
   /** A reconnect: refuse the sign-in if a different Google account is chosen. */
   expectEmail?: string | null;
   returnTo?: string | null;
+  /** A client connecting through a connect link (see reviews/connect-invites.ts). */
+  inviteId?: string | null;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -205,7 +209,11 @@ export function createGoogleOAuthAuthorization(opts: {
   const expires = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
   const db = getDb();
   db.prepare("DELETE FROM google_oauth_states WHERE julianday(expires_at) < julianday('now')").run();
-  const payload = { ...(opts.expectEmail ? { expectEmail: opts.expectEmail } : {}), ...(safeReturnTo(opts.returnTo) ? { returnTo: safeReturnTo(opts.returnTo) } : {}) };
+  const payload = {
+    ...(opts.expectEmail ? { expectEmail: opts.expectEmail } : {}),
+    ...(safeReturnTo(opts.returnTo) ? { returnTo: safeReturnTo(opts.returnTo) } : {}),
+    ...(opts.inviteId ? { inviteId: opts.inviteId } : {}),
+  };
   db.prepare(`
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at, purpose, payload)
     VALUES(?,?,?,?,?,?,?,?,?)

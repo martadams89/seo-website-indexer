@@ -214,6 +214,18 @@ export interface ReviewRoutineSettings {
   extra_instructions?: string;
 }
 
+/** A link that lets a client connect their own Google account's Business Profile through your approved Cloud project. */
+export interface ConnectInvite {
+  id: string; status: 'open' | 'connected' | 'expired' | 'revoked';
+  client_name: string | null; client_email: string | null; project: string | null;
+  google_email: string | null; shared_locations: string[];
+  expires_at: string; connected_at: string | null; created_at: string; created_by: string | null;
+  /** Only while the link is open. */
+  url: string | null;
+  /** Set when the link was just created with an email address. */
+  emailed?: boolean;
+}
+
 const json = (body: unknown) => ({ body: JSON.stringify(body) });
 
 export const reviewsApi = {
@@ -238,6 +250,10 @@ export const reviewsApi = {
   approveChange: (id: string) => apiFetch<ProfileChange>(`/api/reviews/changes/${id}/approve`, { method: 'POST', ...json({}) }),
   rejectChange: (id: string) => apiFetch<ProfileChange>(`/api/reviews/changes/${id}/reject`, { method: 'POST', ...json({}) }),
   unlink: (id: string) => apiFetch<{ ok: boolean }>(`/api/reviews/locations/${id}`, { method: 'DELETE' }),
+  connectInvites: () => apiFetch<ConnectInvite[]>('/api/reviews/connect-invites'),
+  createConnectInvite: (data: { projectFrom: string; clientName?: string; clientEmail?: string; days?: number }) =>
+    apiFetch<ConnectInvite>('/api/reviews/connect-invites', { method: 'POST', ...json(data) }),
+  revokeConnectInvite: (id: string) => apiFetch<{ ok: boolean }>(`/api/reviews/connect-invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   sync: (id: string) => apiFetch<{ fetched: number; created: number }>(`/api/reviews/locations/${id}/sync`, { method: 'POST' }),
   performance: (id: string, days = 28) => apiFetch<Performance>(`/api/reviews/locations/${id}/performance?days=${days}`),
   reviews: (q: { locationId?: string; filter?: ReviewFilter; search?: string; limit?: number; offset?: number }) => {
