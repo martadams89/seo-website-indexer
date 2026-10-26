@@ -173,7 +173,7 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
         <p className="ads-hint">Moving a linked location onto the new connection keeps its reviews, rules and history (Locations tab).</p>
       </section>
 
-      <ClientConnectLinks canManage={canManage} />
+      <ClientConnectLinks canManage={canManage} onLinked={async () => { await reload(true); onLinked(); }} />
 
       <McpConnect compact />
       {linking && <LinkLocationsModal onClose={() => setLinking(false)} onLinked={async () => { setLinking(false); await reload(true); onLinked(); }} />}

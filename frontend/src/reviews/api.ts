@@ -231,7 +231,8 @@ const json = (body: unknown) => ({ body: JSON.stringify(body) });
 export const reviewsApi = {
   setup: (fresh = false) => apiFetch<ReviewsSetup>(`/api/reviews/setup${fresh ? '?fresh=1' : ''}`),
   enableApi: (googleAccountId: string) => apiFetch<{ ok: boolean; message: string }>('/api/reviews/setup/enable-api', { method: 'POST', ...json({ googleAccountId }) }),
-  discover: () => apiFetch<DiscoveryResult>('/api/reviews/discover'),
+  /** Profiles the workspace's Google connections can see; one connection only when `googleAccountId` is given. */
+  discover: (googleAccountId?: string) => apiFetch<DiscoveryResult>(`/api/reviews/discover${googleAccountId ? `?googleAccountId=${encodeURIComponent(googleAccountId)}` : ''}`),
   locations: () => apiFetch<ReviewLocation[]>('/api/reviews/locations'),
   link: (data: { googleAccountId: string; accountName: string; locationName: string }) => apiFetch<ReviewLocation>('/api/reviews/locations', { method: 'POST', ...json(data) }),
   update: (id: string, data: { brief?: ReviewBrief; rules?: Partial<ReplyRules>; profileRules?: Partial<ProfileRules>; enabled?: boolean; googleAccountId?: string }) => apiFetch<ReviewLocation>(`/api/reviews/locations/${id}`, { method: 'PATCH', ...json(data) }),
