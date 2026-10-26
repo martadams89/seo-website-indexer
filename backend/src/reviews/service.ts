@@ -5,7 +5,7 @@
  * reply rules.
  */
 import {
-  CLOUD_PLATFORM_SCOPE, enableRequiredApis, getAccessTokenForAccount, GOOGLE_BUSINESS_SERVICES, hasBuiltinCredentials, WEBMASTERS_SCOPE,
+  CLOUD_PLATFORM_SCOPE, enableRequiredApis, getAccessTokenForAccount, GOOGLE_BUSINESS_SERVICES, hasBuiltinCredentials, limitedTo, type LimitedProduct,
 } from '../auth/google-oauth.js';
 import { getGoogleAccountsForWorkspace, getSitesForWorkspace, type GoogleAccount } from '../db/database.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
@@ -50,8 +50,9 @@ export function consoleLinks(project: string | null) {
 type ApiState = 'ok' | 'api_disabled' | 'not_approved' | 'no_scope' | 'needs_reauth' | 'error' | 'unchecked';
 interface ConnectionStatus {
   id: string; email: string | null; project: string | null; has_business_scope: boolean; has_cloud_scope: boolean; needs_reauth: boolean;
-  /** Asked Google for Business Profile only (no Search Console or Analytics). */
+  /** A limited connection (no Search Console) that includes Business Profile. */
   business_only: boolean;
+  limited_to: LimitedProduct[] | null;
   /** Linked locations that use this connection. */
   locations: number;
   api: ApiState; accounts: number | null; message: string | null; hint: string | null;
@@ -70,7 +71,8 @@ async function probe(account: GoogleAccount, fresh: boolean): Promise<Connection
   const status: ConnectionStatus = {
     id: account.id, email: account.email, project,
     has_business_scope: scopes.includes(BUSINESS_SCOPE), has_cloud_scope: scopes.includes(CLOUD_PLATFORM_SCOPE),
-    business_only: scopes.includes(BUSINESS_SCOPE) && !scopes.includes(WEBMASTERS_SCOPE),
+    business_only: !!limitedTo(account.granted_scopes)?.includes('business'),
+    limited_to: limitedTo(account.granted_scopes),
     locations: 0,
     needs_reauth: !!account.needs_reauth, api: 'unchecked', accounts: null, message: null, hint: null,
     links: consoleLinks(project),

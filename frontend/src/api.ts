@@ -30,6 +30,11 @@ export interface GoogleAccount {
   last_refreshed_at?: string | null;
   last_refresh_error?: string | null;
   granted_scopes?: string | null;
+  /** Cloud project number of the connection's OAuth client. */
+  project?: string | null;
+  /** Products a limited connection is for; null for a full one. */
+  limited_to?: Array<'ads' | 'business'> | null;
+  used_for?: { sites: number; ads_clients: number; locations: number };
   owner_email?: string | null;
   is_mine?: boolean;
   can_disconnect?: boolean;
@@ -259,7 +264,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; businessOnly?: boolean } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 

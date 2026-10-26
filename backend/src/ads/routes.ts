@@ -13,7 +13,7 @@ import { assertCanChangeAds } from './access.js';
 import { applyChange, proposeRecommendations, rejectChange, revertChange } from './changes.js';
 import { accountOverview, auditAccount, listRecommendations, searchTerms } from './insights.js';
 import { buildRoutinePrompt, DEFAULT_ROUTINE, FOCUS_AREAS, normalizeRoutine } from './routine-prompt.js';
-import { enableAdsApi, setupStatus, verifyAndLinkAccount } from './setup.js';
+import { enableAdsApi, moveAdsAccount, setupStatus, verifyAndLinkAccount } from './setup.js';
 import { analyticsLogins, Ga4Error, listGa4Properties } from '../analytics/ga4.js';
 import { linkGa4Property } from './ga4-link.js';
 import {
@@ -99,7 +99,11 @@ export function registerAdsRoutes(app: FastifyInstance): void {
             const existing = linked.find(l => l.customer_id === c.customer_id);
             // A linked account whose Google connection was disconnected must
             // stay selectable so it can be relinked to this connection.
-            return { ...c, linked_account_id: existing?.id ?? null, needs_relink: !!existing && isOrphanedAdsAccount(existing) };
+            return {
+              ...c, linked_account_id: existing?.id ?? null, needs_relink: !!existing && isOrphanedAdsAccount(existing),
+              // The connection the linked account uses now (another login or project when it differs).
+              linked_via: existing?.google_account_id ?? null,
+            };
           }),
         });
       } catch (e) {
@@ -164,6 +168,17 @@ export function registerAdsRoutes(app: FastifyInstance): void {
       recordAuditEvent({ actorUserId: actor(req).id, workspaceId: acc.workspace_id, action: 'google_ads.guardrails_updated', detail: { accountId: acc.id, monthlyBudget: updated?.monthly_budget, guardrails: updated?.guardrails } });
     }
     return updated;
+  }));
+
+  // Move a client to another Google connection (another user, or the same user through another Cloud project).
+  app.post('/api/ads/accounts/:id/connection', handle(async (req) => {
+    const acc = accountInWorkspace(req, (req.params as { id: string }).id);
+    assertCanChangeAds(user(req), acc.workspace_id);
+    const { googleAccountId } = (req.body ?? {}) as { googleAccountId?: string };
+    if (!googleAccountId) throw Object.assign(new Error('googleAccountId is required.'), { statusCode: 400 });
+    const moved = await moveAdsAccount(acc, googleAccountId, user(req).id);
+    recordAuditEvent({ actorUserId: actor(req).id, workspaceId: acc.workspace_id, action: 'google_ads.account_moved', detail: { accountId: acc.id, from: acc.google_account_id, to: moved.google_account_id } });
+    return moved;
   }));
 
   app.delete('/api/ads/accounts/:id', handle(async (req) => {

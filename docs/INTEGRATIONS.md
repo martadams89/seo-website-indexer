@@ -96,7 +96,7 @@ Google Ads is opt-in. Ticking **Also allow Google Ads management** (or **Add Goo
 https://www.googleapis.com/auth/adwords
 ```
 
-Google Business Profile is opt-in too: **Add Business Profile access** (Business Profile → Setup) adds `https://www.googleapis.com/auth/business.manage`. Google has no read-only variant, so replies, posts, photos and profile edits are governed by the MCP `reviews:write` scope, the **Manage Google Business Profile** capability and each location's rules. Google must also approve the Cloud project once before the APIs answer. When that approval sits on another project, connect through that project's OAuth client with **Only ask Google for Business Profile access**: the connection then requests just `business.manage` and `userinfo.email`, and the same Google user can stay connected through the main project for Search Console. See the [Google Business Profile guide](REVIEWS.md#a-separate-google-account-or-cloud-project).
+Google Business Profile is opt-in too: **Add Business Profile access** (Business Profile → Setup) adds `https://www.googleapis.com/auth/business.manage`. Google has no read-only variant, so replies, posts, photos and profile edits are governed by the MCP `reviews:write` scope, the **Manage Google Business Profile** capability and each location's rules. Google must also approve the Cloud project once before the APIs answer. When that approval sits on another project, connect through that project's OAuth client with **Only ask Google for Business Profile access**: the connection then requests just `business.manage` and `userinfo.email`, and the same Google user can stay connected through the main project for Search Console. Google Ads has the same option (**Only ask Google for Google Ads access**: `adwords` and `userinfo.email`) for a project that holds the Ads API access level or quota you need. See the [Google Business Profile guide](REVIEWS.md#a-separate-google-account-or-cloud-project).
 
 Google publishes no read-only Ads scope, so what may change is decided by the app: the MCP `ads:write` scope, the member's **Manage Google Ads** capability and each client's monthly budget and guardrails. Re-consent asks again for every scope the connection already uses (Ads and Business Profile are carried forward), so existing access and linked sites are kept. Google Ads API access is granted to the Cloud project that owns the OAuth client (Explorer or Basic; developer tokens are no longer used). See the [Google Ads guide](GOOGLE_ADS.md).
 
@@ -116,7 +116,7 @@ Google publishes no read-only Ads scope, so what may change is decided by the ap
    https://YOUR-HOST/api/auth/google/callback
    ```
 
-6. Enter the client ID and secret during setup or set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` on the container.
+6. Enter the client ID and secret once (**Another project** when connecting) or set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` on the container. Later sign-ins, including other Google users, pick the project from a list and reuse its client; the secret stays on the server.
 7. Open **Settings → Google Accounts → Connect Google** and complete consent.
 
 An External OAuth app left in **Testing** can receive refresh grants that expire after seven days when these scopes are requested. Use **Production** for a public long-running app or **Internal** for an appropriate Google Workspace deployment, then reconnect. See [Google OAuth 2.0](https://developers.google.com/identity/protocols/oauth2).

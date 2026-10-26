@@ -2,11 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Link2, Pencil, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { useToast } from '../AppContext';
-import { adsApi, errorMessage, money, type AdsAccount, type AdsBrief, type AdsGuardrails, type DiscoveryResult, type Ga4PropertiesResult } from './api';
+import { adsApi, errorMessage, money, type AdsAccount, type AdsBrief, type AdsConnectionStatus, type AdsGuardrails, type DiscoveryResult, type Ga4PropertiesResult } from './api';
+
+/** "owner@acme.test · project 123": tells a connection apart from the same Google user on another project. */
+const connectionName = (c: Pick<AdsConnectionStatus, 'email' | 'id' | 'project' | 'limited_to'>) =>
+  `${c.email ?? c.id}${c.project ? ` · project ${c.project}` : ''}${c.limited_to ? ' (Ads only)' : ''}`;
 import { GOALS, MODE_LABEL } from './constants';
 
-export function AdsClients({ accounts, canManage, reload, onOpen }: {
-  accounts: AdsAccount[]; canManage: boolean; reload: (fresh?: boolean) => Promise<void>; onOpen: (id: string) => void;
+export function AdsClients({ accounts, connections = [], canManage, reload, onOpen }: {
+  accounts: AdsAccount[]; connections?: AdsConnectionStatus[]; canManage: boolean; reload: (fresh?: boolean) => Promise<void>; onOpen: (id: string) => void;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState<AdsAccount | null>(null);
@@ -48,7 +52,10 @@ export function AdsClients({ accounts, canManage, reload, onOpen }: {
                     )}
                     {a.last_error && !a.connection_lost && <small className="ads-error-line">{a.last_error}</small>}
                   </td>
-                  <td><code>{a.customer_id_formatted}</code>{a.login_customer_id && <small className="text-dim"> via manager</small>}</td>
+                  <td>
+                    <code>{a.customer_id_formatted}</code>{a.login_customer_id && <small className="text-dim"> via manager</small>}
+                    {(() => { const c = connections.find(x => x.id === a.google_account_id); return c ? <small className="text-dim ads-connection-name">{connectionName(c)}</small> : null; })()}
+                  </td>
                   <td>{a.monthly_budget === null ? <span className="badge badge-warn">Not set</span> : money(a.monthly_budget, a.currency, 0)}</td>
                   <td><span className={`badge badge-${a.guardrails.mode === 'guarded' ? 'ok' : a.guardrails.mode === 'review' ? 'accent' : 'info'}`}>{MODE_LABEL[a.guardrails.mode]}</span></td>
                   <td>{a.pending_approvals ? <span className="badge badge-warn">{a.pending_approvals}</span> : '—'}</td>
@@ -67,7 +74,7 @@ export function AdsClients({ accounts, canManage, reload, onOpen }: {
       ) : (
         <div className="ops-empty compact"><Users /><strong>No clients linked</strong><span>Link the ad accounts you manage to start.</span></div>
       )}
-      {editing && <EditClientModal account={editing} canManage={canManage} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await reload(); }} />}
+      {editing && <EditClientModal account={editing} connections={connections} canManage={canManage} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await reload(true); }} />}
       {linking && <LinkAccountsModal onClose={() => setLinking(false)} onLinked={async () => { setLinking(false); await reload(true); }} />}
     </section>
   );
@@ -92,6 +99,13 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
     setScanning(true);
     setError('');
     void scan();
+  }
+
+  async function moveHere(accountId: string, googleAccountId: string) {
+    setBusy(true);
+    try { await adsApi.moveConnection(accountId, googleAccountId); toast('success', 'Client now uses this connection'); await scan(); await onLinked(); }
+    catch (e) { toast('error', errorMessage(e)); }
+    setBusy(false);
   }
 
   async function link() {
@@ -131,9 +145,12 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
                 }} />
                 <span>
                   <strong>{c.name ?? c.customer_id}</strong>
-                  <small>{c.customer_id.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3')}{c.currency ? ` · ${c.currency}` : ''}{c.manager ? ' · manager account' : ''}{c.test_account ? ' · test account' : ''}{c.status && c.status !== 'ENABLED' ? ` · ${c.status.toLowerCase()}` : ''}{linked ? ' · already linked' : ''}{c.needs_relink ? ' · connection lost, select to relink' : ''}</small>
+                  <small>{c.customer_id.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3')}{c.currency ? ` · ${c.currency}` : ''}{c.manager ? ' · manager account' : ''}{c.test_account ? ' · test account' : ''}{c.status && c.status !== 'ENABLED' ? ` · ${c.status.toLowerCase()}` : ''}{linked ? (c.linked_via && c.linked_via !== conn.google_account_id ? ' · linked through another connection' : ' · already linked') : ''}{c.needs_relink ? ' · connection lost, select to relink' : ''}</small>
                   {c.error && <small className="ads-error-line">{c.error}</small>}
                 </span>
+                {linked && c.linked_via && c.linked_via !== conn.google_account_id && (
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={e => { e.preventDefault(); void moveHere(c.linked_account_id!, conn.google_account_id); }}>Use this connection</button>
+                )}
               </label>
             );
           })}
@@ -146,8 +163,10 @@ export function LinkAccountsModal({ onClose, onLinked }: { onClose: () => void; 
 
 const num = (v: string): number | null => v.trim() === '' ? null : Number(v);
 
-export function EditClientModal({ account, canManage, onClose, onSaved }: { account: AdsAccount; canManage: boolean; onClose: () => void; onSaved: () => void | Promise<void> }) {
+export function EditClientModal({ account, connections = [], canManage, onClose, onSaved }: { account: AdsAccount; connections?: AdsConnectionStatus[]; canManage: boolean; onClose: () => void; onSaved: () => void | Promise<void> }) {
   const toast = useToast();
+  const [connectionId, setConnectionId] = useState(account.google_account_id ?? '');
+  const adsConnections = connections.filter(c => c.has_ads_scope);
   const [budget, setBudget] = useState(account.monthly_budget === null ? '' : String(account.monthly_budget));
   const [brief, setBrief] = useState<AdsBrief & { competitorsText: string }>({ ...account.brief, competitorsText: (account.brief.competitors ?? []).join('\n') });
   const [guard, setGuard] = useState<AdsGuardrails>(account.guardrails);
@@ -168,6 +187,8 @@ export function EditClientModal({ account, canManage, onClose, onSaved }: { acco
     setBusy(true);
     try {
       const { competitorsText, ...rest } = brief;
+      // Switch connection first: it's checked against Google and nothing else should save if it fails.
+      if (connectionId && connectionId !== account.google_account_id) await adsApi.moveConnection(account.id, connectionId);
       await adsApi.update(account.id, {
         monthlyBudget: num(budget),
         brief: { ...rest, competitors: competitorsText.split(/[\n,]/).map(s => s.trim()).filter(Boolean) },
@@ -190,6 +211,20 @@ export function EditClientModal({ account, canManage, onClose, onSaved }: { acco
     <Modal onClose={onClose} size="xl" title={account.name ?? account.customer_id_formatted} eyebrow={`Client · ${account.customer_id_formatted}`} icon={<ShieldCheck />}
       description="The brief tells the AI what this client is trying to achieve. The budget and guardrails decide what it may change without asking you."
       footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!canManage || busy} onClick={save}>{busy ? 'Saving…' : 'Save client'}</button></>}>
+      {adsConnections.length > 0 && (
+        <>
+          <h3 className="ads-form-heading">Google connection</h3>
+          <div className="form-grid">
+            <label>Manage this account through
+              <select className="input" value={connectionId} disabled={!canManage} onChange={e => setConnectionId(e.target.value)}>
+                {!connectionId && <option value="">Choose a connection</option>}
+                {adsConnections.map(c => <option key={c.id} value={c.id}>{connectionName(c)}{c.access === 'access_level' ? ' (test access only)' : ''}</option>)}
+              </select>
+              <small>Another Google user, or the same user through another Cloud project with the access level or quota this client needs. The app checks it can reach the account (directly or through a manager) before switching.</small>
+            </label>
+          </div>
+        </>
+      )}
       <h3 className="ads-form-heading">Budget and goal</h3>
       <div className="form-grid">
         <label>Monthly budget ({account.currency ?? 'account currency'})<input className="input" type="number" min={0} step="1" value={budget} disabled={!canManage} onChange={e => setBudget(e.target.value)} placeholder="e.g. 1500" /><small>The most this client wants to spend in a calendar month.</small></label>

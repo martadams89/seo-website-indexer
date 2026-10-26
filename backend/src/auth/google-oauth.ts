@@ -66,12 +66,33 @@ export const GOOGLE_BUSINESS_SCOPE = 'https://www.googleapis.com/auth/business.m
 export const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 export const WEBMASTERS_SCOPE = 'https://www.googleapis.com/auth/webmasters';
 const EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
+
 /**
- * A Business-Profile-only connection asks for nothing else, so a Cloud project
- * used just for Business Profile (the one Google reviewed and approved) never
- * has to carry Search Console or Analytics scopes on its consent screen.
+ * A connection can be limited to the products it's for. Google grants API
+ * access and quota per Cloud project, so a workspace often has one project
+ * (or Google user) for Search Console, another for Google Ads and another for
+ * Business Profile. A limited connection asks for only those scopes plus the
+ * email that names it, so its project's consent screen needs nothing else.
  */
-export const BUSINESS_ONLY_SCOPES = [EMAIL_SCOPE, GOOGLE_BUSINESS_SCOPE].join(' ');
+export type LimitedProduct = 'ads' | 'business';
+const PRODUCT_SCOPE: Record<LimitedProduct, string> = { ads: GOOGLE_ADS_SCOPE, business: GOOGLE_BUSINESS_SCOPE };
+
+export function limitedScopes(only: LimitedProduct[]): string {
+  return [EMAIL_SCOPE, ...(['ads', 'business'] as const).filter(p => only.includes(p)).map(p => PRODUCT_SCOPE[p])].join(' ');
+}
+export const BUSINESS_ONLY_SCOPES = limitedScopes(['business']);
+export const ADS_ONLY_SCOPES = limitedScopes(['ads']);
+
+/** The products a limited grant is for, or null for a full connection (one that can read Search Console). */
+export function limitedTo(grantedScopes: string | null | undefined): LimitedProduct[] | null {
+  const granted = (grantedScopes ?? '').split(' ').filter(Boolean);
+  if (!granted.length || granted.includes(WEBMASTERS_SCOPE)) return null;
+  const products = (['ads', 'business'] as const).filter(p => granted.includes(PRODUCT_SCOPE[p]));
+  return products.length ? products : null;
+}
+
+/** Scopes a sign-in must not silently take away from the connection it replaces. */
+const KEPT_SCOPES: Array<[string, string]> = [[WEBMASTERS_SCOPE, 'Search Console'], [GOOGLE_ADS_SCOPE, 'Google Ads'], [GOOGLE_BUSINESS_SCOPE, 'Business Profile']];
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
 
@@ -80,6 +101,11 @@ const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 
 export function hasBuiltinCredentials(): boolean {
   return !!(BUILTIN_CLIENT_ID && BUILTIN_CLIENT_SECRET);
+}
+
+/** Whether this OAuth client is the server's built-in one (GOOGLE_OAUTH_CLIENT_ID). */
+export function isBuiltinClient(clientId: string | null | undefined): boolean {
+  return !!BUILTIN_CLIENT_ID && clientId === BUILTIN_CLIENT_ID;
 }
 
 // ── Google OAuth Endpoints ────────────────────────────────────────────────────
@@ -148,8 +174,8 @@ export interface PendingGoogleOAuth {
 export function createGoogleOAuthAuthorization(opts: {
   userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
   clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean; business?: boolean;
-  /** Ask only for Business Profile (plus the email that names the connection). */
-  businessOnly?: boolean;
+  /** Ask only for these products (plus the email that names the connection); empty or omitted means a full connection. */
+  only?: LimitedProduct[] | null;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -162,8 +188,11 @@ export function createGoogleOAuthAuthorization(opts: {
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
     VALUES(?,?,?,?,?,?,?)
   `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
-  const scopes = (opts.businessOnly
-    ? [BUSINESS_ONLY_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : '']
+  // A limited connection that is asked for another product keeps its limit and adds that product.
+  const only = [...new Set([...(opts.only ?? []), ...(opts.only?.length && opts.ads ? ['ads'] : []), ...(opts.only?.length && opts.business ? ['business'] : [])])]
+    .filter((p): p is LimitedProduct => p === 'ads' || p === 'business');
+  const scopes = (only.length
+    ? [limitedScopes(only), opts.autoSetup ? CLOUD_PLATFORM_SCOPE : '']
     : [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.business ? GOOGLE_BUSINESS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : '']
   ).filter(Boolean).join(' ');
   const params = new URLSearchParams({
@@ -350,14 +379,17 @@ export async function exchangeCodeForTokens(
   // delegate the credential to workspaces where they are a member.
   // One connection per Google user per OAuth client (Cloud project).
   const id = connectionIdFor(email, clientId);
-  // A Business-Profile-only sign-in through the same project would replace a
-  // full connection's grant and silently drop Search Console. Refuse instead.
+  // A new sign-in through the same project replaces that connection's grant.
+  // Refuse one that would silently take away Search Console, Google Ads or
+  // Business Profile (a limited sign-in, or a box unticked on Google's screen).
   const previousScopes = (getGoogleAccountById(id)?.granted_scopes ?? '').split(' ');
   const newScopes = (data.scope ?? '').split(' ');
-  if (previousScopes.includes(WEBMASTERS_SCOPE) && !newScopes.includes(WEBMASTERS_SCOPE) && newScopes.includes(GOOGLE_BUSINESS_SCOPE)) {
+  const lost = KEPT_SCOPES.filter(([scope]) => previousScopes.includes(scope) && !newScopes.includes(scope)).map(([, label]) => label);
+  if (lost.length) {
     throw new Error(
-      `${email} is already connected through this Google Cloud project with Search Console access, and a Business-Profile-only sign-in would remove it. `
-      + 'Use "Add Business Profile access" on that connection instead (it keeps Search Console), or connect through a different Cloud project.'
+      `${email} is already connected through this Google Cloud project with ${lost.join(' and ')} access, and this sign-in would remove it. `
+      + 'To use it in this workspace, add the existing connection instead (Settings → Google Accounts → "Your other Google accounts", or "Use a Google account you\'ve already connected" in setup). '
+      + 'To give it more access, use Reconnect or "Add … access" on that connection, which keeps everything it has; or connect through a different Cloud project.'
     );
   }
   if (ownerUserId && !canOwnGoogleAccount(id, ownerUserId)) {

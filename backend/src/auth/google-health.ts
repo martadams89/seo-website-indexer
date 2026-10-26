@@ -11,11 +11,12 @@
  * loop notifies the workspace when something new needs attention.
  */
 import {
-  getAllGoogleAccounts, getDb, getGoogleAccountsForWorkspace, getSetting, setSetting, type GoogleAccount,
+  getAllGoogleAccounts, getDb, getGoogleAccountsForOwner, getGoogleAccountsForWorkspace, getSetting, isGoogleAccountAvailableToWorkspace, setSetting, type GoogleAccount,
 } from '../db/database.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
 import {
-  CLOUD_PLATFORM_SCOPE, GOOGLE_ADS_SCOPE, GOOGLE_ANALYTICS_SCOPE, GOOGLE_BUSINESS_SCOPE, getAccessTokenForAccount,
+  CLOUD_PLATFORM_SCOPE, GOOGLE_ADS_SCOPE, GOOGLE_ANALYTICS_SCOPE, GOOGLE_BUSINESS_SCOPE, getAccessTokenForAccount, isBuiltinClient, limitedTo,
+  type LimitedProduct,
 } from './google-oauth.js';
 
 const WEBMASTERS_SCOPE = 'https://www.googleapis.com/auth/webmasters';
@@ -73,6 +74,42 @@ function usage(account: GoogleAccount) {
     ? count(`SELECT COUNT(*) AS n FROM integrations WHERE provider='ga4' AND workspace_id IN (${workspaces.map(() => '?').join(',')})`, ...workspaces)
     : 0;
   return { sites, indexingSites, ads, locations, ga4: adsWithGa4 + ga4Integrations > 0, workspaces };
+}
+
+/** What a connection is used for, in counts the dashboard can show. */
+export function connectionUsage(account: GoogleAccount): { sites: number; ads_clients: number; locations: number } {
+  const u = usage(account);
+  return { sites: u.sites, ads_clients: u.ads, locations: u.locations };
+}
+
+export interface GoogleProject {
+  /** Cloud project number (from the OAuth client id), when Google's client ids carry one. */
+  project: string | null;
+  /** A connection holding this OAuth client: pass it as projectFrom to sign another Google user in through it. */
+  source_id: string;
+  builtin: boolean;
+  connections: Array<{ id: string; email: string | null; limited_to: LimitedProduct[] | null; in_workspace: boolean } & ReturnType<typeof connectionUsage>>;
+}
+
+/**
+ * The Cloud projects (OAuth clients) this person can sign Google users in
+ * through without re-entering a client id and secret: those used by the
+ * workspace's connections, and by their own connections elsewhere. The secret
+ * never leaves the server.
+ */
+export function googleProjects(workspaceId: string, userId: string): GoogleProject[] {
+  const byId = new Map<string, GoogleAccount>();
+  for (const a of [...getGoogleAccountsForWorkspace(workspaceId), ...getGoogleAccountsForOwner(userId)]) byId.set(a.id, a);
+  const groups = new Map<string, GoogleAccount[]>();
+  for (const a of byId.values()) if (a.client_id) groups.set(a.client_id, [...(groups.get(a.client_id) ?? []), a]);
+  return [...groups.entries()].map(([clientId, accounts]) => {
+    const inWorkspace = (a: GoogleAccount) => isGoogleAccountAvailableToWorkspace(a.id, workspaceId);
+    const source = accounts.find(a => inWorkspace(a) && !a.needs_reauth) ?? accounts.find(a => !a.needs_reauth) ?? accounts[0];
+    return {
+      project: projectOf(clientId), source_id: source.id, builtin: isBuiltinClient(clientId),
+      connections: accounts.map(a => ({ id: a.id, email: a.email, limited_to: limitedTo(a.granted_scopes), in_workspace: inWorkspace(a), ...connectionUsage(a) })),
+    };
+  }).sort((a, b) => b.connections.filter(c => c.in_workspace).length - a.connections.filter(c => c.in_workspace).length);
 }
 
 /** Permissions the connection's current uses need but its grant lacks. Pure apart from the usage lookup. */

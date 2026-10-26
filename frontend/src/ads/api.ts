@@ -67,6 +67,12 @@ export interface AdsConnectionStatus {
   accessible_customers: number | null;
   message: string | null;
   hint: string | null;
+  /** Products a limited connection asked Google for (e.g. ['ads']); null for a full connection. */
+  limited_to: Array<'ads' | 'business'> | null;
+  /** Linked clients that use this connection. */
+  clients: number;
+  /** Cloud console pages for this connection's own project. */
+  links: AdsSetup['links'];
 }
 
 export interface AdsSetup {
@@ -103,6 +109,8 @@ export interface DiscoveredCustomer {
   linked_account_id: string | null;
   /** Already linked, but its Google connection was disconnected: selectable to relink. */
   needs_relink?: boolean;
+  /** The connection the linked account uses now. */
+  linked_via?: string | null;
 }
 
 export interface DiscoveryResult {
@@ -234,6 +242,9 @@ export const adsApi = {
   update: (id: string, data: { monthlyBudget?: number | null; brief?: AdsBrief; guardrails?: Partial<AdsGuardrails>; enabled?: boolean; ga4PropertyId?: string | null }) =>
     apiFetch<AdsAccount>(`/api/ads/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', ...json(data) }),
   unlink: (id: string) => apiFetch<{ ok: boolean }>(`/api/ads/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Move a client to another Google connection; the server checks it can reach the account first. */
+  moveConnection: (id: string, googleAccountId: string) =>
+    apiFetch<AdsAccount>(`/api/ads/accounts/${encodeURIComponent(id)}/connection`, { method: 'POST', body: JSON.stringify({ googleAccountId }) }),
   overview: (id: string, days: number, fresh = false) => apiFetch<AdsOverview>(`/api/ads/accounts/${encodeURIComponent(id)}/overview?days=${days}${fresh ? '&fresh=1' : ''}`),
   audit: (id: string) => apiFetch<{ findings: AuditFinding[]; errors: string[]; checked_at: string }>(`/api/ads/accounts/${encodeURIComponent(id)}/audit`),
   searchTerms: (id: string, wasteOnly: boolean) => apiFetch<{ terms: SearchTermRow[]; period: { start: string; end: string } }>(`/api/ads/accounts/${encodeURIComponent(id)}/search-terms?days=30${wasteOnly ? '&wasteOnly=1' : ''}`),

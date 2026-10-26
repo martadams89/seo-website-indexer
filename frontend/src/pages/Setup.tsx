@@ -5,6 +5,8 @@ import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { skipSetup } from '../workspace/setupSkip';
+import { apiFetch } from '../api/client';
+import { GoogleConnectForm } from '../components/GoogleConnectForm';
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
 
@@ -38,8 +40,12 @@ export default function SetupPage() {
     }
   }, [status]);
 
+  // Cloud projects this person already set up (in any of their workspaces): a new Google user can sign in through one without retyping its client.
+  const [knownProjects, setKnownProjects] = useState(0);
+
   useEffect(() => {
     api.getMyAccounts().then(setMyAccounts).catch(() => setMyAccounts([]));
+    apiFetch<{ projects: unknown[] }>('/api/auth/google/projects').then(r => setKnownProjects(r.projects.length)).catch(() => setKnownProjects(0));
   }, [activeId]);
 
   // Leave the wizard; an empty workspace stops sending this browser back here.
@@ -258,6 +264,14 @@ export default function SetupPage() {
               before connecting accounts that must run unattended.
             </div>
           </div>
+
+          {!hasBuiltin && knownProjects > 0 && (
+            <div className="card">
+              <h2 style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Sign in a Google account through a project you already use</h2>
+              <p className="text-secondary text-sm mb-3">The OAuth client is already saved, so there's nothing to set up in Google Cloud.</p>
+              <GoogleConnectForm product="all" canManage={canConnect} />
+            </div>
+          )}
 
           {hasBuiltin ? (
             <div className="card text-center" style={{ padding: '32px 24px' }}>

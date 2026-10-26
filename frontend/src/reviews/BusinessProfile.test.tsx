@@ -11,6 +11,11 @@ vi.mock('../components/McpConnect', () => ({ McpConnect: () => null }));
 vi.mock('../ads/googleConnect', () => ({
   openGoogleConsent: vi.fn(async () => {}), openApiEnable: vi.fn(async () => []), useApisEnabled: () => {}, useGoogleAuthSuccess: () => {},
 }));
+vi.mock('../api/client', () => ({
+  apiFetch: vi.fn(async (url: string) => (url === '/api/auth/google/projects'
+    ? { builtin_available: false, projects: [{ project: '111111111111', source_id: 'me@acme.test', builtin: false, connections: [{ id: 'me@acme.test', email: 'me@acme.test', limited_to: null, in_workspace: true, sites: 3, ads_clients: 0, locations: 0 }] }] }
+    : {})),
+}));
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   reviewsApi: { profile: vi.fn(), editProfile: vi.fn(), resolveGoogleUpdates: vi.fn(), checkGoogleUpdates: vi.fn() },
@@ -49,16 +54,28 @@ beforeEach(() => {
   vi.mocked(openGoogleConsent).mockClear();
 });
 
+it('reuses the project the workspace already has, with nothing to re-enter', async () => {
+  render(<ReviewsSetupView setup={setup} canManage reload={async () => {}} onLinked={() => {}} />);
+  const picker = await screen.findByLabelText(/Google Cloud project/) as HTMLSelectElement;
+  await waitFor(() => expect(picker.value).toBe('existing:me@acme.test'));
+  expect(screen.queryByLabelText('OAuth client ID')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Sign in with Google/ }));
+  await waitFor(() => expect(openGoogleConsent).toHaveBeenCalledWith(expect.objectContaining({ projectFrom: 'me@acme.test', business: true })));
+  expect(vi.mocked(openGoogleConsent).mock.calls[0][0]).not.toHaveProperty('clientId');
+});
+
 it('connects through a different Cloud project, asking only for Business Profile', async () => {
   render(<ReviewsSetupView setup={setup} canManage reload={async () => {}} onLinked={() => {}} />);
   expect(screen.getByText('Apply for Business Profile API access')).toBeTruthy();
-  fireEvent.click(screen.getByLabelText(/Use a different Google Cloud project/));
+  const picker = await screen.findByLabelText(/Google Cloud project/);
+  await waitFor(() => expect((picker as HTMLSelectElement).value).toBe('existing:me@acme.test'));
+  fireEvent.change(picker, { target: { value: 'custom' } });
   expect((screen.getByLabelText(/Only ask Google for Business Profile access/) as HTMLInputElement).checked).toBe(true);
   fireEvent.change(screen.getByLabelText('OAuth client ID'), { target: { value: '222222222222-gbp.apps.googleusercontent.com' } });
   fireEvent.change(screen.getByLabelText('OAuth client secret'), { target: { value: 'GOCSPX-secret' } });
   fireEvent.click(screen.getByRole('button', { name: /Sign in with Google/ }));
   await waitFor(() => expect(openGoogleConsent).toHaveBeenCalledWith(expect.objectContaining({
-    business: true, businessOnly: true, clientId: '222222222222-gbp.apps.googleusercontent.com', clientSecret: 'GOCSPX-secret',
+    business: true, only: ['business'], clientId: '222222222222-gbp.apps.googleusercontent.com', clientSecret: 'GOCSPX-secret',
   })));
 });
 

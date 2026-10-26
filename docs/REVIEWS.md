@@ -24,14 +24,14 @@ Replies and posts only work on verified locations; Google refuses them for unver
 
 Google approves the Business Profile APIs per Cloud project, and the approval often ends up on a different project from the one you use for Search Console, or with a different Google user. The app handles both:
 
-- **A different Google user.** Sign them in from **Setup → Connect Business Profile separately**. Their connection sits beside the others in the workspace.
-- **The same Google user, another project.** Tick **Use a different Google Cloud project** and enter that project's OAuth client ID and secret (a *Web application* client with the redirect URI the page shows). A Google user can be connected once per project, so Search Console keeps using its connection and your locations use this one. Each connection shows its project number on the Setup tab and under **Settings → Google Accounts**.
+- **A different Google user.** Under **Setup → Connect Business Profile separately**, pick a **Google Cloud project** you already use and sign in. The app reuses that project's OAuth client, so there's nothing to re-enter; choose the other user on Google's screen.
+- **The same Google user, another project.** Choose **Another project (enter its OAuth client)** and enter that project's client ID and secret once (a *Web application* client with the redirect URI the page shows). A Google user can be connected once per project, so Search Console keeps using its connection and your locations use this one. Each connection shows its project number on the Setup tab and under **Settings → Google Accounts**.
 - **Business Profile only.** Tick **Only ask Google for Business Profile access** (on by default for another project). The consent screen then shows just Business Profile and the email address, so that project doesn't need Search Console or Analytics configured. These connections are never offered to sites for Search Console.
 - **Moving locations.** Open a location's settings on **Locations & rules** and pick another connection, or use **Use this connection** in **Find and link locations**. The app checks that the new connection can see the location and read its reviews before it switches; reviews, rules, brief and history stay.
 
 When a project is still waiting for Google, the Setup tab shows the approval steps and quota link for that project's number. If another project is already approved, connect through it and move the locations across.
 
-A Business-Profile-only sign-in through a project that already has a full connection for the same Google user is refused, because it would replace that connection and remove its Search Console access. Use **Add Business Profile access** on the existing connection instead.
+A sign-in through a project that already has a connection for the same Google user is refused if it would remove that connection's Search Console, Google Ads or Business Profile access (for example a Business-Profile-only sign-in over a full connection). Use **Add Business Profile access** or **Reconnect** on the existing connection instead. Google Ads works the same way; see [Several Google accounts and projects](GOOGLE_ADS.md#several-google-accounts-and-projects).
 
 ## Profile, posts and photos
 

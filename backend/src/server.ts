@@ -84,12 +84,14 @@ import {
   consumeGoogleOAuthState,
   GOOGLE_ADS_SCOPE,
   GOOGLE_BUSINESS_SCOPE,
-  WEBMASTERS_SCOPE,
+  hasBuiltinCredentials,
+  limitedTo,
+  type LimitedProduct,
   createApiEnableAuthorization,
   exchangeCodeForAccessToken,
   enableRequiredApis,
 } from './auth/google-oauth.js';
-import { forgetProbe, googleAttentionCount, KNOWN_GOOGLE_SERVICES, probeDisabledApis, servicesFor, workspaceGoogleHealth } from './auth/google-health.js';
+import { connectionUsage, forgetProbe, googleAttentionCount, googleProjects, KNOWN_GOOGLE_SERVICES, probeDisabledApis, servicesFor, workspaceGoogleHealth } from './auth/google-health.js';
 import { healOrphanedReviewLocations } from './reviews/store.js';
 import { probeSitemap } from './indexer/sitemap.js';
 import { listGSCSites } from './indexer/google.js';
@@ -1304,6 +1306,9 @@ app.get('/api/auth/accounts', async (req) => {
     last_refreshed_at: acc.last_refreshed_at ?? null,
     last_refresh_error: acc.last_refresh_error ?? null,
     granted_scopes: acc.granted_scopes ?? null,
+    project: /^(\d{6,})-/.exec(acc.client_id)?.[1] ?? null,
+    limited_to: limitedTo(acc.granted_scopes),
+    used_for: connectionUsage(acc),
     owner_email: acc.owner_email ?? null,
     is_mine: acc.owner_user_id === user.id,
     can_disconnect: acc.owner_user_id === user.id || !!user.is_super_admin,
@@ -1414,10 +1419,12 @@ app.post('/api/auth/google/start', async (req, reply) => {
   const user = currentUser(req);
   const workspaceId = currentWorkspace(req);
   if (!workspaceId) return reply.status(400).send({ error: 'No active workspace.' });
-  const { clientId, clientSecret, autoSetup, accountId, ads, business, businessOnly } = (req.body ?? {}) as {
+  const { clientId, clientSecret, autoSetup, accountId, ads, business, only, projectFrom } = (req.body ?? {}) as {
     clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean;
-    /** true: ask only for Business Profile. false: full scopes. Omitted: a reconnect keeps what the connection had. */
-    businessOnly?: boolean;
+    /** Products to limit the grant to. [] = full scopes. Omitted: a reconnect keeps what the connection had. */
+    only?: LimitedProduct[];
+    /** Sign a (new) Google user in through the OAuth client an existing connection already uses. */
+    projectFrom?: string;
   };
   let reconnect: ReturnType<typeof getGoogleAccountById> = null;
   if (accountId) {
@@ -1426,23 +1433,29 @@ app.post('/api/auth/google/start', async (req, reply) => {
       return reply.status(404).send({ error: 'Account not found' });
     }
   }
+  // Reusing a project: the OAuth client stays on the server; the browser only names the connection that holds it.
+  let source: ReturnType<typeof getGoogleAccountById> = null;
+  if (projectFrom && !reconnect) {
+    source = getGoogleAccountById(projectFrom);
+    if (!source || (!isGoogleAccountAvailableToWorkspace(source.id, workspaceId) && source.owner_user_id !== user.id && !user.is_super_admin)) {
+      return reply.status(404).send({ error: 'That Google Cloud project isn\'t available in this workspace.' });
+    }
+  }
   const origin = browserOrigin(req);
-  const granted = reconnect?.granted_scopes?.split(' ').filter(Boolean) ?? [];
-  const keepBusinessOnly = granted.length > 0 && granted.includes(GOOGLE_BUSINESS_SCOPE) && !granted.includes(WEBMASTERS_SCOPE);
   try {
     const authorizationUrl = createGoogleOAuthAuthorization({
       userId: user.id,
       workspaceId,
       redirectUri: `${origin}/api/auth/google/callback`,
       autoSetup: !!autoSetup,
-      businessOnly: businessOnly ?? (!!reconnect && keepBusinessOnly),
+      only: only ?? (reconnect ? limitedTo(reconnect.granted_scopes) : null),
       // A reconnect must never silently drop Google Ads or Business Profile:
       // carry them forward when the existing grant has them (the URL no
       // longer uses incremental auth).
       ads: !!ads || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_ADS_SCOPE),
       business: !!business || !!reconnect?.granted_scopes?.split(' ').includes(GOOGLE_BUSINESS_SCOPE),
-      clientId: reconnect?.client_id ?? clientId,
-      clientSecret: reconnect?.client_secret ?? clientSecret,
+      clientId: reconnect?.client_id ?? source?.client_id ?? clientId,
+      clientSecret: reconnect?.client_secret ?? source?.client_secret ?? clientSecret,
       loginHint: reconnect?.email ?? null,
     });
     return { authorizationUrl };
@@ -1573,6 +1586,12 @@ app.get('/api/auth/google/health', async (req) => {
   if (!ws) return [];
   const q = req.query as { probe?: string; fresh?: string };
   return workspaceGoogleHealth(ws, { probe: q.probe === '1' || q.probe === 'true', fresh: q.fresh === '1' || q.fresh === 'true' });
+});
+
+// Cloud projects (OAuth clients) a new Google user can be signed in through without re-entering a client id and secret.
+app.get('/api/auth/google/projects', async (req) => {
+  const ws = currentWorkspace(req);
+  return { builtin_available: hasBuiltinCredentials(), projects: ws ? googleProjects(ws, currentUser(req).id) : [] };
 });
 
 // Start the one-off "switch the APIs on" sign-in for one connection.

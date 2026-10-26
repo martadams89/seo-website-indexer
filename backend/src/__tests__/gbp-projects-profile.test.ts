@@ -177,7 +177,7 @@ describe('one Google user, several Cloud projects', () => {
     try {
       signIn(m.oauth.BUSINESS_ONLY_SCOPES);
       await expect(m.oauth.exchangeCodeForTokens('code', 'https://app.test/cb', owner.workspaceId, owner.user.id, { clientId: OLD_CLIENT, clientSecret: 'secret' }))
-        .rejects.toThrow(/would remove it/);
+        .rejects.toThrow(/with Search Console access, and this sign-in would remove it/);
       expect(m.db.getGoogleAccountById(OLD_ID)!.granted_scopes).toContain('/auth/webmasters');
       const third = `333333333333-x.apps.googleusercontent.com`;
       await m.oauth.exchangeCodeForTokens('code', 'https://app.test/cb', owner.workspaceId, owner.user.id, { clientId: third, clientSecret: 'secret' });
@@ -189,7 +189,7 @@ describe('one Google user, several Cloud projects', () => {
   it('asks only for Business Profile on a Business-Profile-only sign-in', () => {
     const url = new URL(m.oauth.createGoogleOAuthAuthorization({
       userId: owner.user.id, workspaceId: owner.workspaceId, redirectUri: 'https://app.test/api/auth/google/callback',
-      clientId: GBP_CLIENT, clientSecret: 'secret', businessOnly: true,
+      clientId: GBP_CLIENT, clientSecret: 'secret', only: ['business'],
     }));
     expect(url.searchParams.get('scope')!.split(' ').sort()).toEqual([m.oauth.GOOGLE_BUSINESS_SCOPE, 'https://www.googleapis.com/auth/userinfo.email'].sort());
   });

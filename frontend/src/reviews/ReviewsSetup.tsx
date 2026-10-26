@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, Plus, ShieldCheck, Zap } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, ShieldCheck, Zap } from 'lucide-react';
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
+import { GoogleConnectForm } from '../components/GoogleConnectForm';
 import { errorMessage } from '../ads/api';
 import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from '../ads/googleConnect';
 import { reviewsApi, type ConnectionStatus, type ReviewsSetup } from './api';
@@ -25,15 +26,6 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
-  // Off by default: Cloud access puts Workspace accounts under Google Cloud
-  // session control, which forces them to sign in again every few hours.
-  const [autoSetup, setAutoSetup] = useState(false);
-  // A Business Profile project Google approved separately: its own OAuth client, and only the Business Profile scope.
-  const [ownProject, setOwnProject] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [businessOnly, setBusinessOnly] = useState(false);
-  const redirectUri = `${window.location.origin}/api/auth/google/callback`;
   const refreshAfterConsent = useCallback(() => { void reload(true); }, [reload]);
   useGoogleAuthSuccess(refreshAfterConsent);
   useApisEnabled(useCallback(result => {
@@ -48,17 +40,11 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
     toast('success', 'Copied to clipboard');
   }
 
-  async function connect(accountId?: string) {
-    setBusy(accountId ?? 'new');
-    try {
-      const custom = !accountId && (ownProject || !setup?.builtin_oauth_client);
-      if (custom && (!clientId.trim() || !clientSecret.trim())) throw new Error('Enter the OAuth client ID and secret from the Business Profile Cloud project first.');
-      await openGoogleConsent({
-        accountId, business: true, autoSetup,
-        ...(accountId ? {} : { businessOnly }),
-        ...(custom ? { clientId: clientId.trim(), clientSecret: clientSecret.trim() } : {}),
-      });
-    } catch (e) { toast('error', errorMessage(e)); }
+  /** Reconnect, or add Business Profile to, an existing connection (it keeps its project and everything it has). */
+  async function connect(accountId: string) {
+    setBusy(accountId);
+    try { await openGoogleConsent({ accountId, business: true }); }
+    catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }
 
@@ -181,45 +167,8 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
           user, connect it here. The same Google account can be connected once per project: Search Console keeps using its connection, and your
           locations use this one.
         </p>
-        <label className="autosetup-row">
-          <input type="checkbox" checked={ownProject || !setup.builtin_oauth_client} disabled={!setup.builtin_oauth_client}
-            onChange={e => { setOwnProject(e.target.checked); setBusinessOnly(e.target.checked); }} />
-          <div>
-            <strong>Use a different Google Cloud project</strong>
-            <div className="text-dim">Enter the OAuth client (Web application) from the project Google approved for Business Profile.</div>
-          </div>
-        </label>
-        {(ownProject || !setup.builtin_oauth_client) && (
-          <div className="reviews-own-project">
-            <div className="form-grid">
-              <label>OAuth client ID<input className="input" value={clientId} onChange={e => setClientId(e.target.value)} placeholder="1234567890-abc….apps.googleusercontent.com" /></label>
-              <label>OAuth client secret<input className="input" type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder="GOCSPX-…" /></label>
-            </div>
-            <span className="ads-hint">Add this redirect URI to that OAuth client in the Cloud console:</span>
-            <span className="mcp-copy-row"><code>{redirectUri}</code><button className="btn-icon btn-icon-ghost" aria-label="Copy redirect URI" onClick={() => copy(redirectUri)}><Copy size={13} /></button></span>
-          </div>
-        )}
-        <label className="autosetup-row">
-          <input type="checkbox" checked={businessOnly} onChange={e => setBusinessOnly(e.target.checked)} />
-          <div>
-            <strong>Only ask Google for Business Profile access</strong>
-            <div className="text-dim">
-              The consent screen shows just Business Profile, so that project doesn't need Search Console or Analytics set up. Leave it unticked
-              when you're connecting a new Google account through the main project and also want Search Console from it.
-            </div>
-          </div>
-        </label>
-        <label className="autosetup-row">
-          <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
-          <div>
-            <strong>Also keep Cloud access on this connection</strong>
-            <div className="text-dim">Not needed to switch the APIs on: "Switch on for me" does that with a one-off sign-in. Keeping Cloud access lets the app enable APIs without asking, but managed Google Workspace accounts can then be signed out every few hours by Google Cloud session control.</div>
-          </div>
-        </label>
-        <div className="ads-row-actions">
-          <button className="btn btn-primary" disabled={!canManage || busy === 'new'} onClick={() => connect()}><Plus size={14} /> Sign in with Google</button>
-        </div>
-        <p className="ads-hint">On Google's screen, pick the Google user that manages the profiles. Moving a linked location onto the new connection keeps its reviews, rules and history (Locations tab).</p>
+        <GoogleConnectForm product="business" canManage={canManage} />
+        <p className="ads-hint">Moving a linked location onto the new connection keeps its reviews, rules and history (Locations tab).</p>
       </section>
 
       <McpConnect compact />

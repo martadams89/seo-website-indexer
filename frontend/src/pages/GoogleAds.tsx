@@ -92,7 +92,7 @@ export default function GoogleAdsPage() {
       {!canManage && <div className="alert alert-info"><div className="alert-content">You can view Google Ads data in this workspace. Changing budgets, guardrails or approving changes needs the “Manage Google Ads” permission.</div></div>}
 
       {tab === 'setup' && <AdsSetupView setup={setup} accounts={accounts} canManage={canManage} reload={load} onLinked={() => go({ tab: 'clients' })} />}
-      {tab === 'clients' && <AdsClients accounts={accounts} canManage={canManage} reload={load} onOpen={id => go({ tab: 'overview', account: id })} />}
+      {tab === 'clients' && <AdsClients accounts={accounts} connections={setup?.connections ?? []} canManage={canManage} reload={load} onOpen={id => go({ tab: 'overview', account: id })} />}
       {tab === 'overview' && (account
         ? <AdsOverviewView key={account.id} account={account} />
         : <EmptyState onSetup={() => go({ tab: 'setup' })} loading={loading} />)}
