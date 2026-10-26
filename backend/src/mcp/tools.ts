@@ -18,7 +18,7 @@ import {
 import { getUserById, type User } from '../auth/users.js';
 import { accessibleWorkspaces, canAccessSiteInWorkspace, canEditWorkspace, hasCapability, workspaceRole } from '../auth/workspaces.js';
 import { inspectGoogleUrl } from '../indexer/google.js';
-import { getGooglePerformance, getGoogleDimension } from '../indexer/performance.js';
+import { getGooglePerformance, getGoogleDimension, getGoogleQueryPages } from '../indexer/performance.js';
 import { checkSiteHygiene } from '../indexer/hygiene.js';
 import { checkAgentReadiness } from '../indexer/agent-readiness.js';
 import { publishUrlUpdated, indexingQuotaBucket } from '../indexer/google-indexing.js';
@@ -166,6 +166,29 @@ export const TOOLS: ToolDef[] = [
       days: DAYS,
     },
     handler: (ctx, args) => getGoogleDimension(requireSite(ctx, String(args.siteId)), Number(args.days ?? 28), args.dimension as 'country' | 'device' | 'searchAppearance'),
+  },
+  {
+    name: 'get_query_page_performance',
+    title: 'Get search terms and pages together',
+    description: 'Search Console clicks, impressions, CTR and position by search term AND page together, live from Google, for the last N days or any start/end dates: which pages rank for which terms (keyword cannibalisation, the terms each page gets). Filter with query/page "contains" text. Rows come most-clicked first; page through with startRow (next_start_row). fresh=true includes the last couple of days that Google is still finalising. Google leaves out very rare search terms, so rows add up to less than site totals.',
+    scope: 'mcp:read',
+    inputShape: {
+      siteId: z.string(),
+      days: z.number().int().min(1).max(480).optional().describe('Last N days (default 28). Ignored when start and end are given.'),
+      start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      query: z.string().max(200).optional().describe('Only search terms containing this text.'),
+      page: z.string().max(500).optional().describe('Only pages whose URL contains this text.'),
+      limit: z.number().int().min(1).max(5000).optional().describe('Rows per call (default 500).'),
+      startRow: z.number().int().min(0).optional(),
+      fresh: z.boolean().optional(),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    handler: (ctx, args) => getGoogleQueryPages(requireSite(ctx, String(args.siteId)), {
+      days: args.days as number | undefined, start: args.start as string | undefined, end: args.end as string | undefined,
+      query: args.query as string | undefined, page: args.page as string | undefined,
+      limit: args.limit as number | undefined, startRow: args.startRow as number | undefined, fresh: args.fresh as boolean | undefined,
+    }),
   },
   {
     name: 'get_week_over_week_deltas',
