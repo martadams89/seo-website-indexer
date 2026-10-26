@@ -304,6 +304,14 @@ describe('cross-tenant HTTP authorization', () => {
     expect((await json<{ must_change_password: boolean }>(tempLogin)).must_change_password).toBe(true);
   });
 
+  it('serves a client\'s Business Profile connect link without a session, but not the agency\'s link management', async () => {
+    // The link itself is the credential: an unknown one is simply not found, never "sign in first".
+    expect((await req('GET', '/api/connect/not-a-real-link')).status).toBe(404);
+    expect((await req('POST', '/api/connect/not-a-real-link/start')).status).toBe(404);
+    expect((await req('GET', '/api/reviews/connect-invites')).status).toBe(401);
+    expect((await req('POST', '/api/reviews/connect-invites', { body: { projectFrom: 'x' } })).status).toBe(401);
+  });
+
   it('rate-limits repeated bad logins', async () => {
     let sawTooMany = false;
     for (let i = 0; i < 25; i++) {

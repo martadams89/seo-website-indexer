@@ -78,7 +78,10 @@ export function ReviewsLocations({ locations, connections, canManage, reload, on
 }
 
 /** Find every location the connected Google users manage and link the chosen ones. */
-export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void; onLinked: () => void | Promise<void> }) {
+/** Pick Business Profile locations to link; `googleAccountId` limits it to one connection (for example one just signed in). */
+export function LinkLocationsModal({ onClose, onLinked, googleAccountId, description }: {
+  onClose: () => void; onLinked: () => void | Promise<void>; googleAccountId?: string; description?: string;
+}) {
   const toast = useToast();
   const [result, setResult] = useState<DiscoveryResult | null>(null);
   const [error, setError] = useState('');
@@ -86,10 +89,10 @@ export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void;
   const [selected, setSelected] = useState<Record<string, { googleAccountId: string; accountName: string }>>({});
   const [busy, setBusy] = useState(false);
 
-  const scan = useCallback(() => reviewsApi.discover()
+  const scan = useCallback(() => reviewsApi.discover(googleAccountId)
     .then(next => { setResult(next); setError(''); })
     .catch(e => setError(errorMessage(e)))
-    .finally(() => setScanning(false)), []);
+    .finally(() => setScanning(false)), [googleAccountId]);
   useEffect(() => { void scan(); }, [scan]);
 
   async function link() {
@@ -113,7 +116,7 @@ export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void;
   const count = Object.keys(selected).length;
   return (
     <Modal onClose={onClose} size="lg" title="Link Business Profile locations" eyebrow="Google reviews" icon={<Link2 />}
-      description="Locations the connected Google users own or manage."
+      description={description ?? 'Locations the connected Google users own or manage.'}
       footer={<>
         <button className="btn btn-ghost" disabled={scanning} onClick={() => { setScanning(true); setError(''); void scan(); }}><RefreshCw size={13} /> {scanning && result ? 'Scanning…' : 'Scan again'}</button>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>

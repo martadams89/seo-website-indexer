@@ -89,11 +89,11 @@ export function useApisEnabled(onDone: (result: { ok: boolean; enabled: string[]
   }, [onDone]);
 }
 
-/** Run `onSuccess` when the OAuth callback popup reports a completed connection. */
-export function useGoogleAuthSuccess(onSuccess: () => void): void {
+/** Run `onSuccess` when the OAuth callback popup reports a completed connection (with the account it connected). */
+export function useGoogleAuthSuccess(onSuccess: (connected: { email?: string; accountId?: string }) => void): void {
   useEffect(() => {
     const handler = (event: MessageEvent) => {
-      if (event.origin === window.location.origin && event.data?.type === 'GOOGLE_AUTH_SUCCESS') onSuccess();
+      if (event.origin === window.location.origin && event.data?.type === 'GOOGLE_AUTH_SUCCESS') onSuccess({ email: event.data.email, accountId: event.data.accountId });
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);

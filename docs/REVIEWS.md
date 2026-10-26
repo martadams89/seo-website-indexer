@@ -33,6 +33,19 @@ When a project is still waiting for Google, the Setup tab shows the approval ste
 
 A sign-in through a project that already has a connection for the same Google user is refused if it would remove that connection's Search Console, Google Ads or Business Profile access (for example a Business-Profile-only sign-in over a full connection). Use **Add Business Profile access** or **Reconnect** on the existing connection instead. Google Ads works the same way; see [Several Google accounts and projects](GOOGLE_ADS.md#several-google-accounts-and-projects).
 
+## Let a client connect their own Google account
+
+Google approves the Business Profile APIs for a **Cloud project** (the OAuth client), not for a Google account. Once your project is approved, any Google user who signs in through it can let the app manage *their* profiles: the calls use the client's own sign-in but count against your project and its approval. Social schedulers such as Mixpost work this way, and it means nobody has to add you as a manager on the profile first.
+
+1. Connect Google through your approved project at least once (for example `you@agency.com` on the project Google approved), or save that project's OAuth client on the **Setup** tab.
+2. On **Setup → Connect a client's Business Profile**, pick that project, then choose how:
+   - **Send a link.** Optionally enter the client's name and email, and click **Create link** (or **Create and email link** when email is set up). The link works for 3 to 30 days. The client opens it (no account needed here), clicks **Connect with Google**, chooses the Google account they use for their Business Profile and approves **Business Profile access only**. They then tick which of their profiles to share; each one is linked to the workspace straight away and its reviews are imported. You get a notification (event *Google connections*) when they connect and when they share, and the link list shows each link's status, the Google account used and the profiles shared.
+   - **Sign in here.** When you're with the client or have their Google login, click **Sign in with the client's Google account**, choose their account on Google's screen and approve Business Profile access. The location picker then opens for that account so you choose which profiles to link.
+
+Either way the connection belongs to the person who created the link or signed in, and is shared with that workspace, like any other connection. Only the browser that did the Google sign-in can list and share the client's profiles, so a forwarded link can't expose them. Until they share a profile, the client can sign in again with a different Google account if they picked the wrong one. Cancel an unused link at any time; the client can remove access from their Google Account (Security → Your connections to third-party apps).
+
+Your project's OAuth consent screen must be set to **External** and **In production**, and Google expects it to be verified for the Business Profile scope. An **Internal** app only lets people in your own Google Workspace organisation sign in, and in **Testing** only listed test users can sign in and their access expires after 7 days. Every client's calls share your project's Business Profile quota (300 requests a minute once approved).
+
 ## Profile, posts and photos
 
 - **Profile.** A completeness checklist (verification, description length, categories, phone, website, opening hours, holiday hours for the next 60 days, photos, logo and cover, recent posts, review replies, fresh reviews, Google-suggested edits) with the next step for each gap. Edit the description (up to 750 characters, no links), phone, website, weekly opening hours (up to three periods a day, overnight periods allowed) and special or holiday hours. Name, categories and address stay in Business Profile Manager, because Google may ask you to verify again after changing them.

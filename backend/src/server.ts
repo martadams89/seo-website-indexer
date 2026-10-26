@@ -169,6 +169,7 @@ import { healOrphanedAdsAccounts } from './ads/store.js';
 import { registerMcpOAuthRoutes, registerMcpOAuthApiRoutes } from './mcp/oauth.js';
 import { registerAdsRoutes } from './ads/routes.js';
 import { registerReviewsRoutes } from './reviews/routes.js';
+import { completeConnectInvite, registerConnectRoutes } from './reviews/connect-routes.js';
 import { registerSearchRoutes } from './analytics/search-routes.js';
 import { createMcpToken, listMcpTokens, revokeMcpToken, normalizeScopes } from './mcp/tokens.js';
 import { addAnnotation } from './platform/store.js';
@@ -304,8 +305,9 @@ const AUTH_OPEN_PATHS = new Set<string>([
 ]);
 // Pre-auth path prefixes (dynamic segments) — e.g. the SSO provider redirect
 // and callback which the identity provider hits with no session, and the
-// workspace-invite accept flow (the invitee has no account/session yet).
-const AUTH_OPEN_PREFIXES = ['/api/auth/sso/', '/api/invites/', '/api/v1/'];
+// workspace-invite accept flow (the invitee has no account/session yet), and a
+// client's Business Profile connect link (the link itself is the credential).
+const AUTH_OPEN_PREFIXES = ['/api/auth/sso/', '/api/invites/', '/api/v1/', '/api/connect/'];
 function sessionTokenFromReq(req: { headers: Record<string, unknown> }): string | undefined {
   const raw = req.headers['cookie'];
   if (typeof raw !== 'string') return undefined;
@@ -1494,7 +1496,7 @@ app.get('/api/auth/google/callback', async (req, reply) => {
     return reply.type('text/html').send(googleResultPage({
       ok: false, title: error === 'access_denied' ? 'Google sign-in cancelled' : 'Google sign-in failed',
       message: error === 'access_denied' ? 'Nothing was changed. Start again and choose the Google account you want.' : error,
-      post: null, openerOrigin, returnTo,
+      post: null, openerOrigin, returnTo, ...(pending?.payload?.inviteId ? { backLabel: 'Back' } : {}),
     }));
   }
 
@@ -1529,6 +1531,9 @@ app.get('/api/auth/google/callback', async (req, reply) => {
       post: { type: 'GOOGLE_APIS_ENABLED', ok, enabled: result.enabled, skipped: result.skipped }, openerOrigin, returnTo, autoClose: ok,
     }));
   }
+
+  // A client connecting their own account through an agency's connect link.
+  if (pending.payload?.inviteId) return reply.type('text/html').send(await completeConnectInvite(pending, code));
 
   try {
     const connected = await exchangeCodeForTokens(code, pending.redirectUri, pending.workspaceId, pending.userId,
@@ -2913,6 +2918,7 @@ registerPlatformRoutes(app);
 registerDiscoveryRoutes(app);
 registerAdsRoutes(app);
 registerReviewsRoutes(app);
+registerConnectRoutes(app, { redirectOrigin: browserOrigin, publicOrigin, secureCookies });
 registerSearchRoutes(app);
 registerPlaybookRoutes(app);
 registerMcpOAuthRoutes(app);

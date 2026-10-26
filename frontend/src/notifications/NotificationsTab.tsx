@@ -34,7 +34,7 @@ const EVENT_GROUPS: Array<{ title: string; events: EventInfo[] }> = [
     events: [
       { id: 'review_alerts', label: 'Google review alerts', description: 'A new low-rated Google review arrives, or Google rejects a reply (threshold set per location).' },
       { id: 'profile_alerts', label: 'Business Profile changes', description: 'Google, or someone using "Suggest an edit", changed a Business Profile you manage (checked daily, sent once per change).' },
-      { id: 'google_connection', label: 'Google connection problems', description: 'A Google connection needs reconnecting, a new permission, or a Google API switched on. Sent once per change.' },
+      { id: 'google_connection', label: 'Google connections', description: 'A Google connection needs reconnecting, a new permission or a Google API switched on (sent once per change), or a client connects their Business Profile through your link.' },
       { id: 'citation_changes', label: 'AI citation movement', description: 'A tracked answer engine gains or loses your domain.' },
     ],
   },

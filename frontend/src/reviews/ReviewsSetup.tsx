@@ -3,6 +3,7 @@ import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, ShieldCheck,
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
 import { GoogleConnectForm } from '../components/GoogleConnectForm';
+import { ClientConnectLinks } from './ClientConnectLinks';
 import { errorMessage } from '../ads/api';
 import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from '../ads/googleConnect';
 import { reviewsApi, type ConnectionStatus, type ReviewsSetup } from './api';
@@ -171,6 +172,8 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
         <GoogleConnectForm product="business" canManage={canManage} />
         <p className="ads-hint">Moving a linked location onto the new connection keeps its reviews, rules and history (Locations tab).</p>
       </section>
+
+      <ClientConnectLinks canManage={canManage} onLinked={async () => { await reload(true); onLinked(); }} />
 
       <McpConnect compact />
       {linking && <LinkLocationsModal onClose={() => setLinking(false)} onLinked={async () => { setLinking(false); await reload(true); onLinked(); }} />}

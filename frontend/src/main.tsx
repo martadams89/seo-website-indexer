@@ -34,6 +34,7 @@ const GoogleAdsPage = lazy(() => import('./pages/GoogleAds'))
 const ReviewsPage = lazy(() => import('./pages/Reviews'))
 const OAuthConsentPage = lazy(() => import('./pages/OAuthConsent'))
 const ApprovePage = lazy(() => import('./pages/Approve'))
+const ConnectBusinessPage = lazy(() => import('./pages/ConnectBusiness'))
 
 const loading = <div className="page-loading">Opening workspace…</div>
 
@@ -46,6 +47,8 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         {/* Public, outside the auth gate — reached from the emailed workspace-invite link */}
         <Route path="/accept-invite" element={<AcceptInvitePage />} />
+        {/* Public — a client connecting their own Google Business Profile from an agency's link */}
+        <Route path="/connect/:token" element={<ConnectBusinessPage />} />
         <Route path="/*" element={
           <AuthGate>
           <WorkspaceProvider>

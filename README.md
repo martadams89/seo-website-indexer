@@ -126,7 +126,7 @@ Connections are configured in the dashboard and scoped to the active workspace u
 | --- | --- |
 | Search and indexing | Google Search Console, IndexNow, Bing Webmaster |
 | Paid search | Google Ads (API v26, access through your own Google Cloud project) |
-| Local | Google Business Profile: reviews, replies, profile edits, posts, photos and performance (needs Google's one-time API approval for your Cloud project) |
+| Local | Google Business Profile: reviews, replies, profile edits, posts, photos and performance (needs Google's one-time API approval for your Cloud project). Clients can connect their own Google account through your approved project with a connect link. |
 | Analytics and performance | Google Analytics 4, PageSpeed and CrUX, Cloudflare, Plausible, Matomo |
 | AI visibility | OpenAI, Anthropic, Gemini, Perplexity, xAI, Brave Search |
 | Publishing | WordPress, Shopify, Webflow |
@@ -156,7 +156,7 @@ Google never adds a permission silently: a new scope always needs one consent cl
 - **Switched-off APIs.** Every 30 minutes, and whenever you open that page, the app checks the APIs each connection uses (Search Console, Analytics Admin, Google Ads, Business Profile). Anything Google reports as disabled gets a Cloud console link and a **Switch them on for me** button. That button starts a one-off sign-in that asks for Cloud access, uses it once to enable the APIs, and keeps nothing. The saved connection never carries the Cloud scope, so Workspace Cloud session control can't expire it. Your Google user needs the Service Usage Admin (or Owner/Editor) role on the project.
 - **Several Google accounts in one browser.** Every Google sign-in shows Google's account chooser, including reconnects and adding access, so the browser's default Google account never gets picked for you. A reconnect that comes back as a different account changes nothing and says so. The sign-in window opens straight from the click so pop-up blockers leave it alone; if pop-ups are blocked anyway, the sign-in continues in the same tab and returns you to the page you started from.
 - **Several accounts and projects.** Google grants API access and quota per Cloud project, so a workspace can use one project for Search Console, another for Google Ads and another for Business Profile, with the same or different Google users. A Google user can be connected once per project, and a connection can be limited to Google Ads or Business Profile only. New sign-ins pick a project the app already knows, so its OAuth client is never re-entered. See [Several Google accounts and projects](docs/GOOGLE_ADS.md#several-google-accounts-and-projects).
-- **Alerts.** A banner on every page says when a connection needs attention. Each workspace also gets a notification (event *Google connection problems*) when a connection needs reconnecting, a permission or an API, sent once per change rather than every hour.
+- **Alerts.** A banner on every page says when a connection needs attention. Each workspace also gets a notification (event *Google connections*) when a connection needs reconnecting, a permission or an API, sent once per change rather than every hour.
 
 ## How indexing works
 

@@ -292,7 +292,7 @@ Provider setup links: [Anthropic API keys](https://console.anthropic.com/setting
 
 Notification credentials belong to the active workspace under **Settings → Notifications**. The page has three parts:
 
-- **Events.** Switch each event on or off for the workspace. *Needs a decision* covers review replies, Business Profile changes and Google Ads changes an AI assistant proposed but may not publish on its own, plus Ads changes Google refused. *Alerts* covers new low-rated reviews, edits Google made to a profile, Google connection problems and AI citation movement. *Runs and reports* covers runs and the weekly ranking playbook.
+- **Events.** Switch each event on or off for the workspace. *Needs a decision* covers review replies, Business Profile changes and Google Ads changes an AI assistant proposed but may not publish on its own, plus Ads changes Google refused. *Alerts* covers new low-rated reviews, edits Google made to a profile, Google connections (problems, and clients connecting through a connect link) and AI citation movement. *Runs and reports* covers runs and the weekly ranking playbook.
 - **Channels.** Slack, Discord, ntfy, Telegram, WhatsApp, a generic webhook and email. Email has default recipients and any number of named lists, and each list picks its own events.
 - **Where each event goes.** A grid of events against the configured channels. A channel gets every event that's switched on unless you untick it there, so you can, for example, send approvals to WhatsApp and leave run summaries to email.
 

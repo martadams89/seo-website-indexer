@@ -8,6 +8,7 @@ import { openGoogleConsent } from '../ads/googleConnect';
 const toast = vi.fn();
 vi.mock('../AppContext', () => ({ useToast: () => toast }));
 vi.mock('../components/McpConnect', () => ({ McpConnect: () => null }));
+vi.mock('../workspace/WorkspaceContext', () => ({ useWorkspace: () => ({ active: { id: 'ws1', permissions: { manage_integrations: true } } }) }));
 vi.mock('../ads/googleConnect', () => ({
   openGoogleConsent: vi.fn(async () => {}), openApiEnable: vi.fn(async () => []), useApisEnabled: () => {}, useGoogleAuthSuccess: () => {},
 }));
@@ -18,7 +19,7 @@ vi.mock('../api/client', () => ({
 }));
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
-  reviewsApi: { profile: vi.fn(), editProfile: vi.fn(), resolveGoogleUpdates: vi.fn(), checkGoogleUpdates: vi.fn() },
+  reviewsApi: { profile: vi.fn(), editProfile: vi.fn(), resolveGoogleUpdates: vi.fn(), checkGoogleUpdates: vi.fn(), connectInvites: vi.fn(async () => []) },
 }));
 
 const links = { access_form: 'https://support.google.com/business/contact/api_default', quotas: 'https://console.cloud.google.com/q', enable_apis: 'https://console.cloud.google.com/e', business_profile: 'https://business.google.com/locations' };

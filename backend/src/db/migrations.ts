@@ -8,6 +8,34 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261027_01_google_connect_invites',
+    description: 'Links that let a client connect their own Google account (Business Profile) through the agency\'s approved Cloud project',
+    up(db) {
+      db.exec(`
+        CREATE TABLE google_connect_invites (
+          id TEXT PRIMARY KEY,
+          token_hash TEXT NOT NULL UNIQUE,
+          token_enc TEXT NOT NULL,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          product TEXT NOT NULL DEFAULT 'business',
+          project_source TEXT NOT NULL,
+          client_name TEXT,
+          client_email TEXT,
+          status TEXT NOT NULL DEFAULT 'open',
+          google_account_id TEXT,
+          google_email TEXT,
+          browser_hash TEXT,
+          shared_locations TEXT,
+          connected_at TEXT,
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_google_connect_invites_ws ON google_connect_invites(workspace_id, created_at);
+      `);
+    },
+  },
+  {
     id: '20261026_03_saved_google_oauth_clients',
     description: 'Save OAuth clients (Cloud projects) entered when connecting Google, so they never need re-entering',
     up(db) {
