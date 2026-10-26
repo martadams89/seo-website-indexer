@@ -176,6 +176,8 @@ describe('Google reviews over MCP', () => {
     expect(result.status).toBe('needs_approval');
     expect(result.findings.map(f => f.code)).toContain('low_rating');
     expect(calls.some(c => c.method === 'PUT')).toBe(false);
+    // A person is told, with a link straight to the reply (batched for a minute in real use).
+    expect(await (await import('../utils/approval-alerts.js')).flushApprovalAlerts()).toBeGreaterThanOrEqual(1);
     const approved = await m.service.approveReply(result.reply_id, { user: alice.user, text: 'Sorry we were late, and that we didn\'t call ahead. Please ring us so we can put it right.' });
     expect(approved.status).toBe('published');
     expect(calls.find(c => c.method === 'PUT')?.body?.comment).toMatch(/didn't call ahead/);

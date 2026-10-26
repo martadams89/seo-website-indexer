@@ -3,9 +3,10 @@
 // or a new project's OAuth client. A connection can be limited to one product,
 // because Google grants API access and quota per project: a workspace often
 // has one project for Search Console, one for Google Ads and one for Business
-// Profile.
+// Profile. An OAuth client typed in here is saved (secret encrypted, never
+// sent back) so it's picked from the list next time instead of re-entered.
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Plus } from 'lucide-react';
+import { Copy, Plus, Save, Trash2 } from 'lucide-react';
 import { apiFetch } from '../api/client';
 import { useToast } from '../AppContext';
 import { openGoogleConsent, useGoogleAuthSuccess } from '../ads/googleConnect';
@@ -17,6 +18,9 @@ interface GoogleProject {
   project: string | null;
   source_id: string;
   builtin: boolean;
+  /** Set when the OAuth client is saved for this workspace or by you. */
+  saved_client_id: string | null;
+  label: string | null;
   connections: Array<{ id: string; email: string | null; limited_to: Product[] | null; in_workspace: boolean; sites: number; ads_clients: number; locations: number }>;
 }
 
@@ -28,8 +32,11 @@ function projectSummary(p: GoogleProject): string {
     c.ads_clients ? `${c.ads_clients} Ads client${c.ads_clients === 1 ? '' : 's'}` : '',
     c.locations ? `${c.locations} location${c.locations === 1 ? '' : 's'}` : '',
   ].filter(Boolean).join(', ');
+  if (!p.connections.length) return 'saved, nobody signed in yet';
   return p.connections.slice(0, 3).map(c => `${c.email ?? c.id}${uses(c) ? ` (${uses(c)})` : ''}`).join('; ') + (p.connections.length > 3 ? '…' : '');
 }
+
+const projectName = (p: GoogleProject) => `${p.label ? `${p.label} — ` : ''}Project ${p.project ?? 'unknown'}${p.builtin ? ' (built-in)' : ''}`;
 
 /**
  * `product` is what the page connects for: 'ads' or 'business' offer a
@@ -43,6 +50,7 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
   const [choice, setChoice] = useState('');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [clientLabel, setClientLabel] = useState('');
   const [limited, setLimited] = useState(false);
   const [autoSetup, setAutoSetup] = useState(false);
   const [withAds, setWithAds] = useState(false);
@@ -56,12 +64,14 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
       setBuiltinAvailable(r.builtin_available);
       // Default to the project the workspace already uses, so nobody retypes a client they've already set up.
       setChoice(current => current || (r.projects[0] ? `existing:${r.projects[0].source_id}` : r.builtin_available ? 'builtin' : 'custom'));
+      return r.projects;
     })
-    .catch(() => setChoice(current => current || 'custom')), []);
+    .catch(() => { setChoice(current => current || 'custom'); return null; }), []);
   useEffect(() => { void load(); }, [load]);
   useGoogleAuthSuccess(useCallback(() => { void load(); onConnected?.(); }, [load, onConnected]));
 
   const custom = choice === 'custom';
+  const selected = projects.find(p => `existing:${p.source_id}` === choice) ?? null;
   const showBuiltin = builtinAvailable && !projects.some(p => p.builtin);
 
   function pick(next: string) {
@@ -76,12 +86,45 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
       if (custom && (!clientId.trim() || !clientSecret.trim())) throw new Error('Enter the OAuth client ID and secret from that Google Cloud project first.');
       await openGoogleConsent({
         ...(choice.startsWith('existing:') ? { projectFrom: choice.slice('existing:'.length) } : {}),
-        ...(custom ? { clientId: clientId.trim(), clientSecret: clientSecret.trim() } : {}),
+        ...(custom ? { clientId: clientId.trim(), clientSecret: clientSecret.trim(), clientLabel: clientLabel.trim() || undefined } : {}),
         ads: product === 'ads' || withAds,
         business: product === 'business' || withBusiness,
         ...(product !== 'all' && limited ? { only: [product] } : {}),
         autoSetup,
       });
+    } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+    // The client was saved when the sign-in started, so pick it from the list from now on.
+    if (custom) {
+      const id = clientId.trim();
+      const list = await load();
+      const savedProject = list?.find(p => p.saved_client_id && p.project && id.startsWith(`${p.project}-`));
+      if (savedProject) { setChoice(`existing:${savedProject.source_id}`); setClientId(''); setClientSecret(''); setClientLabel(''); }
+    }
+  }
+
+  /** Keep a project's OAuth client for later without signing anyone in now. */
+  async function saveProject() {
+    setBusy(true);
+    try {
+      if (!clientId.trim() || !clientSecret.trim()) throw new Error('Enter the OAuth client ID and secret first.');
+      const saved = await apiFetch<{ id: string }>('/api/auth/google/clients', { method: 'POST', body: JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), label: clientLabel.trim() || undefined }) });
+      const list = await load();
+      const savedProject = list?.find(p => p.saved_client_id === saved.id);
+      if (savedProject) setChoice(`existing:${savedProject.source_id}`);
+      setClientId(''); setClientSecret(''); setClientLabel('');
+      toast('success', 'Project saved — pick it here whenever you connect a Google account');
+    } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  }
+
+  async function forgetProject(p: GoogleProject) {
+    if (!p.saved_client_id || !confirm(`Forget the saved OAuth client for ${projectName(p)}? Nothing in Google Cloud changes; you'd need to enter it again to use it.`)) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/auth/google/clients/${encodeURIComponent(p.saved_client_id)}`, { method: 'DELETE' });
+      setChoice('');
+      await load();
     } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
     setBusy(false);
   }
@@ -92,7 +135,7 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
         <select className="input" value={choice} disabled={!canManage} onChange={e => pick(e.target.value)}>
           {projects.map(p => (
             <option key={p.source_id} value={`existing:${p.source_id}`}>
-              {`Project ${p.project ?? 'unknown'}${p.builtin ? ' (built-in)' : ''}: ${projectSummary(p)}`}
+              {`${projectName(p)}: ${projectSummary(p)}`}
             </option>
           ))}
           {showBuiltin && <option value="builtin">This server's built-in project</option>}
@@ -104,12 +147,17 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
             : 'Reuses that project\'s OAuth client; there\'s nothing to re-enter. Google asks which account to sign in with, so you can add a different Google user here too.'}
         </small>
       </label>
+      {selected?.saved_client_id && selected.connections.length === 0 && (
+        <button type="button" className="btn btn-ghost btn-sm google-connect-forget" disabled={!canManage || busy} onClick={() => forgetProject(selected)}><Trash2 size={13} /> Forget this saved project</button>
+      )}
       {custom && (
         <div className="google-connect-custom">
           <div className="form-grid">
             <label>OAuth client ID<input className="input" value={clientId} onChange={e => setClientId(e.target.value)} placeholder="1234567890-abc….apps.googleusercontent.com" /></label>
             <label>OAuth client secret<input className="input" type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder="GOCSPX-…" /></label>
+            <label>Name (optional)<input className="input" value={clientLabel} maxLength={80} onChange={e => setClientLabel(e.target.value)} placeholder={product === 'ads' ? 'e.g. Google Ads – Basic access' : product === 'business' ? 'e.g. Business Profile – approved' : 'e.g. Main project'} /></label>
           </div>
+          <span className="google-connect-hint">It's saved for this workspace when you sign in or press Save — the secret is stored encrypted and never shown again.</span>
           <span className="google-connect-hint">Create a <b>Web application</b> client in that project and add this redirect URI:</span>
           <span className="mcp-copy-row"><code>{redirectUri}</code><button type="button" className="btn-icon btn-icon-ghost" aria-label="Copy redirect URI" onClick={() => { navigator.clipboard.writeText(redirectUri); toast('success', 'Copied to clipboard'); }}><Copy size={13} /></button></span>
         </div>
@@ -146,6 +194,7 @@ export function GoogleConnectForm({ product, canManage, onConnected }: { product
       </label>
       <div className="google-connect-actions">
         <button type="button" className="btn btn-primary" disabled={!canManage || busy || !choice} onClick={start}><Plus size={14} /> {busy ? 'Opening Google…' : 'Sign in with Google'}</button>
+        {custom && <button type="button" className="btn btn-secondary" disabled={!canManage || busy} onClick={saveProject}><Save size={14} /> Save project for later</button>}
       </div>
       <p className="google-connect-hint">The same Google account can be connected once per project, so it can use one project for Search Console and another for {product === 'all' ? 'Google Ads or Business Profile' : PRODUCT_LABEL[product]}.</p>
     </div>

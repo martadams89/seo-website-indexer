@@ -104,10 +104,11 @@ export default function Layout() {
 
   // Redirect to onboarding if not configured
   useEffect(() => {
-    if (forceSetup && window.location.pathname !== '/setup') {
+    // A link from a notification (approve or reject something) always opens what it points at.
+    if (forceSetup && location.pathname !== '/setup' && !location.pathname.startsWith('/approve/')) {
       navigate('/setup');
     }
-  }, [forceSetup, navigate]);
+  }, [forceSetup, navigate, location.pathname]);
 
   // SSE connection for live logs
   useEffect(() => {
@@ -361,7 +362,7 @@ export default function Layout() {
       {/* ── Main ── */}
       <main inert={isMobile&&mobileOpen} className="main-content" id="main-content" tabIndex={-1}>
         <div className="global-toolbar">
-          <div><span>{active?.name ?? 'Workspace'}</span><strong>{ALL_NAV.find(item => item.to === location.pathname || (item.to !== '/' && location.pathname.startsWith(`${item.to}/`)))?.label ?? 'Workspace detail'}</strong></div>
+          <div><span>{active?.name ?? 'Workspace'}</span><strong>{ALL_NAV.find(item => item.to === location.pathname || (item.to !== '/' && location.pathname.startsWith(`${item.to}/`)))?.label ?? (location.pathname.startsWith('/approve/') ? 'Approval' : 'Workspace detail')}</strong></div>
           <div className="global-toolbar-actions">
             <button type="button" className="activity-trigger" onClick={() => { setCommandOpen(false); setActivityOpen(true); }} aria-label="Open recent activity"><Activity size={14}/><span>Activity</span>{!sseConnected&&<i/>}</button>
             <button type="button" className="command-trigger" onClick={() => { setActivityOpen(false); setCommandOpen(true); }}><Search size={14} /><span>Jump to anything…</span><kbd><Command size={11} />K</kbd></button>

@@ -54,6 +54,7 @@ Official references: [Data API quickstart](https://developers.google.com/analyti
 | ntfy | Topic; access token only for a protected topic | Settings → Notifications |
 | Telegram | Bot token plus the destination chat ID | Settings → Notifications |
 | Email | SMTP account allowed to send as `SMTP_FROM` | Container environment + Settings → Notifications |
+| WhatsApp | Meta app with WhatsApp, a System User token with `whatsapp_business_messaging`, the phone number ID and an approved message template | Settings → Notifications |
 | Server log ingest | Workspace service token with `logs:write` | Governance & Usage → API & Webhooks |
 | External rank feed | Workspace service token with `events:write` | Governance & Usage → API & Webhooks |
 | Outbound automation webhook | No provider permission; receiving HTTPS endpoint must accept signed POST requests | Governance & Usage → API & Webhooks |
@@ -289,7 +290,19 @@ Provider setup links: [Anthropic API keys](https://console.anthropic.com/setting
 
 ## Notifications
 
-Notification credentials belong to the active workspace under **Settings → Notifications**.
+Notification credentials belong to the active workspace under **Settings → Notifications**. The page has three parts:
+
+- **Events.** Switch each event on or off for the workspace. *Needs a decision* covers review replies, Business Profile changes and Google Ads changes an AI assistant proposed but may not publish on its own, plus Ads changes Google refused. *Alerts* covers new low-rated reviews, edits Google made to a profile, Google connection problems and AI citation movement. *Runs and reports* covers runs and the weekly ranking playbook.
+- **Channels.** Slack, Discord, ntfy, Telegram, WhatsApp, a generic webhook and email. Email has default recipients and any number of named lists, and each list picks its own events.
+- **Where each event goes.** A grid of events against the configured channels. A channel gets every event that's switched on unless you untick it there, so you can, for example, send approvals to WhatsApp and leave run summaries to email.
+
+### Links in messages
+
+Messages about something waiting for a decision link straight to it: `https://YOUR-HOST/w/<workspace>/approve/<kind>/<id>`. The page shows the proposed reply or change with **Approve** and **Reject** (a reply can be edited first). Each channel shows links its own way: buttons in email, tappable actions in ntfy, links in Slack, Discord and Telegram, and plain URLs in WhatsApp.
+
+Opening a link needs someone signed in with access to that workspace. Nothing can be approved from the message itself, so an email security scanner that follows links, or a forwarded message, can't approve anything. Proposals that arrive close together are gathered for `NOTIFY_BATCH_SECONDS` (60 by default) and sent as one message that lists them and links to the full approvals list.
+
+Links use `PUBLIC_URL` when it's set; otherwise the address the dashboard was last opened on.
 
 ### Slack
 
@@ -314,11 +327,23 @@ The bot only needs to send messages to that chat. See the [Telegram bot tutorial
 
 ### Email
 
-Email uses the installation’s SMTP account rather than a workspace API key. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, optional `SMTP_USER`/`SMTP_PASS` and `SMTP_FROM` on the container, then add recipient addresses under Notifications. The SMTP identity must be allowed to send as `SMTP_FROM`; configure SPF, DKIM and DMARC at the mail provider for deliverability. See [deployment and SMTP setup](DEPLOYMENT.md#email-and-password-resets).
+Email uses the installation’s SMTP account rather than a workspace API key. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, optional `SMTP_USER`/`SMTP_PASS` and `SMTP_FROM` on the container, then add recipient addresses under Notifications. Each recipient gets their own copy, so people on a list don't see each other's addresses. Add named lists to send different events to different people, for example Google Ads approvals to the paid-search team and review approvals to the account manager. The SMTP identity must be allowed to send as `SMTP_FROM`; configure SPF, DKIM and DMARC at the mail provider for deliverability. See [deployment and SMTP setup](DEPLOYMENT.md#email-and-password-resets).
+
+### WhatsApp
+
+Messages go through Meta's WhatsApp Business Cloud API from a business phone number you control.
+
+1. Create an app of type **Business** in [Meta for Developers](https://developers.facebook.com/apps) and add the **WhatsApp** product.
+2. Under **WhatsApp → API Setup**, add your business phone number (or use the test number while trying it out) and copy its **Phone number ID**. This is a long numeric ID, not the phone number.
+3. In Business Settings → [System users](https://business.facebook.com/settings/system-users), add a system user, assign it the app with the `whatsapp_business_messaging` permission and generate a token that doesn't expire. A temporary token from the API Setup page stops working after 24 hours.
+4. In WhatsApp Manager → [Message templates](https://business.facebook.com/wa/manage/message-templates/), create a **Utility** template whose body has one variable, for example `SEO alert: {{1}}`, and wait for Meta to approve it. The app puts the whole notification, including its links, into `{{1}}`.
+5. Enter the token, phone number ID, recipients (full international numbers separated by commas), template name and its language code (for example `en` or `en_GB`).
+
+Without a template, WhatsApp only delivers free-form messages to people who have messaged your business number in the last 24 hours, and the test send reports that. Meta charges per template message beyond its free allowance. `WHATSAPP_GRAPH_VERSION` (default `v23.0`) sets the Graph API version.
 
 ### Generic webhook
 
-Provide an HTTPS endpoint that accepts a JSON `POST` body containing `title` and `body`. If the endpoint requires its own authentication, put an unguessable credential in the webhook URL only when the receiver supports that safely; otherwise use the signed outbound webhooks under Governance.
+Provide an HTTPS endpoint that accepts a JSON `POST` body: `{"title": "…", "body": "…", "links": [{"label": "…", "url": "…"}], "event": "review_approvals"}`. `event` is the event name, or `test` for a test send. This also suits Zapier, Make and n8n. If the endpoint requires its own authentication, put an unguessable credential in the webhook URL only when the receiver supports that safely; otherwise use the signed outbound webhooks under Governance.
 
 ## Internal APIs and automation
 

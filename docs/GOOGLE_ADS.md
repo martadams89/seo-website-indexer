@@ -33,7 +33,7 @@ Open **Google Ads → Setup**. The checklist at the top shows what is left to do
 
 - **Already connected for Search Console?** Click **Add Google Ads access** next to that connection. Google asks you to consent to the extra permission; everything the connection already had is kept and no sites need relinking.
 - **Another Google user:** under **Connect a Google user for Google Ads**, pick a **Google Cloud project** you already use and click **Sign in with Google**. The app reuses that project's OAuth client, so there's no client ID or secret to enter; on Google's screen choose the user that manages your clients, ideally the one on your manager (MCC) account.
-- **Another project:** choose **Another project (enter its OAuth client)** for a project with a different access level or quota (see [Several Google accounts and projects](#several-google-accounts-and-projects)). You enter its client ID and secret once; later sign-ins through it reuse them.
+- **Another project:** choose **Another project (enter its OAuth client)** for a project with a different access level or quota (see [Several Google accounts and projects](#several-google-accounts-and-projects)). You enter its client ID and secret once, with an optional name such as *Ads – Basic access*; the app saves them for the workspace (or press **Save project for later** without signing in), and later sign-ins pick the project from the list.
 
 The same form is under **Settings → Google Accounts → Connect Account** (tick **Also allow Google Ads management**).
 
@@ -122,7 +122,7 @@ Shared budgets are counted once. Cutting spend is always inside the limits.
 
 1. **Propose.** A change tool (or the dashboard) builds REST `MutateOperation`s. Google validates them with `validate_only=true`; if Google rejects them the plan is stored as *failed* with Google's message. Otherwise the guardrails set the status: **Ready to apply** (`pending`), **Needs approval** or **Blocked**.
 2. **Apply.** `ads_apply_change` applies a *pending* plan. The guardrails are checked again against fresh account state first, so two changes can't add up to more than the budget allows. A plan that now needs approval is left for a person.
-3. **Approve.** On **Approvals & history**, *Approve & apply* applies a waiting plan straight away (a person's approval overrides approval rules, never *blocked* or read-only). *Reject* closes it.
+3. **Approve.** On **Approvals & history**, *Approve & apply* applies a waiting plan straight away (a person's approval overrides approval rules, never *blocked* or read-only). *Reject* closes it. Switch on **Google Ads approvals** under **Settings → Notifications** to be told by email, WhatsApp, Slack or another channel when an AI assistant's change is waiting; the message links straight to the change. **Google Ads changes that failed** reports changes Google refused. See [notifications](INTEGRATIONS.md#notifications).
 4. **Revert.** *Revert* proposes the opposite of an applied change: previous budgets, bids and statuses are restored and anything it created is removed. The revert is a normal plan with the normal guardrails.
 
 Plans expire after 24 hours if they aren't applied. Each applied change is recorded in the audit log (`google_ads.change_applied`) and in usage (`google_ads` / `mutate`, counted in operations), so workspace usage budgets can cap it.

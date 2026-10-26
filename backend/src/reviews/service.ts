@@ -9,6 +9,8 @@ import {
 } from '../auth/google-oauth.js';
 import { getGoogleAccountsForWorkspace, getSitesForWorkspace, type GoogleAccount } from '../db/database.js';
 import { notificationEventEnabled, sendWorkspaceNotification } from '../utils/notify.js';
+import { workspaceLink } from '../utils/links.js';
+import { queueApprovalAlert } from '../utils/approval-alerts.js';
 import type { User } from '../auth/users.js';
 import {
   ACCESS_FORM_URL, BUSINESS_SCOPE, deleteReply, fetchDailyMetrics, fetchSearchKeywords, listBusinessAccounts, listLocations as listGoogleLocations,
@@ -269,7 +271,7 @@ async function alert(location: ReviewLocation, fresh: StoredReview[], rejected: 
   if (!fresh.length && !rejected.length) return;
   if (!notificationEventEnabled(location.workspace_id, 'review_alerts')) return;
   const name = location.title ?? location.location_name;
-  const origin = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : null;
+  const link = workspaceLink(location.workspace_id, `/reviews?location=${location.id}&filter=unreplied`);
   const MAX_LINES = 8;
   const lines = [
     ...fresh.slice(0, MAX_LINES).map(r => `${stars(r.rating)} ${r.reviewer_name ?? 'Anonymous'}: "${excerpt(r.comment)}"`),
@@ -279,8 +281,9 @@ async function alert(location: ReviewLocation, fresh: StoredReview[], rejected: 
   const title = fresh.length
     ? `${fresh.length} new review${fresh.length === 1 ? '' : 's'} need${fresh.length === 1 ? 's' : ''} attention — ${name}`
     : `Review reply rejected — ${name}`;
-  const body = `${lines.join('\n')}${origin ? `\n\nReply: ${origin}/reviews?location=${location.id}` : ''}`;
-  await sendWorkspaceNotification(location.workspace_id, title, body, 'review_alerts').catch(() => false);
+  await sendWorkspaceNotification(location.workspace_id, title, lines.join('\n'), 'review_alerts', {
+    links: link ? [{ label: 'Reply to reviews', url: link }] : [],
+  }).catch(() => false);
 }
 
 /**
@@ -398,6 +401,15 @@ export async function submitReply(input: {
     status: decision === 'publish' ? 'publishing' : decision === 'blocked' ? 'blocked' : 'needs_approval',
   });
   if (decision === 'needs_approval') supersedeOpenPlans(input.review.id, plan.id);
+  if (decision === 'needs_approval' && input.source === 'mcp') {
+    queueApprovalAlert(input.location.workspace_id, 'review_approvals', {
+      headline: action === 'delete'
+        ? `Delete the reply to a ${input.review.rating || 'no'}-star review — ${input.location.title ?? input.location.location_name}`
+        : `Reply to a ${input.review.rating || 'no'}-star review — ${input.location.title ?? input.location.location_name}`,
+      detail: [input.review.comment ? `Review: "${input.review.comment}"` : '', text ? `Proposed reply: "${text}"` : '', findings.map(f => f.message).join(' ')].filter(Boolean).join('\n'),
+      path: `/approve/reply/${plan.id}`,
+    });
+  }
   if (decision !== 'publish') return plan;
   return publishPlan(plan, input.location, input.review);
 }

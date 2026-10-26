@@ -264,7 +264,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string; returnTo?: string } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; clientLabel?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string; returnTo?: string } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 
@@ -632,6 +632,8 @@ export const api = {
 export interface Workspace {
   id: string;
   name: string;
+  /** The workspace's part of dashboard URLs: /w/<slug>/… */
+  slug?: string;
   created_at?: string;
   is_owner: boolean;
   is_active?: boolean;
@@ -658,7 +660,7 @@ export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;
 }
 export interface InvitePreview {
-  email: string; workspaceName: string; role: string; hasAccount: boolean;
+  email: string; workspaceName: string; workspaceSlug?: string; role: string; hasAccount: boolean;
 }
 export interface AdminWorkspaceSummary {
   id: string; name: string; owner_user_id: string | null; owner_email: string | null;
@@ -682,7 +684,7 @@ export interface AdminUserDetail {
 }
 export interface BingAccount { id: string; name: string; auth_type: 'api_key' | 'oauth'; expires_at: string | null; created_at: string }
 
-export type NotifyChannel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email';
+export type NotifyChannel = 'slack' | 'discord' | 'ntfy' | 'telegram' | 'webhook' | 'email' | 'whatsapp';
 export interface NotifyChannelResult { channel: NotifyChannel; configured: boolean; ok: boolean; error?: string }
 export interface NotificationDelivery {
   id: number; workspace_id: string; event_type: string; channel: NotifyChannel;

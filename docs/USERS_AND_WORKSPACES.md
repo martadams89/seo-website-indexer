@@ -7,7 +7,9 @@ Workspaces let one installation serve several clients, brands or internal teams 
 - A user has one login and can belong to several workspaces.
 - A workspace owns its sites, reports, settings, usage and other operational data.
 - Each workspace has one owner and may have any number of admins, editors and viewers.
-- The workspace selected in the sidebar is the active tenant for every request.
+- The workspace is part of the address: `https://YOUR-HOST/w/<workspace>/…`. Links from emails and other notifications open in the right workspace, and two browser tabs can show different workspaces. Switching workspace in the sidebar moves to the other workspace's address.
+- Each workspace's short name (its slug) is made from its name when it's created and stays the same after a rename, so saved links keep working. An address without a workspace opens the one this browser used last.
+- Someone who opens a link to a workspace they don't belong to sees a page saying so, with links to their own workspaces. Ask the owner for an invitation.
 - A super-admin can see and manage every user and workspace in the installation.
 
 An upgrade from an older single-workspace installation is automatic. The first user to sign in claims the existing data in a default workspace.
@@ -68,7 +70,9 @@ A Google credential:
 - can be removed from one workspace without deleting the underlying credential;
 - can be deleted everywhere only by its owner or a super-admin.
 
-An editor with **Manage integrations and API keys** can connect their own Google account to the active workspace. This supports both common operating models: a client can provide its own Google account, or the team can use a Google account already shared with the workspace.
+An editor with **Manage integrations and API keys** can connect their own Google account to the active workspace.
+
+An OAuth client (a Google Cloud project's client ID and secret) entered on any connect form is saved for the workspace when the sign-in starts, or with **Save project for later**, and can be given a name. After that it's picked from the **Google Cloud project** list instead of typed again, including in your other workspaces. The secret is encrypted and never shown again. **Forget this saved project** removes a saved client nobody has signed in through yet. This supports both common operating models: a client can provide its own Google account, or the team can use a Google account already shared with the workspace.
 
 ### Setting up a new workspace
 

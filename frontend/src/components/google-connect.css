@@ -6,3 +6,4 @@
 .google-connect-custom { display: flex; flex-direction: column; gap: 8px; }
 .google-connect-form .google-connect-hint { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
 .google-connect-form .google-connect-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.google-connect-form .google-connect-forget { align-self: flex-start; }

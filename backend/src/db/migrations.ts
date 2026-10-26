@@ -8,6 +8,43 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261026_03_saved_google_oauth_clients',
+    description: 'Save OAuth clients (Cloud projects) entered when connecting Google, so they never need re-entering',
+    up(db) {
+      db.exec(`
+        CREATE TABLE google_oauth_clients (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+          label TEXT,
+          client_id TEXT NOT NULL,
+          client_secret TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(workspace_id, client_id)
+        );
+      `);
+    },
+  },
+  {
+    id: '20261026_02_workspace_slugs',
+    description: 'Workspace slugs, so dashboard and notification links carry the workspace (/w/<slug>/…)',
+    up(db) {
+      db.exec('ALTER TABLE workspaces ADD COLUMN slug TEXT;');
+      const taken = new Set<string>();
+      const rows = db.prepare('SELECT id, name FROM workspaces ORDER BY created_at, id').all() as Array<{ id: string; name: string }>;
+      const update = db.prepare('UPDATE workspaces SET slug = ? WHERE id = ?');
+      for (const row of rows) {
+        const base = String(row.name ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/g, '') || 'workspace';
+        let slug = base;
+        for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+        taken.add(slug);
+        update.run(slug, row.id);
+      }
+      db.exec('CREATE UNIQUE INDEX idx_workspaces_slug ON workspaces(slug);');
+    },
+  },
+  {
     id: '20261026_01_gbp_profile_posts_photos',
     description: 'Business Profile editing, posts and photos: per-location AI rules, Google-suggested edit tracking and an approval queue',
     up(db) {

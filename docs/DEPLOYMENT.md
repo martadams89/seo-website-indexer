@@ -74,6 +74,8 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 | `GOOGLE_ADS_API_VERSION` | `v26` | Google Ads REST API version. Raise it when Google releases a new version and the release notes allow. |
 | `OAUTH_RATE_LIMIT_MAX` | `30` | MCP OAuth registration, token and revocation requests allowed per IP per minute. |
 | `MCP_OAUTH_REDIRECT_ALLOWLIST` | unset | Comma-separated redirect hosts/schemes MCP clients may use, e.g. `chatgpt.com,claude.ai,*.claude.com,vscode.dev,cursor:,localhost,127.0.0.1`. Unset allows any `https` redirect. |
+| `NOTIFY_BATCH_SECONDS` | `60` | How long approval notifications (AI proposals waiting for a person) are gathered before one message is sent per workspace and event. `0` sends each straight away. |
+| `WHATSAPP_GRAPH_VERSION` | `v23.0` | Meta Graph API version used for WhatsApp notifications. |
 | `GOOGLE_INDEXING_DAILY_LIMIT` | `200` | Daily Google Indexing API notifications per Cloud project, shared by sites that opt in. Set `0` to disable. Raise it only if Google has granted a higher quota. |
 
 ### Security notes for a public install

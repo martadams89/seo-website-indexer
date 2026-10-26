@@ -22,6 +22,7 @@ import {
 import { operationTypeFor, removeOperation, updateOperation, type Operation } from './operations.js';
 import { recordAuditEvent } from '../auth/users.js';
 import { recordUsage } from '../platform/store.js';
+import { queueApprovalAlert } from '../utils/approval-alerts.js';
 import { logSystem } from '../utils/logger.js';
 
 export function callContext(account: AdsAccount): AdsCallContext {
@@ -179,7 +180,18 @@ export async function proposeChange(input: ProposeInput): Promise<AdsChange> {
     validation, status, error, revertsChangeId: input.revertsChangeId,
   });
   logSystem(status === 'failed' ? 'warn' : 'info', `Google Ads change proposed for ${account.name ?? account.customer_id}: ${input.summary} (${status.replace('_', ' ')})`);
+  alertIfWaiting(account, change);
   return change;
+}
+
+/** An assistant's change that needs a person goes out as an approval alert with a deep link. */
+function alertIfWaiting(account: AdsAccount, change: AdsChange): void {
+  if (change.status !== 'needs_approval' || change.source !== 'mcp') return;
+  queueApprovalAlert(account.workspace_id, 'ads_approvals', {
+    headline: `${change.summary} — ${account.name ?? account.customer_id}`,
+    detail: [change.rationale ? `Why: ${change.rationale}` : '', change.findings.filter(f => f.severity !== 'info').map(f => f.message).join(' ')].filter(Boolean).join('\n'),
+    path: `/approve/ads/${change.id}`,
+  });
 }
 
 function recordApplied(account: AdsAccount, change: AdsChange, userId: string | null, result: unknown) {
@@ -238,6 +250,7 @@ export async function applyChange(changeId: string, opts: { userId: string | nul
     }
     if (evaluation.verdict === 'needs_approval' && !opts.approvedByPerson) {
       updateChange(change.id, { status: 'needs_approval', findings, impact: evaluation.impact as unknown as Record<string, unknown> });
+      alertIfWaiting(account, getChange(change.id)!);
       throw new AdsApiError(`Account state changed and this now needs approval: ${findings.filter(f => f.severity !== 'info').map(f => f.message).join(' ')}`, 'PERMISSION');
     }
     updateChange(change.id, { findings, impact: evaluation.impact as unknown as Record<string, unknown> });
@@ -253,6 +266,14 @@ export async function applyChange(changeId: string, opts: { userId: string | nul
   } catch (e) {
     updateChange(change.id, { status: 'failed', error: summariseMutateError(e) });
     logSystem('error', `Google Ads change failed for ${account.name ?? account.customer_id}: ${summariseMutateError(e)}`);
+    // A person who clicked Approve sees the error on screen; anything applied on its own is reported.
+    if (!opts.approvedByPerson) {
+      queueApprovalAlert(account.workspace_id, 'ads_alerts', {
+        headline: `${change.summary} — ${account.name ?? account.customer_id}`,
+        detail: `Google refused it: ${summariseMutateError(e)}`,
+        path: `/approve/ads/${change.id}`,
+      });
+    }
     throw e;
   }
   return getChange(change.id)!;
@@ -335,11 +356,13 @@ export async function proposeRecommendations(input: {
     }
   }
   const status = findings.some(f => f.severity === 'block') ? 'blocked' : findings.some(f => f.severity === 'approval') ? 'needs_approval' : 'pending';
-  return createChange({
+  const change = createChange({
     workspaceId: account.workspace_id, adsAccountId: account.id, createdBy: input.userId, source: input.source,
     kind: `${input.action}_recommendations`,
     summary: `${input.action === 'apply' ? 'Apply' : 'Dismiss'} ${names.length} Google recommendation${names.length === 1 ? '' : 's'} (${[...new Set(types.values())].join(', ')})`,
     rationale: input.rationale, operations: names.map(name => ({ recommendation: name, type: types.get(name) })),
     findings, status,
   });
+  alertIfWaiting(account, change);
+  return change;
 }

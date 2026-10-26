@@ -5,7 +5,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getGoogleAccountsForWorkspace, getWorkspaceSetting, setWorkspaceSetting } from '../db/database.js';
-import { getWorkspace } from '../auth/workspaces.js';
+import { getWorkspace, workspaceSlug } from '../auth/workspaces.js';
 import { recordAuditEvent, type User } from '../auth/users.js';
 import { publicOrigin } from '../utils/origin.js';
 import { ADS_SCOPE, AdsApiError, discoverCustomers, formatCustomerId } from './client.js';
@@ -232,6 +232,14 @@ export function registerAdsRoutes(app: FastifyInstance): void {
     return change;
   };
 
+  // One change, with its client, for the approval page that notification links open.
+  app.get('/api/ads/changes/:id', handle(async (req) => {
+    const change = getChange((req.params as { id: string }).id);
+    if (!change || change.workspace_id !== workspace(req)) throw Object.assign(new Error('Change not found.'), { statusCode: 404 });
+    const account = getAdsAccount(change.ads_account_id);
+    return { ...change, account: account ? { id: account.id, name: account.name, customer_id: formatCustomerId(account.customer_id), currency: account.currency } : null };
+  }));
+
   // Approving a change (or applying a pending one) is a person deciding on the dashboard.
   app.post('/api/ads/changes/:id/approve', handle(async (req) => {
     const change = changeInWorkspace(req);
@@ -302,7 +310,7 @@ export function registerAdsRoutes(app: FastifyInstance): void {
     const origin = publicOrigin(req);
     const fresh = ids.map(id => getAdsAccount(id)!).filter(Boolean);
     return buildRoutinePrompt({
-      settings, accounts: fresh, connectorName, endpoint: `${origin}/mcp`, dashboardUrl: `${origin}/ads?tab=changes`,
+      settings, accounts: fresh, connectorName, endpoint: `${origin}/mcp`, dashboardUrl: `${origin}/w/${encodeURIComponent(workspaceSlug(ws))}/ads?tab=changes`,
       workspaceName: getWorkspace(ws)?.name ?? null,
     });
   }));

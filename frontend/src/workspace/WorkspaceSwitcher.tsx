@@ -32,7 +32,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
       await refreshWorkspaces();
       setName('');
       setCreating(false);
-      switchWorkspace(ws.id); // reloads into the new workspace
+      switchWorkspace(ws.id, ws.slug); // opens the new workspace's URL
     } finally {
       setBusy(false);
     }

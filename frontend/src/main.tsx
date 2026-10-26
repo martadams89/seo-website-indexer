@@ -6,6 +6,7 @@ import './styles/streamlined.css'
 import { AppProvider } from './AppContext'
 import { AuthGate } from './auth/AuthGate'
 import { WorkspaceProvider } from './workspace/WorkspaceContext'
+import { ROUTER_BASENAME } from './api/client'
 import Layout from './Layout'
 const Discovery = lazy(() => import('./pages/Discovery'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -32,12 +33,14 @@ const PlaybookPage = lazy(() => import('./pages/Playbook'))
 const GoogleAdsPage = lazy(() => import('./pages/GoogleAds'))
 const ReviewsPage = lazy(() => import('./pages/Reviews'))
 const OAuthConsentPage = lazy(() => import('./pages/OAuthConsent'))
+const ApprovePage = lazy(() => import('./pages/Approve'))
 
 const loading = <div className="page-loading">Opening workspace…</div>
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter><Suspense fallback={loading}>
+    {/* Inside the app every path is under the workspace in the URL: /w/<slug>/… */}
+    <BrowserRouter basename={ROUTER_BASENAME}><Suspense fallback={loading}>
       <Routes>
         {/* Public, outside the auth gate — reached from the emailed reset link */}
         <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -79,6 +82,8 @@ function InnerRoutes() {
             <Route path="/sites/:siteId" element={<SiteWorkspacePage />} />
             <Route path="/ads" element={<GoogleAdsPage />} />
             <Route path="/reviews" element={<ReviewsPage />} />
+            {/* Opened from a notification's "Approve or reject" link */}
+            <Route path="/approve/:kind/:id" element={<ApprovePage />} />
             <Route path="/publishing" element={<PublishingPage />} />
             {/* Google accounts now live under Settings → Google Accounts */}
             <Route path="/accounts" element={<Navigate to="/settings" replace />} />

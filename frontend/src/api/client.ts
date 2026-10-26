@@ -5,6 +5,23 @@ export function apiUrl(path: string): string {
   return `${BASE}${path}`;
 }
 
+/**
+ * The workspace this tab is showing comes from its URL (/w/<slug>/…), so links
+ * open in the right workspace and two tabs can show different ones.
+ * localStorage only remembers the last one used, for URLs without a workspace.
+ */
+const URL_MATCH = typeof window !== "undefined" ? /^\/w\/([^/]+)/.exec(window.location.pathname) : null;
+/** The workspace slug (or id) in this tab's URL, if any. */
+export const URL_WORKSPACE: string | null = URL_MATCH ? decodeURIComponent(URL_MATCH[1]) : null;
+/** The router's basename: every in-app path lives under the URL's workspace. */
+export const ROUTER_BASENAME: string | undefined = URL_MATCH ? URL_MATCH[0] : undefined;
+
+/** A path inside the app for a workspace, e.g. workspacePath('acme', '/reviews') → '/w/acme/reviews'. */
+export function workspacePath(slug: string, path = "/"): string {
+  return `/w/${encodeURIComponent(slug)}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+// In memory per tab: another tab switching workspace never changes this one.
 let activeWorkspaceId: string | null =
   typeof localStorage !== "undefined"
     ? localStorage.getItem(WORKSPACE_STORAGE_KEY)

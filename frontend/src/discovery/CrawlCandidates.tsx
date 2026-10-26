@@ -3,6 +3,7 @@ import { CrawlComparison } from './CrawlComparison';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { exportCsv } from './export';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { discovery } from './api';
 export type CrawlCandidate = {
   id: string;
@@ -436,9 +437,9 @@ export function CrawlCandidates({
         {rows.length} / 5,000 candidates retained. Candidates stay separate from monitored backlinks.
         Promotion adds an unverified source and preserves existing live checks.
       </p>
-      <a className="btn btn-secondary" href={`/discovery?tab=backlinks&site=${encodeURIComponent(siteId)}`}>
+      <Link className="btn btn-secondary" to={`/discovery?tab=backlinks&site=${encodeURIComponent(siteId)}`}>
         Open backlink monitor
-      </a>
+      </Link>
       {loading && <p role="status">Loading candidates…</p>}
       <div className="discovery-actions">
         <button

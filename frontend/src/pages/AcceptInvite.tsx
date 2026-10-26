@@ -36,7 +36,9 @@ export default function AcceptInvitePage() {
     try {
       await api.acceptInvite(token, { password: password || undefined, name: name.trim() || undefined });
       setDone(true);
-      setTimeout(() => { window.location.href = '/'; }, 1200);
+      // Land in the workspace they were invited to, not whichever one this browser used last.
+      const home = invite?.workspaceSlug ? `/w/${encodeURIComponent(invite.workspaceSlug)}/` : '/';
+      setTimeout(() => { window.location.href = home; }, 1200);
     } catch (err) {
       setError((err as ApiError).message || 'Could not accept this invite.');
     }

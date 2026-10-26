@@ -254,6 +254,7 @@ export const adsApi = {
     if (params.status) q.set('status', params.status);
     return apiFetch<AdsChange[]>(`/api/ads/changes${q.size ? `?${q}` : ''}`);
   },
+  change: (id: string) => apiFetch<AdsChange & { account: { id: string; name: string | null; customer_id: string; currency: string | null } | null }>(`/api/ads/changes/${encodeURIComponent(id)}`),
   approve: (id: string) => apiFetch<AdsChange>(`/api/ads/changes/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   reject: (id: string) => apiFetch<AdsChange>(`/api/ads/changes/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
   revert: (id: string) => apiFetch<AdsChange>(`/api/ads/changes/${encodeURIComponent(id)}/revert`, { method: 'POST' }),
