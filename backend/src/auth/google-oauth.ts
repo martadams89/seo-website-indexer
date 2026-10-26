@@ -64,6 +64,35 @@ export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 // decide what may be published.
 export const GOOGLE_BUSINESS_SCOPE = 'https://www.googleapis.com/auth/business.manage';
 export const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+export const WEBMASTERS_SCOPE = 'https://www.googleapis.com/auth/webmasters';
+const EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
+
+/**
+ * A connection can be limited to the products it's for. Google grants API
+ * access and quota per Cloud project, so a workspace often has one project
+ * (or Google user) for Search Console, another for Google Ads and another for
+ * Business Profile. A limited connection asks for only those scopes plus the
+ * email that names it, so its project's consent screen needs nothing else.
+ */
+export type LimitedProduct = 'ads' | 'business';
+const PRODUCT_SCOPE: Record<LimitedProduct, string> = { ads: GOOGLE_ADS_SCOPE, business: GOOGLE_BUSINESS_SCOPE };
+
+export function limitedScopes(only: LimitedProduct[]): string {
+  return [EMAIL_SCOPE, ...(['ads', 'business'] as const).filter(p => only.includes(p)).map(p => PRODUCT_SCOPE[p])].join(' ');
+}
+export const BUSINESS_ONLY_SCOPES = limitedScopes(['business']);
+export const ADS_ONLY_SCOPES = limitedScopes(['ads']);
+
+/** The products a limited grant is for, or null for a full connection (one that can read Search Console). */
+export function limitedTo(grantedScopes: string | null | undefined): LimitedProduct[] | null {
+  const granted = (grantedScopes ?? '').split(' ').filter(Boolean);
+  if (!granted.length || granted.includes(WEBMASTERS_SCOPE)) return null;
+  const products = (['ads', 'business'] as const).filter(p => granted.includes(PRODUCT_SCOPE[p]));
+  return products.length ? products : null;
+}
+
+/** Scopes a sign-in must not silently take away from the connection it replaces. */
+const KEPT_SCOPES: Array<[string, string]> = [[WEBMASTERS_SCOPE, 'Search Console'], [GOOGLE_ADS_SCOPE, 'Google Ads'], [GOOGLE_BUSINESS_SCOPE, 'Business Profile']];
 
 // ── Bundled / Built-in OAuth Client ──────────────────────────────────────────
 
@@ -72,6 +101,11 @@ const BUILTIN_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 
 export function hasBuiltinCredentials(): boolean {
   return !!(BUILTIN_CLIENT_ID && BUILTIN_CLIENT_SECRET);
+}
+
+/** Whether this OAuth client is the server's built-in one (GOOGLE_OAUTH_CLIENT_ID). */
+export function isBuiltinClient(clientId: string | null | undefined): boolean {
+  return !!BUILTIN_CLIENT_ID && clientId === BUILTIN_CLIENT_ID;
 }
 
 // ── Google OAuth Endpoints ────────────────────────────────────────────────────
@@ -140,6 +174,8 @@ export interface PendingGoogleOAuth {
 export function createGoogleOAuthAuthorization(opts: {
   userId: string; workspaceId: string; redirectUri: string; autoSetup?: boolean;
   clientId?: string; clientSecret?: string; loginHint?: string | null; ads?: boolean; business?: boolean;
+  /** Ask only for these products (plus the email that names the connection); empty or omitted means a full connection. */
+  only?: LimitedProduct[] | null;
 }): string {
   const clientId = opts.clientId?.trim() || BUILTIN_CLIENT_ID;
   const clientSecret = opts.clientSecret?.trim() || BUILTIN_CLIENT_SECRET;
@@ -152,7 +188,13 @@ export function createGoogleOAuthAuthorization(opts: {
     INSERT INTO google_oauth_states(state_hash, user_id, workspace_id, client_id, client_secret, redirect_uri, expires_at)
     VALUES(?,?,?,?,?,?,?)
   `).run(hashState(state), opts.userId, opts.workspaceId, clientId, encrypt(clientSecret), opts.redirectUri, expires);
-  const scopes = [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.business ? GOOGLE_BUSINESS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : ''].filter(Boolean).join(' ');
+  // A limited connection that is asked for another product keeps its limit and adds that product.
+  const only = [...new Set([...(opts.only ?? []), ...(opts.only?.length && opts.ads ? ['ads'] : []), ...(opts.only?.length && opts.business ? ['business'] : [])])]
+    .filter((p): p is LimitedProduct => p === 'ads' || p === 'business');
+  const scopes = (only.length
+    ? [limitedScopes(only), opts.autoSetup ? CLOUD_PLATFORM_SCOPE : '']
+    : [OAUTH_SCOPES, opts.ads ? GOOGLE_ADS_SCOPE : '', opts.business ? GOOGLE_BUSINESS_SCOPE : '', opts.autoSetup ? CLOUD_PLATFORM_SCOPE : '']
+  ).filter(Boolean).join(' ');
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: opts.redirectUri,
@@ -261,6 +303,19 @@ async function fetchUserEmail(accessToken: string): Promise<string> {
 }
 
 /**
+ * The connection id for this Google user through this OAuth client. The same
+ * user and client always map to the same row, so a reconnect refreshes it in
+ * place; a different client (another Cloud project) gets its own row.
+ */
+export function connectionIdFor(email: string, clientId: string): string {
+  const same = getDb().prepare('SELECT id FROM google_accounts WHERE email = ? AND client_id = ?').get(email, clientId) as { id: string } | undefined;
+  if (same) return same.id;
+  const project = projectFromClientId(clientId) ?? createHash('sha256').update(clientId).digest('hex').slice(0, 10);
+  const candidates = [email, `${email}~${project}`, `${email}~${project}-${createHash('sha256').update(clientId).digest('hex').slice(0, 6)}`];
+  return candidates.find(c => !getGoogleAccountById(c)) ?? `${email}~${randomUUID().slice(0, 8)}`;
+}
+
+/**
  * Exchanges the authorization code received from Google for access/refresh tokens.
  * Persists the credentials inside SQLite.
  */
@@ -322,18 +377,34 @@ export async function exchangeCodeForTokens(
   // tokens with ours while leaving ownership unchanged — a cross-tenant
   // credential clash, not a real reassignment. The owner can explicitly
   // delegate the credential to workspaces where they are a member.
-  if (ownerUserId && !canOwnGoogleAccount(email, ownerUserId)) {
+  // One connection per Google user per OAuth client (Cloud project).
+  const id = connectionIdFor(email, clientId);
+  // A new sign-in through the same project replaces that connection's grant.
+  // Refuse one that would silently take away Search Console, Google Ads or
+  // Business Profile (a limited sign-in, or a box unticked on Google's screen).
+  const previousScopes = (getGoogleAccountById(id)?.granted_scopes ?? '').split(' ');
+  const newScopes = (data.scope ?? '').split(' ');
+  const lost = KEPT_SCOPES.filter(([scope]) => previousScopes.includes(scope) && !newScopes.includes(scope)).map(([, label]) => label);
+  if (lost.length) {
+    throw new Error(
+      `${email} is already connected through this Google Cloud project with ${lost.join(' and ')} access, and this sign-in would remove it. `
+      + 'To use it in this workspace, add the existing connection instead (Settings → Google Accounts → "Your other Google accounts", or "Use a Google account you\'ve already connected" in setup). '
+      + 'To give it more access, use Reconnect or "Add … access" on that connection, which keeps everything it has; or connect through a different Cloud project.'
+    );
+  }
+  if (ownerUserId && !canOwnGoogleAccount(id, ownerUserId)) {
     throw new Error(
       `This Google account (${email}) is already connected to a different account in this app. Disconnect it there first, or sign in with a different Google account.`
     );
   }
 
-  // Save the new account (uses email as account ID for extreme simplicity and clarity).
+  // Save the connection. Its id is the email for the first project a Google
+  // user connects through, and email~project for any other project.
   // owner_user_id records who controls the credential. workspace_id records its
   // original "home" workspace, while a separate delegation row grants use in
   // the active workspace. The upsert preserves ownership on token refresh.
   upsertGoogleAccount({
-    id: email,
+    id,
     email,
     client_id: clientId,
     client_secret: clientSecret,
@@ -347,12 +418,12 @@ export async function exchangeCodeForTokens(
     workspace_id: workspaceId ?? null,
     owner_user_id: ownerUserId ?? null,
   });
-  if (workspaceId) shareGoogleAccountWithWorkspace(email, workspaceId, ownerUserId);
+  if (workspaceId) shareGoogleAccountWithWorkspace(id, workspaceId, ownerUserId);
 
   // Reconnecting mints a fresh refresh token, so clear any stale reauth flag
   // (the upsert's ON CONFLICT preserves the old needs_reauth value otherwise).
-  setGoogleAccountNeedsReauth(email, false);
-  _tokenCache.delete(email);
+  setGoogleAccountNeedsReauth(id, false);
+  _tokenCache.delete(id);
 
   // Best-effort: enable the Google API this tool needs (Search Console) on the
   // linked project, so the user doesn't have to do it by
@@ -362,7 +433,7 @@ export async function exchangeCodeForTokens(
   const granted = (data.scope ?? '').split(' ');
   if (granted.includes(CLOUD_PLATFORM_SCOPE)) {
     const services = [
-      ...AUTO_ENABLE_SERVICES,
+      ...(granted.includes(WEBMASTERS_SCOPE) ? AUTO_ENABLE_SERVICES : []),
       ...(granted.includes(GOOGLE_ADS_SCOPE) ? [GOOGLE_ADS_SERVICE] : []),
       ...(granted.includes(GOOGLE_BUSINESS_SCOPE) ? GOOGLE_BUSINESS_SERVICES : []),
     ];

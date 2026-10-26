@@ -3,10 +3,11 @@ import { ExternalLink, Link2, MapPin, Pencil, RefreshCw, ShieldCheck, Star, Tras
 import { Modal } from '../components/Modal';
 import { useToast } from '../AppContext';
 import { errorMessage } from '../ads/api';
-import { MODE_LABEL, reviewsApi, type DiscoveryResult, type ReplyRules, type ReviewBrief, type ReviewLocation } from './api';
+import { AI_MODE_LABEL, MODE_LABEL, reviewsApi, type AiMode, type ConnectionStatus, type DiscoveryResult, type ProfileRules, type ReplyRules, type ReviewBrief, type ReviewLocation } from './api';
+import { connectionLabel } from './format';
 
-export function ReviewsLocations({ locations, canManage, reload, onOpen }: {
-  locations: ReviewLocation[]; canManage: boolean; reload: (fresh?: boolean) => Promise<void>; onOpen: (id: string) => void;
+export function ReviewsLocations({ locations, connections, canManage, reload, onOpen }: {
+  locations: ReviewLocation[]; connections: ConnectionStatus[]; canManage: boolean; reload: (fresh?: boolean) => Promise<void>; onOpen: (id: string) => void;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState<ReviewLocation | null>(null);
@@ -35,7 +36,7 @@ export function ReviewsLocations({ locations, canManage, reload, onOpen }: {
         <div><span className="eyebrow">Locations</span><h2>Linked Business Profiles</h2></div>
         <button className="btn btn-primary btn-sm" disabled={!canManage} onClick={() => setLinking(true)}><Link2 size={13} /> Link locations</button>
       </div>
-      <p className="card-intro">Each location has its own reply rules — what an AI assistant may publish on its own — and a brief that shapes how replies sound. People replying on this dashboard always publish directly.</p>
+      <p className="card-intro">Each location has its own rules for what an AI assistant may publish on its own (replies, posts, photos and profile edits), a brief that shapes how replies sound, and the Google connection it uses. People on this dashboard always publish directly.</p>
       {locations.length ? (
         <div className="reviews-location-list">
           {locations.map(l => (
@@ -48,8 +49,13 @@ export function ReviewsLocations({ locations, canManage, reload, onOpen }: {
                   <span className={`badge badge-${l.rules.mode === 'read_only' ? 'info' : l.rules.mode === 'review' ? 'warn' : 'ok'}`}><ShieldCheck size={11} /> {MODE_LABEL[l.rules.mode]}{l.rules.mode === 'guarded' ? ` (${l.rules.auto_min_rating}★+)` : ''}</span>
                   {l.stats.unreplied > 0 && <span className="badge badge-accent">{l.stats.unreplied} unanswered</span>}
                   {l.stats.awaiting_approval > 0 && <span className="badge badge-warn">{l.stats.awaiting_approval} awaiting approval</span>}
+                  {l.stats.changes_awaiting_approval > 0 && <span className="badge badge-warn">{l.stats.changes_awaiting_approval} profile change{l.stats.changes_awaiting_approval === 1 ? '' : 's'} waiting</span>}
                   {!l.enabled && <span className="badge badge-info">Paused</span>}
                 </div>
+                {(() => {
+                  const conn = connections.find(c => c.id === l.google_account_id);
+                  return <small className="text-dim">Google connection: {conn ? connectionLabel(conn) : l.google_account_id ?? 'none (pick one in settings)'}</small>;
+                })()}
                 {l.last_error && <small className="ads-error-line">{l.last_error}</small>}
               </div>
               <div className="ads-cell-actions">
@@ -65,7 +71,7 @@ export function ReviewsLocations({ locations, canManage, reload, onOpen }: {
       ) : (
         <div className="ops-empty compact"><MapPin /><strong>No locations linked</strong><span>Link the Business Profiles you manage to start.</span></div>
       )}
-      {editing && <LocationSettingsModal location={editing} canManage={canManage} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await reload(); }} />}
+      {editing && <LocationSettingsModal location={editing} connections={connections} canManage={canManage} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await reload(true); }} />}
       {linking && <LinkLocationsModal onClose={() => setLinking(false)} onLinked={async () => { setLinking(false); await reload(true); }} />}
     </section>
   );
@@ -95,6 +101,13 @@ export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void;
     }
     setBusy(false);
     if (ok) { toast('success', `Linked ${ok} location${ok === 1 ? '' : 's'} and imported their reviews.`); await onLinked(); }
+  }
+
+  async function moveHere(locationId: string, googleAccountId: string) {
+    setBusy(true);
+    try { await reviewsApi.update(locationId, { googleAccountId }); toast('success', 'Location now uses this connection'); await scan(); await onLinked(); }
+    catch (e) { toast('error', errorMessage(e)); }
+    setBusy(false);
   }
 
   const count = Object.keys(selected).length;
@@ -129,8 +142,11 @@ export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void;
                     })} />
                     <span>
                       <strong>{loc.title ?? loc.location_name}</strong>
-                      <small>{[loc.address, loc.website].filter(Boolean).join(' · ')}{loc.verified === false ? ' · not verified (replies are refused until it is)' : ''}{linked ? ' · already linked' : ''}</small>
+                      <small>{[loc.address, loc.website].filter(Boolean).join(' · ')}{loc.verified === false ? ' · not verified (replies are refused until it is)' : ''}{linked ? (loc.linked_via === conn.google_account_id ? ' · linked through this connection' : ' · linked through another connection') : ''}</small>
                     </span>
+                    {linked && loc.linked_via !== conn.google_account_id && (
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={e => { e.preventDefault(); void moveHere(loc.linked_location_id!, conn.google_account_id); }}>Use this connection</button>
+                    )}
                   </label>
                 );
               })}
@@ -146,9 +162,12 @@ export function LinkLocationsModal({ onClose, onLinked }: { onClose: () => void;
 
 const linesOf = (value: string) => value.split(/\n/).map(s => s.trim()).filter(Boolean);
 
-function LocationSettingsModal({ location, canManage, onClose, onSaved }: { location: ReviewLocation; canManage: boolean; onClose: () => void; onSaved: () => void | Promise<void> }) {
+function LocationSettingsModal({ location, connections, canManage, onClose, onSaved }: { location: ReviewLocation; connections: ConnectionStatus[]; canManage: boolean; onClose: () => void; onSaved: () => void | Promise<void> }) {
   const toast = useToast();
   const [rules, setRules] = useState<ReplyRules>(location.rules);
+  const [profileRules, setProfileRules] = useState<ProfileRules>(location.profile_rules);
+  const [connectionId, setConnectionId] = useState(location.google_account_id ?? '');
+  const choices = connections.filter(c => c.has_business_scope);
   const [brief, setBrief] = useState<ReviewBrief>(location.brief);
   const [banned, setBanned] = useState(location.rules.banned_phrases.join('\n'));
   const [enabled, setEnabled] = useState(location.enabled);
@@ -158,7 +177,10 @@ function LocationSettingsModal({ location, canManage, onClose, onSaved }: { loca
   async function save() {
     setBusy(true);
     try {
-      await reviewsApi.update(location.id, { rules: { ...rules, banned_phrases: linesOf(banned) }, brief, enabled });
+      await reviewsApi.update(location.id, {
+        rules: { ...rules, banned_phrases: linesOf(banned) }, profileRules, brief, enabled,
+        ...(connectionId && connectionId !== location.google_account_id ? { googleAccountId: connectionId } : {}),
+      });
       toast('success', 'Location saved');
       await onSaved();
     } catch (e) { toast('error', errorMessage(e)); }
@@ -166,8 +188,18 @@ function LocationSettingsModal({ location, canManage, onClose, onSaved }: { loca
   }
 
   return (
-    <Modal onClose={onClose} size="lg" title={location.title ?? location.location_name} eyebrow="Reply rules and brief" icon={<Star />}
+    <Modal onClose={onClose} size="lg" title={location.title ?? location.location_name} eyebrow="Location settings" icon={<Star />}
       footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!canManage || busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button></>}>
+      <fieldset className="reviews-fieldset" disabled={!canManage}>
+        <legend>Google connection</legend>
+        <label className="reviews-wide">Read and manage this profile through
+          <select className="input" value={connectionId} onChange={e => setConnectionId(e.target.value)}>
+            {!connectionId && <option value="">Choose a connection</option>}
+            {choices.map(c => <option key={c.id} value={c.id}>{connectionLabel(c)}{c.api === 'not_approved' ? ' — waiting for Google approval' : ''}</option>)}
+          </select>
+        </label>
+        <small className="text-dim reviews-wide">Switch to another Google user, or the same user through another Cloud project (for example the one Google approved for Business Profile). The app checks the new connection can see this location first; reviews, rules and history stay.</small>
+      </fieldset>
       <fieldset className="reviews-fieldset" disabled={!canManage}>
         <legend>What AI assistants may publish without you</legend>
         <label>Mode
@@ -200,6 +232,20 @@ function LocationSettingsModal({ location, canManage, onClose, onSaved }: { loca
         <label className="reviews-wide">Phrases that always need approval (one per line)
           <textarea className="input" rows={3} value={banned} onChange={e => setBanned(e.target.value)} placeholder={'refund\ncompensation'} />
         </label>
+      </fieldset>
+      <fieldset className="reviews-fieldset" disabled={!canManage}>
+        <legend>Profile, posts and photos from AI assistants</legend>
+        {([['profile', 'Profile edits (description and hours)'], ['posts', 'New posts'], ['photos', 'New photos']] as const).map(([key, label]) => (
+          <label key={key}>{label}
+            <select className="input" value={profileRules[key]} onChange={e => setProfileRules(r => ({ ...r, [key]: e.target.value as AiMode }))}>
+              {(['approval', 'auto', 'off'] as const).map(m => <option key={m} value={m}>{AI_MODE_LABEL[m]}</option>)}
+            </select>
+          </label>
+        ))}
+        <div className="reviews-checks">
+          <label className="ads-inline-check"><input type="checkbox" checked={profileRules.alert_google_updates} onChange={e => setProfileRules(r => ({ ...r, alert_google_updates: e.target.checked }))} /> Alert me when Google changes the profile</label>
+        </div>
+        <small className="text-dim reviews-wide">Phone and website changes, offers, deletions and new logo, cover or profile photos always wait for approval.</small>
       </fieldset>
       <fieldset className="reviews-fieldset" disabled={!canManage}>
         <legend>How replies should sound</legend>

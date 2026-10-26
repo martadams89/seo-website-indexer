@@ -8,6 +8,38 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261026_01_gbp_profile_posts_photos',
+    description: 'Business Profile editing, posts and photos: per-location AI rules, Google-suggested edit tracking and an approval queue',
+    up(db) {
+      db.exec(`
+        ALTER TABLE gbp_locations ADD COLUMN profile_rules TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE gbp_locations ADD COLUMN google_updates TEXT;
+        ALTER TABLE gbp_locations ADD COLUMN google_updates_checked_at TEXT;
+        CREATE TABLE gbp_changes (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          location_id TEXT NOT NULL REFERENCES gbp_locations(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          rationale TEXT,
+          source TEXT NOT NULL DEFAULT 'dashboard',
+          created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          status TEXT NOT NULL,
+          findings TEXT NOT NULL DEFAULT '[]',
+          decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+          decided_at TEXT,
+          published_at TEXT,
+          error TEXT,
+          result TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_gbp_changes_workspace_status ON gbp_changes(workspace_id, status);
+        CREATE INDEX idx_gbp_changes_location ON gbp_changes(location_id, created_at DESC);
+      `);
+    },
+  },
+  {
     id: '20261025_03_google_oauth_state_purpose',
     description: 'Let a Google sign-in be a one-off API enable flow that stores no connection',
     up(db) {

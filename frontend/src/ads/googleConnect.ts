@@ -4,7 +4,13 @@ import { useEffect } from 'react';
 import { api } from '../api';
 import { apiFetch } from '../api/client';
 
-export async function openGoogleConsent(options: { accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean; business?: boolean }): Promise<void> {
+export async function openGoogleConsent(options: {
+  accountId?: string; clientId?: string; clientSecret?: string; autoSetup?: boolean; ads?: boolean; business?: boolean;
+  /** Limit the grant to these products; [] asks for a full connection. */
+  only?: Array<'ads' | 'business'>;
+  /** Sign a new Google user in through the OAuth client this existing connection uses. */
+  projectFrom?: string;
+}): Promise<void> {
   const { authorizationUrl } = await api.beginGoogleAuth(options);
   const width = 600;
   const height = 700;

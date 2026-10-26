@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Circle, Cloud, Copy, ExternalLink, KeyRound, Link2, Plus, Scale, Zap } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Cloud, Copy, ExternalLink, KeyRound, Link2, Scale, Zap } from 'lucide-react';
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
+import { GoogleConnectForm } from '../components/GoogleConnectForm';
 import { adsApi, errorMessage, type AdsAccount, type AdsConnectionStatus, type AdsSetup } from './api';
 import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from './googleConnect';
 import { LinkAccountsModal } from './AdsClients';
@@ -21,13 +22,6 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  // Off by default: a Cloud scope on the saved connection lets a Workspace
-  // session-control policy expire it. "Switch on for me" below enables the API
-  // with a one-off sign-in instead.
-  const [autoSetup, setAutoSetup] = useState(false);
-  const [custom, setCustom] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
   const [linking, setLinking] = useState(false);
   const redirectUri = `${window.location.origin}/api/auth/google/callback`;
 
@@ -45,18 +39,11 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
     toast('success', 'Copied to clipboard');
   }
 
-  async function connect(accountId?: string) {
-    setBusy(accountId ?? 'new');
-    try {
-      const useCustom = !accountId && (custom || !setup?.builtin_oauth_client);
-      if (useCustom && (!clientId.trim() || !clientSecret.trim())) throw new Error('Enter the OAuth client ID and secret from your Google Cloud project first.');
-      await openGoogleConsent({
-        accountId, ads: true, autoSetup,
-        ...(useCustom ? { clientId: clientId.trim(), clientSecret: clientSecret.trim() } : {}),
-      });
-    } catch (e) {
-      toast('error', errorMessage(e));
-    }
+  /** Reconnect, or add Google Ads to, an existing connection (it keeps its project and everything it has). */
+  async function connect(accountId: string) {
+    setBusy(accountId);
+    try { await openGoogleConsent({ accountId, ads: true }); }
+    catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }
 
@@ -116,9 +103,10 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
               <article key={conn.id}>
                 <div className="ads-connection-main">
                   <strong>{conn.email ?? conn.id}</strong>
-                  <small>Cloud project {conn.project ?? 'unknown'}{conn.accessible_customers !== null ? ` · ${conn.accessible_customers} directly accessible ad account(s)` : ''}</small>
+                  <small>Cloud project {conn.project ?? 'unknown'}{conn.accessible_customers !== null ? ` · ${conn.accessible_customers} directly accessible ad account(s)` : ''}{conn.clients ? ` · used by ${conn.clients} linked client${conn.clients === 1 ? '' : 's'}` : ''}</small>
                   <div className="ads-badges">
                     <span className={`badge badge-${conn.has_ads_scope ? 'ok' : 'warn'}`}>{conn.has_ads_scope ? 'Google Ads access' : 'No Google Ads access'}</span>
+                    {conn.limited_to && <span className="badge badge-accent" title="This connection asked Google only for these products">{conn.limited_to.map(p => (p === 'ads' ? 'Google Ads' : 'Business Profile')).join(' + ')} only</span>}
                     {conn.has_ads_scope && <span className={`badge badge-${api.tone}`}>API: {api.text}</span>}
                     {conn.has_ads_scope && conn.api === 'ok' && <span className={`badge badge-${access.tone}`}>Access level: {access.text}</span>}
                     {conn.has_cloud_scope && <span className="badge badge-info">Cloud access</span>}
@@ -134,8 +122,8 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
                   {conn.api === 'api_disabled' && (
                     <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApi(conn)} title="Switches the API on with a one-off Google sign-in; the saved connection keeps no Cloud access"><Zap size={13} /> Switch on for me</button>
                   )}
-                  {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={`https://console.cloud.google.com/apis/library/googleads.googleapis.com?project=${conn.project ?? ''}`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
-                  {conn.access === 'access_level' && <a className="btn btn-secondary btn-sm" href={`https://console.cloud.google.com/google/ads-apis/overview?project=${conn.project ?? ''}`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Apply for access</a>}
+                  {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={conn.links.enable_api} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
+                  {conn.access === 'access_level' && <a className="btn btn-secondary btn-sm" href={conn.links.access_level} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Apply for access</a>}
                 </div>
               </article>
             );
@@ -143,33 +131,22 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
           {!setup.connections.length && <div className="ops-empty compact">No Google account is connected to this workspace yet.</div>}
         </div>
 
-        <div className="ads-connect-new">
-          <label className="autosetup-row">
-            <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
-            <div>
-              <strong>Also keep Cloud access on this connection</strong>
-              <div className="text-dim">Not needed to switch APIs on: "Switch on for me" does that with a one-off sign-in. Keeping Cloud access lets the app enable APIs without asking, but managed Google Workspace accounts can then be signed out every few hours by Google Cloud session control.</div>
-            </div>
-          </label>
-          {setup.builtin_oauth_client && (
-            <label className="ads-inline-check">
-              <input type="checkbox" checked={custom} onChange={e => setCustom(e.target.checked)} /> Use a different Google Cloud project (a client's own OAuth client)
-            </label>
-          )}
-          {(custom || !setup.builtin_oauth_client) && (
-            <div className="form-grid">
-              <label>OAuth client ID<input className="input" value={clientId} onChange={e => setClientId(e.target.value)} placeholder="1234567890-abc….apps.googleusercontent.com" /></label>
-              <label>OAuth client secret<input className="input" type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder="GOCSPX-…" /></label>
-            </div>
-          )}
-          <div className="ads-row-actions">
-            <button className="btn btn-primary" disabled={!canManage || busy === 'new'} onClick={() => connect()}><Plus size={14} /> Connect a Google account with Google Ads</button>
-            {setup.connections.some(c => c.has_ads_scope) && (
-              <button className="btn btn-secondary" disabled={!canManage} onClick={() => setLinking(true)}><Link2 size={14} /> Find and link client accounts</button>
-            )}
-          </div>
-          <p className="ads-hint">Already connected for Search Console? Use <b>Add Google Ads access</b> on that connection above — it keeps its existing permissions and sites.</p>
+        {setup.connections.some(c => c.has_ads_scope) && (
+          <div className="ads-row-actions"><button className="btn btn-secondary" disabled={!canManage} onClick={() => setLinking(true)}><Link2 size={14} /> Find and link client accounts</button></div>
+        )}
+        <p className="ads-hint">Already connected for Search Console? Use <b>Add Google Ads access</b> on that connection above; it keeps its existing permissions and sites.</p>
+      </section>
+
+      <section className="ops-card">
+        <div className="ops-card-head">
+          <div><span className="eyebrow">Another account or project</span><h2>Connect a Google user for Google Ads</h2></div>
         </div>
+        <p className="card-intro">
+          Google sets the Ads API access level (Test, Explorer, Basic) and its daily quota per Cloud project, and each Google user reaches different
+          ad accounts. Add another Google user through a project you already use, or connect a project with the access level you need. Move each
+          client onto the right connection from the Clients tab.
+        </p>
+        <GoogleConnectForm product="ads" canManage={canManage} />
       </section>
 
       <details className="ops-card ads-guide" open={!setup.builtin_oauth_client && !setup.connections.length}>
@@ -183,7 +160,7 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
           <li>
             <strong>Enable the APIs.</strong> Paste this into Cloud Shell (top-right terminal icon in the Cloud console):
             <CopyBlock value={`gcloud services enable googleads.googleapis.com searchconsole.googleapis.com indexing.googleapis.com analyticsdata.googleapis.com --project ${setup.project ?? 'YOUR_PROJECT_ID'}`} onCopy={copy} />
-            <span>Or skip this and tick “Let the app enable the Google APIs it needs” when connecting.</span>
+            <span>Or skip this and use <b>Switch on for me</b> on the connection once it's signed in.</span>
           </li>
           <li>
             <strong>Configure the consent screen</strong> (Google Auth Platform → Branding, Audience). Choose <b>Internal</b> if everyone uses your Google Workspace; otherwise <b>External</b> and click <b>Publish app</b> — apps left in Testing get refresh tokens that expire after seven days.
@@ -192,7 +169,7 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
           <li>
             <strong>Create an OAuth client</strong> (Clients → Create client → Web application) with this authorised redirect URI. Google has no API for creating these, so this is the one step that can't be automated.
             <CopyBlock value={redirectUri} onCopy={copy} />
-            <span>Paste the client ID and secret above, or set <code>GOOGLE_OAUTH_CLIENT_ID</code> and <code>GOOGLE_OAUTH_CLIENT_SECRET</code> on the container so every user gets one-click sign-in.</span>
+            <span>Pick <b>Another project</b> above and paste the client ID and secret (only once: later sign-ins reuse it), or set <code>GOOGLE_OAUTH_CLIENT_ID</code> and <code>GOOGLE_OAUTH_CLIENT_SECRET</code> on the container so every user gets one-click sign-in.</span>
             <span className="ads-links"><a href={setup.links.credentials} target="_blank" rel="noreferrer">Credentials <ExternalLink size={12} /></a></span>
           </li>
           <li>
@@ -206,7 +183,7 @@ export function AdsSetupView({ setup, accounts, canManage, reload, onLinked }: {
         <Scale size={18} />
         <div>
           <strong>Stay inside Google's API policy</strong>
-          <p>Use your own Google Cloud project and reach clients through your own manager (MCC) account — that is your own use of the API. Don't let clients sign in to this install with their own Google accounts on your project; if a client wants direct access, connect them with their own OAuth client (“Use a different Google Cloud project”) or give them their own install.</p>
+          <p>Use your own Google Cloud project and reach clients through your own manager (MCC) account — that is your own use of the API. Don't let clients sign in to this install with their own Google accounts on your project; if a client wants direct access, connect them through their own Cloud project (<b>Another project</b> above) or give them their own install.</p>
         </div>
       </section>
 

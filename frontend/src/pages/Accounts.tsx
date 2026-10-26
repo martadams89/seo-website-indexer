@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Plus, Trash2, Key, Check, Copy, AlertCircle, AlertTriangle, RefreshCw, Smartphone } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Key, AlertCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import { api, type GoogleAccount } from '../api';
 import { useApp } from '../AppContext';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { GoogleHealth } from '../components/GoogleHealth';
+import { GoogleConnectForm } from '../components/GoogleConnectForm';
 
 const ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 const hasAds = (acc: GoogleAccount) => !!acc.granted_scopes?.split(' ').includes(ADS_SCOPE);
+const projectOf = (clientId: string) => /^(\d{6,})-/.exec(clientId)?.[1] ?? null;
 
 export default function AccountsPage({ embedded = false }: { embedded?: boolean } = {}) {
-  const { status, refresh } = useApp();
+  const { refresh } = useApp();
   const { active } = useWorkspace();
   const canConnect = !!active?.permissions?.manage_integrations;
   const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
@@ -17,26 +19,9 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Custom Account Connection Form State
   const [showAddForm, setShowAddForm] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [connecting, setConnecting] = useState(false);
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
-  // Opt-in, not default: ticking this requests the broad cloud-platform scope,
-  // which makes refresh tokens for managed (Google Workspace) accounts subject
-  // to reauth/session-control policies → periodic "invalid_rapt" failures. Core
-  // Search Console works without it.
-  const [autoSetup, setAutoSetup] = useState(false);
-  // Opt-in Google Ads management (adwords scope). Re-consenting an existing
-  // connection adds it without losing the scopes it already has.
-  const [withAds, setWithAds] = useState(false);
-  const [useOwnClient, setUseOwnClient] = useState(false);
   const [connectError, setConnectError] = useState('');
-  const [copied, setCopied] = useState(false);
-
-  const hasBuiltin = status?.auth?.hasBuiltinCredentials ?? false;
-  const redirectUri = window.location.origin + '/api/auth/google/callback';
 
   async function fetchAccounts() {
     setLoading(true);
@@ -61,8 +46,6 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
         await refresh();
         await fetchAccounts();
         setShowAddForm(false);
-        setClientId('');
-        setClientSecret('');
       }
     };
     window.addEventListener('message', handleMessage);
@@ -72,15 +55,14 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
   // `reconnect` re-authorises an existing account in place: it reuses the
   // account's encrypted client id/secret through a single-use server-side OAuth
   // state, so the user never has to disconnect it or re-enter credentials.
-  async function startGoogleAuth(reconnect?: GoogleAccount, opts: { ads?: boolean } = {}) {
+  // The server carries Ads and Business Profile forward and keeps a limited connection limited;
+  // leaving Cloud access out drops it, which is what stops Workspace session-control expiry.
+  async function startGoogleAuth(reconnect: GoogleAccount, opts: { ads?: boolean } = {}) {
     setConnectError('');
-    if (reconnect) setReconnectingId(reconnect.id); else setConnecting(true);
-    const ownClient = !hasBuiltin || useOwnClient;
+    setReconnectingId(reconnect.id);
     try {
-      const ads = opts.ads ?? (reconnect ? hasAds(reconnect) || withAds : withAds);
-      const { authorizationUrl } = await api.beginGoogleAuth(reconnect
-        ? { accountId: reconnect.id, autoSetup, ads }
-        : { clientId: ownClient ? clientId.trim() : undefined, clientSecret: ownClient ? clientSecret.trim() : undefined, autoSetup, ads });
+      const ads = opts.ads ?? hasAds(reconnect);
+      const { authorizationUrl } = await api.beginGoogleAuth({ accountId: reconnect.id, ads });
 
       const width = 600;
       const height = 700;
@@ -99,7 +81,6 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
     } catch (e) {
       setConnectError(String(e).replace('Error: ', ''));
     }
-    setConnecting(false);
     setReconnectingId(null);
   }
 
@@ -129,12 +110,6 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
       await refresh();
       await fetchAccounts();
     } catch (e) { setError(String(e).replace('Error: ', '')); }
-  }
-
-  function copyRedirectUri() {
-    navigator.clipboard.writeText(redirectUri);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   return (
@@ -173,7 +148,8 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             <Key size={18} style={{ color: 'var(--accent)' }} /> Link Google Account
           </h2>
           <p className="text-secondary text-sm mb-4">
-            Connect an additional Google account. You can link sites to this profile for Search Console inspection and sitemap submission.
+            Connect another Google user, or the same one through another Google Cloud project. Pick a project you already use and nothing needs re-entering;
+            a separate project is useful when Google Ads or Business Profile API access or quota sits on a different one.
           </p>
 
           <div className="alert alert-warn mb-4">
@@ -184,101 +160,10 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
             </div>
           </div>
 
-          <div style={{ background: 'var(--bg-input)', padding: '16px 20px', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 20 }}>
-            <strong style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-primary)' }}>Authorized Redirect URI:</strong>
-            <p style={{ margin: '0 0 8px 0', fontSize: 12, color: 'var(--text-secondary)' }}>
-              Paste this Redirect URI into your Google Cloud Credentials configuration under <strong>Authorized redirect URIs</strong>:
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)' }}>
-              <code style={{ fontSize: 12, wordBreak: 'break-all', flexGrow: 1, color: 'var(--text-primary)' }}>{redirectUri}</code>
-              <button
-                type="button"
-                className="btn-icon btn-icon-ghost"
-                onClick={copyRedirectUri}
-                title="Copy Redirect URI"
-                aria-label={copied ? 'Copied redirect URI' : 'Copy redirect URI'}
-              >
-                {copied ? <Check size={16} style={{ color: 'var(--ok)' }} /> : <Copy size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Auto-setup opt-in (applies to both connect modes) */}
-          <label className="autosetup-row">
-            <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
-            <div>
-              <strong>Auto-configure Google APIs</strong>
-              <div className="text-dim" style={{ fontSize: 12 }}>
-                After you sign in, the tool enables the Search Console API on your project for you and can
-                provision a one-click Gemini key later. This requests broad Google
-                Cloud access on the consent screen. <strong>Managed (Google Workspace) accounts:</strong> leave
-                this unchecked — the Cloud scope makes your login subject to your organisation's re-authentication
-                policy and forces a periodic reconnect. Search Console works without it; you can enable the API
-                by hand in the Cloud console.
-              </div>
-            </div>
-          </label>
-
-          <label className="autosetup-row">
-            <input type="checkbox" checked={withAds} onChange={e => setWithAds(e.target.checked)} />
-            <div>
-              <strong>Also allow Google Ads management</strong>
-              <div className="text-dim" style={{ fontSize: 12 }}>
-                Adds Google's Ads permission so this connection can report on and manage the ad accounts this Google user can reach.
-                Manage clients, budgets and guardrails on the Google Ads page.
-              </div>
-            </div>
-          </label>
-
-          {hasBuiltin && (
-            <label className="autosetup-row">
-              <input type="checkbox" checked={useOwnClient} onChange={e => setUseOwnClient(e.target.checked)} />
-              <div>
-                <strong>Use a different Google Cloud project</strong>
-                <div className="text-dim" style={{ fontSize: 12 }}>
-                  Enter another OAuth client — for example a client's own project, so their API usage stays on their Google Cloud account.
-                </div>
-              </div>
-            </label>
-          )}
-
-          {hasBuiltin && !useOwnClient ? (
-            <div className="text-center py-3">
-              <div style={{ background: 'var(--ok-dim)', width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                <Smartphone size={20} style={{ color: 'var(--ok)' }} />
-              </div>
-              <h3 style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>One-Click Google Sign-In</h3>
-              <p className="text-secondary text-xs mb-3">Uses your pre-configured environment credentials.</p>
-              <button className="btn btn-primary" onClick={() => startGoogleAuth()} disabled={connecting}>
-                {connecting ? 'Launching popup…' : 'Sign in with Google'}
-              </button>
-            </div>
-          ) : (
-            <div>
-              <div className="input-group mb-3">
-                <label className="input-label">Client ID</label>
-                <input className="input" placeholder="1234567890-abc...apps.googleusercontent.com"
-                  value={clientId} onChange={e => setClientId(e.target.value)} />
-              </div>
-
-              <div className="input-group mb-3">
-                <label className="input-label">Client Secret</label>
-                <input className="input" type="password" placeholder="GOCSPX-..."
-                  value={clientSecret} onChange={e => setClientSecret(e.target.value)} />
-              </div>
-
-              {connectError && <div className="alert alert-error mb-3"><div className="alert-content">{connectError}</div></div>}
-
-              <div className="flex gap-2 justify-end">
-                <button className="btn btn-secondary" onClick={() => setShowAddForm(false)}>Cancel</button>
-                <button className="btn btn-primary" disabled={!clientId.trim() || !clientSecret.trim() || connecting} onClick={() => startGoogleAuth()}>
-                  {connecting ? 'Launching popup…' : 'Start Authorization'}
-                </button>
-              </div>
-            </div>
-          )}
+          <GoogleConnectForm product="all" canManage={canConnect} onConnected={() => setShowAddForm(false)} />
         </div>
       )}
+      {connectError && <div className="alert alert-error mb-3"><div className="alert-content">{connectError}</div></div>}
 
       {/* Accounts List */}
       {myAccounts.some(a => !a.available_in_workspace) && (
@@ -326,15 +211,25 @@ export default function AccountsPage({ embedded = false }: { embedded?: boolean 
                     {acc.email || 'Google Account'}
                     {!!acc.needs_reauth && <span className="badge badge-error">Reconnect required</span>}
                     {hasAds(acc) && <span className="badge badge-accent">Google Ads</span>}
+                    {acc.limited_to && <span className="badge badge-info" title="This connection asked Google only for these products">{acc.limited_to.map(p => (p === 'ads' ? 'Google Ads' : 'Business Profile')).join(' + ')} only</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></span>
+                    <span>{(acc.project ?? projectOf(acc.client_id)) ? <>Cloud project <code>{acc.project ?? projectOf(acc.client_id)}</code></> : <>Client ID: <code>{acc.client_id.slice(0, 15)}...</code></>}</span>
                     <span>•</span>
                     <span>Connected {new Date(acc.created_at || '').toLocaleDateString()}</span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
                     {acc.is_mine ? 'Connected by you' : `Shared workspace account${acc.owner_email ? ` · owned by ${acc.owner_email}` : ''}`}
                   </div>
+                  {acc.used_for && (acc.used_for.sites + acc.used_for.ads_clients + acc.used_for.locations > 0) && (
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
+                      Used for {[
+                        acc.used_for.sites ? `${acc.used_for.sites} site${acc.used_for.sites === 1 ? '' : 's'} (Search Console)` : '',
+                        acc.used_for.ads_clients ? `${acc.used_for.ads_clients} Google Ads client${acc.used_for.ads_clients === 1 ? '' : 's'}` : '',
+                        acc.used_for.locations ? `${acc.used_for.locations} Business Profile location${acc.used_for.locations === 1 ? '' : 's'}` : '',
+                      ].filter(Boolean).join(', ')}
+                    </div>
+                  )}
                   {acc.refresh_token_expiry && (
                     <div style={{ fontSize: 12, color: 'var(--warn)', marginTop: 4 }}>
                       Google issued a time-limited refresh grant ending {new Date(acc.refresh_token_expiry).toLocaleString()}, so this

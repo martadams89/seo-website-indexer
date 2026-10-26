@@ -31,15 +31,15 @@ Open **Google Ads → Setup**. The checklist at the top shows what is left to do
 
 ### 1. Connect Google with Google Ads access
 
-- **Already connected for Search Console?** Click **Add Google Ads access** next to that connection. Google asks you to consent to the extra permission; everything the connection already had is kept (incremental authorisation), and no sites need relinking.
-- **New connection:** click **Connect a Google account with Google Ads**. Sign in as the Google user that manages your clients, ideally the user on your manager (MCC) account.
-- Leave **Let the app enable the Google APIs it needs** ticked to have the Google Ads, Search Console, Indexing and Analytics APIs switched on for you. This asks Google for Cloud access (`cloud-platform`). Managed Google Workspace accounts may then be asked to sign in again periodically; untick it and enable the APIs by hand if that becomes a nuisance.
+- **Already connected for Search Console?** Click **Add Google Ads access** next to that connection. Google asks you to consent to the extra permission; everything the connection already had is kept and no sites need relinking.
+- **Another Google user:** under **Connect a Google user for Google Ads**, pick a **Google Cloud project** you already use and click **Sign in with Google**. The app reuses that project's OAuth client, so there's no client ID or secret to enter; on Google's screen choose the user that manages your clients, ideally the one on your manager (MCC) account.
+- **Another project:** choose **Another project (enter its OAuth client)** for a project with a different access level or quota (see [Several Google accounts and projects](#several-google-accounts-and-projects)). You enter its client ID and secret once; later sign-ins through it reuse them.
 
-The same options exist under **Settings → Google Accounts** (tick **Also allow Google Ads management**).
+The same form is under **Settings → Google Accounts → Connect Account** (tick **Also allow Google Ads management**).
 
 ### 2. Enable the Google Ads API
 
-If the checklist says the API is not enabled, click **Enable automatically** (needs the Cloud access above) or enable `googleads.googleapis.com` in the Cloud console for the project that owns your OAuth client.
+If the checklist says the API is not enabled, click **Switch on for me** on the connection. It uses a one-off Google sign-in with Cloud access that is used once and not kept, so the saved connection stays clear of Workspace session control. Or enable `googleads.googleapis.com` in the Cloud console for the project that owns the connection's OAuth client.
 
 ### 3. Get production access for your Cloud project
 
@@ -61,6 +61,15 @@ Click **Find and link client accounts**. The app lists every account the connect
 
 Open **Clients & guardrails** and edit each client: monthly budget, goal, targets, brief and guardrails (below). The AI routine questionnaire asks for the same answers and saves them here.
 
+### Several Google accounts and projects
+
+Google sets the Ads API access level (Test, Explorer, Basic, Standard) and its daily quota per Cloud project, and each Google user reaches different ad accounts. A workspace can mix them, for example one project for Search Console, one with Basic access for Google Ads and one Google approved for Business Profile:
+
+- **One Google user, several projects.** A Google account can be connected once per project. Each connection shows its project number, what it's limited to and how many clients use it.
+- **Google Ads only.** Tick **Only ask Google for Google Ads access** when connecting (on by default for another project). The consent screen then shows just Google Ads and the email address, so that project needs no Search Console or Analytics setup, and the connection is never used for sites.
+- **Moving a client.** Edit the client on **Clients & guardrails** and pick another connection under **Google connection**, or use **Use this connection** in **Find and link client accounts**. The app checks the new connection can reach the account, directly or through a manager it can see, before switching; budget, guardrails, brief and history stay.
+- **Nothing gets stripped by accident.** A sign-in through the same project that would remove Search Console, Google Ads or Business Profile access from an existing connection is refused with a message; use **Reconnect** or **Add … access** on that connection instead.
+
 ### Running your own OAuth client
 
 If the container has no `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET`, the Setup page shows a one-time guide:
@@ -74,7 +83,7 @@ If the container has no `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET`, t
 
 3. Configure the consent screen (Google Auth Platform). Use **Internal** for a single Google Workspace; otherwise **External** and **Publish app**, because apps left in Testing get refresh tokens that expire after seven days.
 4. Create an OAuth client of type **Web application** with the redirect URI `https://YOUR-HOST/api/auth/google/callback`. Google offers no API for creating these clients, so this is the one step that can't be automated.
-5. Paste the client ID and secret when connecting, or set them on the container so every user gets one-click sign-in.
+5. Pick **Another project** when connecting and paste the client ID and secret (only once: later sign-ins pick the project from the list), or set them on the container so every user gets one-click sign-in.
 6. Apply for Google Ads API access (step 3 above).
 
 ## Clients, budgets and guardrails
@@ -238,7 +247,7 @@ This app is self-hosted open-source software, so the safe pattern is:
 
 - run it yourself with **your own** Google Cloud project and OAuth client;
 - reach client accounts through **your own** manager (MCC) account;
-- don't let clients sign in to your install with their own Google accounts on your project. If a client wants direct access, connect them with their own OAuth client (**Use a different Google Cloud project** when connecting) or give them their own install.
+- don't let clients sign in to your install with their own Google accounts on your project. If a client wants direct access, connect them through their own Cloud project (**Another project** when connecting) or give them their own install.
 
 ## Troubleshooting
 
@@ -247,7 +256,7 @@ Errors from Google are translated into a message and a next step.
 | Message | Fix |
 | --- | --- |
 | *No Google Ads access* / insufficient scopes | Use **Add Google Ads access** on the connection. |
-| *API not enabled* (`SERVICE_DISABLED`) | **Enable automatically**, or enable `googleads.googleapis.com` on the OAuth client's project. |
+| *API not enabled* (`SERVICE_DISABLED`) | **Switch on for me**, or enable `googleads.googleapis.com` on the OAuth client's project. |
 | *Test access only* (`CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION`) | Apply for Explorer or Basic access; link paid billing first. |
 | *User doesn't have permission to access customer* | Relink the account from its manager so the login customer ID is set, and check the Google user's access in Google Ads → Admin → Access and security. |
 | Quota exceeded | Explorer allows 2,880 operations a day across all clients; apply for Basic. |
@@ -257,3 +266,5 @@ Errors from Google are translated into a message and a next step.
 | Google sign-in fails with `redirect_uri_mismatch`, or a callback or MCP URL starts with `http://` | Public hostnames always get `https://`. An IP address or LAN name behind an HTTPS proxy needs `PUBLIC_URL=https://your-host`, or the proxy must send `X-Forwarded-Proto: https`; the dashboard shows a warning until it does. Register exactly `https://your-host/api/auth/google/callback` on the OAuth client. |
 | The AI app says the server failed to authenticate | Check `PUBLIC_URL`, that the reverse proxy forwards `/.well-known/*`, `/oauth/*` and `/mcp`, that the app's redirect URL is in `MCP_OAUTH_REDIRECT_ALLOWLIST` if you set it, and remove and re-add the server. |
 | The AI app asks for a client ID and secret | Register a client under *Apps that need a client ID* with the redirect URL the app shows. |
+| *… is already connected through this Google Cloud project with … access, and this sign-in would remove it* | Use **Reconnect** or **Add Google Ads access** on that connection (it keeps everything), or connect through a different project. |
+| *… can't reach ad account …, directly or through a manager account* | The connection you're moving a client to has no access to it. Give that Google user access in Google Ads → Admin → Access and security (or to the manager account), then try again. |

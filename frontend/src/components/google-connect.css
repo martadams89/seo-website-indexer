@@ -1,0 +1,8 @@
+/* Shared "connect a Google user" form (Google Ads, Business Profile and Settings → Google Accounts). Self-contained: it renders outside the Ads page too. */
+.google-connect-form { display: flex; flex-direction: column; gap: 10px; }
+.google-connect-project { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.google-connect-project .input { width: 100%; }
+.google-connect-project small { font-weight: 400; }
+.google-connect-custom { display: flex; flex-direction: column; gap: 8px; }
+.google-connect-form .google-connect-hint { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+.google-connect-form .google-connect-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

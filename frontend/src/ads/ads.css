@@ -217,3 +217,4 @@
 .ads-cli-schedule { margin-top: 12px; }
 .ads-cli-schedule > summary { color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer; }
 .ads-cli-schedule .mcp-code { margin-top: 8px; }
+.ads-connection-name { display: block; margin-top: 2px; }

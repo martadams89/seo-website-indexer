@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, Plus, ShieldCheck, Zap } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, ExternalLink, KeyRound, Link2, ShieldCheck, Zap } from 'lucide-react';
 import { useToast } from '../AppContext';
 import { McpConnect } from '../components/McpConnect';
+import { GoogleConnectForm } from '../components/GoogleConnectForm';
 import { errorMessage } from '../ads/api';
 import { openApiEnable, openGoogleConsent, useApisEnabled, useGoogleAuthSuccess } from '../ads/googleConnect';
 import { reviewsApi, type ConnectionStatus, type ReviewsSetup } from './api';
@@ -25,9 +26,6 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
-  // Off by default: Cloud access puts Workspace accounts under Google Cloud
-  // session control, which forces them to sign in again every few hours.
-  const [autoSetup, setAutoSetup] = useState(false);
   const refreshAfterConsent = useCallback(() => { void reload(true); }, [reload]);
   useGoogleAuthSuccess(refreshAfterConsent);
   useApisEnabled(useCallback(result => {
@@ -42,9 +40,10 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
     toast('success', 'Copied to clipboard');
   }
 
-  async function connect(accountId?: string) {
-    setBusy(accountId ?? 'new');
-    try { await openGoogleConsent({ accountId, business: true, autoSetup }); }
+  /** Reconnect, or add Business Profile to, an existing connection (it keeps its project and everything it has). */
+  async function connect(accountId: string) {
+    setBusy(accountId);
+    try { await openGoogleConsent({ accountId, business: true }); }
     catch (e) { toast('error', errorMessage(e)); }
     setBusy(null);
   }
@@ -72,13 +71,17 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
     { done: s.access_approved, title: 'Get the project approved by Google', detail: 'Google only serves these APIs to approved projects. Apply once; approval usually takes a few days.' },
     { done: s.locations_linked, title: 'Link your clients\' locations', detail: 'Every location the connected users manage is listed for you to pick.' },
   ];
-  const waiting = setup.connections.find(c => c.api === 'not_approved');
+  const waiting = setup.connections.filter(c => c.api === 'not_approved');
+  // One entry per Cloud project waiting for Google, or the main project before anything has been checked.
+  const approvals = waiting.length
+    ? [...new Map(waiting.map(c => [c.project ?? c.id, c])).values()].map(c => ({ project: c.project, links: c.links }))
+    : !s.access_approved && s.api_enabled ? [{ project: setup.project, links: setup.links }] : [];
 
   return (
     <div className="ads-setup">
       <section className="ops-card">
         <div className="ops-card-head">
-          <div><span className="eyebrow">Checklist</span><h2>{setup.ready ? 'Google reviews are ready' : 'Get Google reviews ready'}</h2></div>
+          <div><span className="eyebrow">Checklist</span><h2>{setup.ready ? 'Business Profile is ready' : 'Get Business Profile ready'}</h2></div>
           <button className="btn btn-ghost btn-sm" onClick={() => reload(true)}>Re-check</button>
         </div>
         <ol className="ads-checklist">
@@ -91,23 +94,24 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
         </ol>
       </section>
 
-      {(waiting || (!s.access_approved && s.api_enabled)) && (
-        <section className="ops-card reviews-approval">
+      {approvals.map(({ project, links }) => (
+        <section key={project ?? 'project'} className="ops-card reviews-approval">
           <div className="ops-card-head"><div><span className="eyebrow">Google approval</span><h2>Apply for Business Profile API access</h2></div><ShieldCheck size={18} /></div>
           <ol className="ads-guide-steps">
             <li><strong>Check you're eligible.</strong> <span>Google wants a Business Profile that has been verified and active for at least 60 days, with a website listed on it. It can be your agency's own profile or a client's you manage.</span></li>
             <li><strong>Open the request form</strong> and choose <b>Application for Basic API Access</b>. Send it from an email address that is an owner or manager on that Business Profile, ideally on the same domain as its website.
-              <span className="ads-links"><a href={setup.links.access_form} target="_blank" rel="noreferrer">Business Profile API request form <ExternalLink size={12} /></a></span>
+              <span className="ads-links"><a href={links.access_form} target="_blank" rel="noreferrer">Business Profile API request form <ExternalLink size={12} /></a></span>
             </li>
             <li><strong>Give this Cloud project number:</strong>
-              <span className="mcp-copy-row"><code>{setup.project ?? 'unknown'}</code><button className="btn-icon btn-icon-ghost" aria-label="Copy project number" onClick={() => copy(setup.project ?? '')}><Copy size={13} /></button></span>
+              <span className="mcp-copy-row"><code>{project ?? 'unknown'}</code><button className="btn-icon btn-icon-ghost" aria-label="Copy project number" onClick={() => copy(project ?? '')}><Copy size={13} /></button></span>
             </li>
             <li><strong>Wait for Google's email.</strong> <span>Approval shows as a 300 requests-per-minute quota on the project (0 means not approved yet). Then click Re-check above.</span>
-              <span className="ads-links"><a href={setup.links.quotas} target="_blank" rel="noreferrer">Check the quota <ExternalLink size={12} /></a></span>
+              <span className="ads-links"><a href={links.quotas} target="_blank" rel="noreferrer">Check the quota <ExternalLink size={12} /></a></span>
             </li>
+            <li><strong>Already approved on another project?</strong> <span>Connect through that project instead (below), then move your locations onto it from the Locations tab.</span></li>
           </ol>
         </section>
-      )}
+      ))}
 
       <section className="ops-card">
         <div className="ops-card-head">
@@ -120,9 +124,10 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
               <article key={conn.id}>
                 <div className="ads-connection-main">
                   <strong>{conn.email ?? conn.id}</strong>
-                  <small>Cloud project {conn.project ?? 'unknown'}{conn.accounts !== null ? ` · ${conn.accounts} Business Profile account(s)` : ''}</small>
+                  <small>Cloud project {conn.project ?? 'unknown'}{conn.accounts !== null ? ` · ${conn.accounts} Business Profile account(s)` : ''}{conn.locations ? ` · used by ${conn.locations} linked location${conn.locations === 1 ? '' : 's'}` : ''}</small>
                   <div className="ads-badges">
                     <span className={`badge badge-${conn.has_business_scope ? 'ok' : 'warn'}`}>{conn.has_business_scope ? 'Business Profile access' : 'No Business Profile access'}</span>
+                    {conn.business_only && <span className="badge badge-accent" title="This connection asked Google for Business Profile only">Business Profile only</span>}
                     {conn.has_business_scope && <span className={`badge badge-${api.tone}`}>API: {api.text}</span>}
                     {conn.has_cloud_scope && <span className="badge badge-info">Cloud access</span>}
                   </div>
@@ -137,28 +142,33 @@ export function ReviewsSetupView({ setup, canManage, reload, onLinked }: {
                   {conn.api === 'api_disabled' && (
                     <button className="btn btn-secondary btn-sm" disabled={!canManage || busy === `enable:${conn.id}`} onClick={() => enableApis(conn)} title="Switches the APIs on with a one-off Google sign-in; the saved connection keeps no Cloud access"><Zap size={13} /> Switch on for me</button>
                   )}
-                  {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={setup.links.enable_apis} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
+                  {conn.api === 'api_disabled' && <a className="btn btn-ghost btn-sm" href={conn.links.enable_apis} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Cloud console</a>}
+                  {conn.api === 'not_approved' && <a className="btn btn-ghost btn-sm" href={conn.links.quotas} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Quota</a>}
                 </div>
               </article>
             );
           })}
           {!setup.connections.length && <div className="ops-empty compact">No Google account is connected to this workspace yet.</div>}
         </div>
-        <label className="autosetup-row">
-          <input type="checkbox" checked={autoSetup} onChange={e => setAutoSetup(e.target.checked)} />
-          <div>
-            <strong>Also keep Cloud access on this connection</strong>
-            <div className="text-dim">Not needed to switch the APIs on: "Switch on for me" does that with a one-off sign-in. Keeping Cloud access lets the app enable APIs without asking, but managed Google Workspace accounts can then be signed out every few hours by Google Cloud session control.</div>
-          </div>
-        </label>
-        <div className="ads-row-actions">
-          <button className="btn btn-primary" disabled={!canManage || busy === 'new' || !setup.builtin_oauth_client} onClick={() => connect()}><Plus size={14} /> Connect a Google account with Business Profile</button>
-          {setup.connections.some(c => c.api === 'ok') && <button className="btn btn-secondary" disabled={!canManage} onClick={() => setLinking(true)}><Link2 size={14} /> Find and link locations</button>}
-        </div>
+        {setup.connections.some(c => c.api === 'ok') && (
+          <div className="ads-row-actions"><button className="btn btn-secondary" disabled={!canManage} onClick={() => setLinking(true)}><Link2 size={14} /> Find and link locations</button></div>
+        )}
         <p className="ads-hint">
-          Already connected for Search Console or Google Ads? Use <b>Add Business Profile access</b> on that connection — it keeps everything it already has.
-          {!setup.builtin_oauth_client && ' To connect a new Google account, add it under Settings → Google accounts first.'}
+          Already connected for Search Console or Google Ads? Use <b>Add Business Profile access</b> on that connection; it keeps everything it already has.
         </p>
+      </section>
+
+      <section className="ops-card">
+        <div className="ops-card-head">
+          <div><span className="eyebrow">Another account or project</span><h2>Connect Business Profile separately</h2></div>
+        </div>
+        <p className="card-intro">
+          Google approves the Business Profile APIs per Cloud project. If that approval sits on a different project, or with a different Google
+          user, connect it here. The same Google account can be connected once per project: Search Console keeps using its connection, and your
+          locations use this one.
+        </p>
+        <GoogleConnectForm product="business" canManage={canManage} />
+        <p className="ads-hint">Moving a linked location onto the new connection keeps its reviews, rules and history (Locations tab).</p>
       </section>
 
       <McpConnect compact />

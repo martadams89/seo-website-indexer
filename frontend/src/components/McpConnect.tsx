@@ -9,7 +9,7 @@ type ConnectedApp = { id: string; client_name: string; scopes: string[]; created
 type OAuthClient = Awaited<ReturnType<typeof api.getOAuthClients>>[number];
 type CreatedClient = Awaited<ReturnType<typeof api.createOAuthClient>>;
 
-const SCOPE_LABEL: Record<string, string> = { 'mcp:read': 'read', 'mcp:write': 'SEO actions', 'ads:write': 'Google Ads changes', 'reviews:write': 'review replies' };
+const SCOPE_LABEL: Record<string, string> = { 'mcp:read': 'read', 'mcp:write': 'SEO actions', 'ads:write': 'Google Ads changes', 'reviews:write': 'Business Profile changes' };
 
 interface ClientGuide {
   id: string;
@@ -191,7 +191,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
           </div>
         )}
         <p className="mcp-note">
-          On the sign-in screen, tick <b>Manage Google Ads</b> or <b>Reply to Google reviews</b> if routines should make Google Ads changes or answer reviews. Access tokens last an
+          On the sign-in screen, tick <b>Manage Google Ads</b> or <b>Manage Google Business Profile</b> if routines should make Google Ads changes, answer reviews or post to Business Profiles. Access tokens last an
           hour and renew automatically; disconnect an app below to cut it off.
         </p>
         {!publicHttps(endpoint) && (
@@ -272,7 +272,7 @@ export function McpConnect({ compact = false }: { compact?: boolean }) {
               <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Token name (e.g. n8n workflow)" aria-label="MCP token name" />
               <label><input type="checkbox" checked={form.allowWrite} onChange={e => setForm({ ...form, allowWrite: e.target.checked })} /> SEO actions</label>
               <label><input type="checkbox" checked={form.allowAds} onChange={e => setForm({ ...form, allowAds: e.target.checked })} /> Google Ads changes</label>
-              <label><input type="checkbox" checked={form.allowReviews} onChange={e => setForm({ ...form, allowReviews: e.target.checked })} /> Review replies</label>
+              <label><input type="checkbox" checked={form.allowReviews} onChange={e => setForm({ ...form, allowReviews: e.target.checked })} /> Business Profile (reviews, posts, profile)</label>
               <button className="btn btn-secondary btn-sm" disabled={busy || !form.name.trim()} onClick={createToken}><Plus size={12} /> Create token</button>
             </div>
           </div>

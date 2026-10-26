@@ -38,10 +38,10 @@ const REQUEST_TTL_MS = 15 * 60_000;
 const MAX_CLIENTS = 1000;
 
 export const SCOPE_INFO: Record<McpScope, { label: string; description: string }> = {
-  'mcp:read': { label: 'Read your data', description: 'Sites, Search Console, indexing, AI citations, Google Ads reporting and Google reviews in every workspace you can access.' },
+  'mcp:read': { label: 'Read your data', description: 'Sites, Search Console, indexing, AI citations, Google Ads reporting and Google Business Profile (reviews, profile, posts, photos) in every workspace you can access.' },
   'mcp:write': { label: 'Run SEO actions', description: 'Submit URLs for indexing, trigger indexing runs and refresh performance snapshots.' },
   'ads:write': { label: 'Manage Google Ads', description: 'Propose and apply Google Ads changes. Each client\'s guardrails still apply: changes outside them wait for your approval.' },
-  'reviews:write': { label: 'Reply to Google reviews', description: 'Publish replies to Google reviews within each location\'s reply rules. Replies outside them wait for your approval.' },
+  'reviews:write': { label: 'Manage Google Business Profile', description: 'Reply to Google reviews, publish posts and photos, and edit profiles within each location\'s rules. Anything outside them waits for your approval.' },
 };
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');

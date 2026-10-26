@@ -6,10 +6,10 @@
  */
 import { getGoogleAccountsForWorkspace, type GoogleAccount } from '../db/database.js';
 import {
-  CLOUD_PLATFORM_SCOPE, GOOGLE_ADS_SERVICE, enableRequiredApis, getAccessTokenForAccount, hasBuiltinCredentials,
+  CLOUD_PLATFORM_SCOPE, GOOGLE_ADS_SERVICE, enableRequiredApis, getAccessTokenForAccount, hasBuiltinCredentials, limitedTo, type LimitedProduct,
 } from '../auth/google-oauth.js';
-import { ADS_SCOPE, AdsApiError, cleanCustomerId, listAccessibleCustomers, projectFromClientId, searchGaql } from './client.js';
-import { linkAdsAccount, listAdsAccounts } from './store.js';
+import { ADS_SCOPE, AdsApiError, cleanCustomerId, discoverCustomers, formatCustomerId, listAccessibleCustomers, projectFromClientId, searchGaql } from './client.js';
+import { linkAdsAccount, listAdsAccounts, type AdsAccount } from './store.js';
 
 export type ApiState = 'ok' | 'no_scope' | 'api_disabled' | 'access_level' | 'needs_reauth' | 'error' | 'unchecked';
 
@@ -25,6 +25,12 @@ export interface ConnectionStatus {
   accessible_customers: number | null;
   message: string | null;
   hint: string | null;
+  /** Products the grant is limited to (e.g. ['ads'] for a Google-Ads-only connection); null for a full connection. */
+  limited_to: LimitedProduct[] | null;
+  /** Linked Ads clients that use this connection. */
+  clients: number;
+  /** Cloud console pages for this connection's own project (access level, API, consent screen). */
+  links: ReturnType<typeof consoleLinks>;
 }
 
 export function consoleLinks(project: string | null) {
@@ -55,6 +61,7 @@ async function probe(account: GoogleAccount, workspaceId: string, fresh: boolean
     has_cloud_scope: scopes.includes(CLOUD_PLATFORM_SCOPE),
     needs_reauth: !!account.needs_reauth,
     api: 'unchecked', access: 'unchecked', accessible_customers: null, message: null, hint: null,
+    limited_to: limitedTo(account.granted_scopes), clients: 0, links: consoleLinks(projectFromClientId(account.client_id)),
   };
   const fail = (e: unknown) => {
     const err = e as AdsApiError;
@@ -96,8 +103,9 @@ async function probe(account: GoogleAccount, workspaceId: string, fresh: boolean
 
 export async function setupStatus(workspaceId: string, opts: { fresh?: boolean } = {}) {
   const accounts = getGoogleAccountsForWorkspace(workspaceId);
-  const connections = await Promise.all(accounts.map(a => probe(a, workspaceId, !!opts.fresh)));
   const linked = listAdsAccounts(workspaceId);
+  const connections = (await Promise.all(accounts.map(a => probe(a, workspaceId, !!opts.fresh))))
+    .map(c => ({ ...c, clients: linked.filter(l => l.google_account_id === c.id).length }));
   const project = connections.find(c => c.has_ads_scope)?.project ?? connections[0]?.project ?? null;
   const ready = connections.some(c => c.api === 'ok' && (c.access === 'ok' || c.access === 'unchecked'));
   return {
@@ -154,4 +162,32 @@ export async function verifyAndLinkAccount(input: {
     name: (c.descriptiveName as string) ?? null, currency: (c.currencyCode as string) ?? null, timeZone: (c.timeZone as string) ?? null,
     isManager: !!c.manager, testAccount: !!c.testAccount, monthlyBudget: input.monthlyBudget ?? null, createdBy: input.userId,
   });
+}
+
+/**
+ * Point a linked Ads client at another Google connection: a different Google
+ * user, or the same user through another Cloud project (for example one with
+ * Basic access or more quota). The new connection must reach the account,
+ * directly or through a manager account it can see. Budget, guardrails,
+ * brief and history stay.
+ */
+export async function moveAdsAccount(account: AdsAccount, googleAccountId: string, userId: string | null): Promise<AdsAccount> {
+  const conn = getGoogleAccountsForWorkspace(account.workspace_id).find(a => a.id === googleAccountId);
+  if (!conn || !(conn.granted_scopes ?? '').split(' ').includes(ADS_SCOPE)) {
+    throw new AdsApiError('That Google connection is not shared with this workspace or has no Google Ads access.', 'NO_ADS_SCOPE');
+  }
+  if (conn.id === account.google_account_id) return account;
+  const verify = (loginCustomerId: string | null) => verifyAndLinkAccount({
+    workspaceId: account.workspace_id, googleAccountId: conn.id, customerId: account.customer_id, loginCustomerId, userId,
+  });
+  // The same manager path usually works from the other connection; otherwise find how it reaches the account.
+  try { return await verify(account.login_customer_id); } catch { /* fall through to discovery */ }
+  const { customers } = await discoverCustomers(conn.id);
+  const route = customers.find(c => c.customer_id === account.customer_id);
+  if (!route) {
+    throw new AdsApiError(`${conn.email ?? conn.id} can't reach ad account ${formatCustomerId(account.customer_id)}, directly or through a manager account.`, 'PERMISSION', {
+      hint: 'Give that Google user access to the account (or to its manager account) in Google Ads → Admin → Access and security, then try again.',
+    });
+  }
+  return verify(route.login_customer_id);
 }

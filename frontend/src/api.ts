@@ -30,6 +30,11 @@ export interface GoogleAccount {
   last_refreshed_at?: string | null;
   last_refresh_error?: string | null;
   granted_scopes?: string | null;
+  /** Cloud project number of the connection's OAuth client. */
+  project?: string | null;
+  /** Products a limited connection is for; null for a full one. */
+  limited_to?: Array<'ads' | 'business'> | null;
+  used_for?: { sites: number; ads_clients: number; locations: number };
   owner_email?: string | null;
   is_mine?: boolean;
   can_disconnect?: boolean;
@@ -259,7 +264,7 @@ export const api = {
     apiFetch<{ ok: boolean }>('/api/auth/save-credentials', {
       method: 'POST', body: JSON.stringify({ clientId, clientSecret }),
     }),
-  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean } = {}) =>
+  beginGoogleAuth: (data: { clientId?: string; clientSecret?: string; autoSetup?: boolean; accountId?: string; ads?: boolean; business?: boolean; only?: Array<'ads' | 'business'>; projectFrom?: string } = {}) =>
     apiFetch<{ authorizationUrl: string }>('/api/auth/google/start', { method: 'POST', body: JSON.stringify(data) }),
   clearAuth: () => apiFetch<{ ok: boolean }>('/api/auth/clear', { method: 'POST' }),
   listGSCSites: (accountId?: string) => 
@@ -647,7 +652,7 @@ export const WORKSPACE_CAPABILITIES: Array<{ id: WorkspaceCapability; label: str
   { id: 'manage_reports', label: 'Manage reports' },
   { id: 'manage_governance', label: 'Manage governance & budgets' },
   { id: 'manage_ads', label: 'Manage Google Ads (budgets, guardrails, approvals)' },
-  { id: 'manage_reviews', label: 'Manage Google reviews (reply rules, approvals, replies)' },
+  { id: 'manage_reviews', label: 'Manage Google Business Profile (reviews, posts, photos, profile edits and their rules)' },
 ];
 export interface WorkspaceInvite {
   id: string; email: string; role: string; ai_citations: boolean; expires_at: string; created_at: string;
