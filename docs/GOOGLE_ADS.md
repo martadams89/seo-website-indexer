@@ -97,6 +97,7 @@ Goal, target CPA or ROAS, website, offer, audience, markets, competitors, brand 
 | Mode | Effect |
 | --- | --- |
 | Autopilot within limits (`guarded`) | Changes inside every rule below apply when the assistant (or you) applies them. Anything outside waits for approval. Default for new links. |
+| Auto-approve everything (`auto`) | Every change can be applied without you, including the ones marked *Always* below. Each change lists what the rules would have held, as *Auto-approved: …*. With *Still ask me before projected spend goes over the monthly budget* ticked (the default), changes that break the monthly budget, or raise spend when none is set, still wait. The *Propose only* routine still switches the client to `review`. |
 | Approve every change (`review`) | Every change waits for a person. Chosen automatically when the AI routine is set to *Propose only*. |
 | Read-only (`read_only`) | No changes at all. |
 
@@ -112,9 +113,9 @@ Goal, target CPA or ROAS, website, offer, audience, markets, competitors, brand 
 | Turning paused campaigns on | Allowed | Optional approval; always subject to the monthly budget. |
 | Bid strategy or CPA/ROAS target changes | Need approval | Can be allowed per client. |
 | Removing campaigns, ad groups, ads, keywords or assets | Need approval | Can be allowed per client. |
-| New campaigns created enabled | Always need approval | Create them paused. |
-| Conversion actions, conversion goals, account settings | Always need approval | — |
-| Applying budget, bidding, broad-match or Performance Max recommendations | Always need approval | — |
+| New campaigns created enabled | Always need approval (except in `auto`) | Create them paused. |
+| Conversion actions, conversion goals, account settings | Always need approval (except in `auto`) | — |
+| Applying budget, bidding, broad-match or Performance Max recommendations | Always need approval (except in `auto`; budget recommendations still wait while the client keeps to its monthly budget) | — |
 
 Shared budgets are counted once. Cutting spend is always inside the limits.
 

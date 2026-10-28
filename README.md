@@ -218,7 +218,7 @@ The [deployment guide](docs/DEPLOYMENT.md) includes the complete SSO, SMTP, reco
 - Human sessions are stored in the database and authentication routes have a stricter rate limit.
 - Workspace access is checked by the API, not only hidden in the interface.
 - Service tokens are hashed, scoped to one workspace and can be expired or revoked.
-- MCP clients sign in with OAuth 2.1 (PKCE, one-hour access tokens, rotating refresh tokens, revocable connected apps) or hashed personal tokens, and never get more than their user's role allows.
+- MCP clients sign in with OAuth 2.1 (PKCE, access tokens checked on every request and revocable at once, rotating refresh tokens) or hashed personal tokens, and never get more than their user's role allows.
 - Google Ads changes are validated by Google, checked against each client's monthly budget and guardrails, and recorded with the person or assistant that made them.
 - AI replies to Google reviews, and AI profile edits, posts and photos, are checked against each location's rules; anything outside them waits for a person, and every change is recorded with who proposed and approved it.
 - `ADMIN_EMAIL` stops anyone else from claiming a fresh public install by creating the first admin account.
@@ -245,7 +245,7 @@ Send the token as `Authorization: Bearer oc_…`. See the [automation API guide]
 
 The app ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-host>/mcp` (Streamable HTTP) so any MCP-capable assistant can read — and, with your permission, act on — your data: sites, Search Console performance, period comparisons, content groups, tracked keywords, URL inspection, the ranking playbook, alerts, indexing, hygiene, AI-agent readiness, AI citations, Google Ads and Google Business Profile.
 
-**Connect with OAuth (recommended):** add the server URL to your AI app. It finds the sign-in automatically, opens this app, and you choose what it may do: read data, run SEO actions (`mcp:write`), manage Google Ads (`ads:write`) and/or manage Google Business Profile: reviews, posts, photos and profile edits (`reviews:write`). Access tokens last an hour and refresh automatically; disconnect an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
+**Connect with OAuth (recommended):** add the server URL to your AI app. It finds the sign-in automatically, opens this app, and you choose what it may do: read data, run SEO actions (`mcp:write`), manage Google Ads (`ads:write`) and/or manage Google Business Profile: reviews, posts, photos and profile edits (`reviews:write`). You connect once: the connection lasts 30 days from its last use (90 for the refresh token), so one that's used regularly never expires, and it survives server restarts and updates. If an app does ask to reconnect, it goes straight back with the access you gave it, with no consent screen. Disconnect an app any time under **Governance & Usage → API & Webhooks → Connected apps**.
 
 | Client | Add the server |
 | --- | --- |

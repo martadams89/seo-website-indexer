@@ -22,6 +22,8 @@ export interface ReplyRules {
   allow_contact_details: boolean;
   /** Replacing a reply that is already published publishes without approval. */
   allow_replace_existing: boolean;
+  /** Deleting a published reply happens without approval (never in review mode). */
+  allow_delete: boolean;
   /** Replies containing any of these phrases (case-insensitive) need approval. */
   banned_phrases: string[];
   /** Send an alert for new reviews rated at or below this (0 turns alerts off). */
@@ -35,6 +37,7 @@ export const DEFAULT_RULES: ReplyRules = {
   allow_links: false,
   allow_contact_details: true,
   allow_replace_existing: false,
+  allow_delete: false,
   banned_phrases: [],
   alert_max_rating: 3,
 };
@@ -59,7 +62,7 @@ const clampInt = (v: unknown, min: number, max: number, fallback: number): numbe
 export function normalizeRules(raw: unknown): ReplyRules {
   const v = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof ReplyRules, unknown>>;
   const mode = ['read_only', 'review', 'guarded', 'autopilot'].includes(String(v.mode)) ? v.mode as ReplyMode : DEFAULT_RULES.mode;
-  const bool = (key: 'allow_links' | 'allow_contact_details' | 'allow_replace_existing') => typeof v[key] === 'boolean' ? v[key] as boolean : DEFAULT_RULES[key];
+  const bool = (key: 'allow_links' | 'allow_contact_details' | 'allow_replace_existing' | 'allow_delete') => typeof v[key] === 'boolean' ? v[key] as boolean : DEFAULT_RULES[key];
   return {
     mode,
     auto_min_rating: clampInt(v.auto_min_rating, 1, 5, DEFAULT_RULES.auto_min_rating),
@@ -67,6 +70,7 @@ export function normalizeRules(raw: unknown): ReplyRules {
     allow_links: bool('allow_links'),
     allow_contact_details: bool('allow_contact_details'),
     allow_replace_existing: bool('allow_replace_existing'),
+    allow_delete: bool('allow_delete'),
     banned_phrases: Array.isArray(v.banned_phrases)
       ? [...new Set(v.banned_phrases.map(p => String(p).trim()).filter(Boolean).map(p => p.slice(0, 100)))].slice(0, 50)
       : DEFAULT_RULES.banned_phrases,
@@ -111,7 +115,7 @@ export function evaluateReply(input: {
 
   if (input.action === 'delete') {
     if (!input.existingReply) add('blocked', 'nothing_to_delete', 'This review has no reply to delete.');
-    else add('approval', 'delete', 'Deleting a published reply always needs a person\'s approval.');
+    else if (!rules.allow_delete || rules.mode === 'review') add('approval', 'delete', 'Deleting a published reply needs a person\'s approval at this location.');
   } else {
     const text = input.text.trim();
     if (!text) add('blocked', 'empty', 'The reply is empty.');

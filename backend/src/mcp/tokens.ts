@@ -22,6 +22,15 @@ export type McpScope = (typeof MCP_SCOPES)[number];
 /** Human-visible prefix so a leaked token is easy to recognise and revoke. */
 const TOKEN_PREFIX = 'seomcp_';
 
+/**
+ * OAuth connections (mcp/oauth.ts) last this long after their last use. Every
+ * request is checked against the database and a disconnect ends the
+ * connection at once, so long lifetimes cost little, while a short access
+ * token turns any refresh an AI app misses into a reconnect.
+ */
+export const OAUTH_ACCESS_TTL_MS = 30 * 86_400_000;
+export const OAUTH_REFRESH_TTL_MS = 90 * 86_400_000;
+
 export interface McpTokenRow {
   id: string;
   user_id: string;
@@ -86,20 +95,30 @@ export interface McpTokenAuth { id: string; userId: string; scopes: McpScope[] }
 
 /**
  * Validate a raw bearer token. Returns the owning user + granted scopes, or null
- * when the token is unknown, revoked or expired. Bumps last_used_at on success.
+ * when the token is unknown, revoked or expired. Bumps last_used_at on success,
+ * and for an OAuth connection pushes its access and refresh expiry forward, so
+ * a connection in regular use never lapses.
  * Write scopes grant `mcp:read` too, and `*` grants everything.
  */
 export function authenticateMcpToken(raw: string): McpTokenAuth | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   const hash = hashToken(trimmed);
-  const row = getDb().prepare(
-    `SELECT id,user_id,scopes FROM mcp_tokens
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT id,user_id,scopes,oauth_grant_id FROM mcp_tokens
        WHERE token_hash=? AND revoked_at IS NULL
          AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))`
-  ).get(hash) as { id: string; user_id: string; scopes: string } | undefined;
+  ).get(hash) as { id: string; user_id: string; scopes: string; oauth_grant_id: string | null } | undefined;
   if (!row) return null;
-  getDb().prepare("UPDATE mcp_tokens SET last_used_at=datetime('now') WHERE token_hash=?").run(hash);
+  if (row.oauth_grant_id) {
+    const now = Date.now();
+    db.prepare("UPDATE mcp_tokens SET last_used_at=datetime('now'), expires_at=? WHERE id=?").run(new Date(now + OAUTH_ACCESS_TTL_MS).toISOString(), row.id);
+    db.prepare("UPDATE mcp_oauth_grants SET last_used_at=datetime('now'), refresh_expires_at=? WHERE id=? AND revoked_at IS NULL")
+      .run(new Date(now + OAUTH_REFRESH_TTL_MS).toISOString(), row.oauth_grant_id);
+  } else {
+    db.prepare("UPDATE mcp_tokens SET last_used_at=datetime('now') WHERE id=?").run(row.id);
+  }
 
   return { id: row.id, userId: row.user_id, scopes: expandScopes(parseScopes(row.scopes)) };
 }

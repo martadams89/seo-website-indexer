@@ -57,7 +57,7 @@ export function AdsClients({ accounts, connections = [], canManage, reload, onOp
                     {(() => { const c = connections.find(x => x.id === a.google_account_id); return c ? <small className="text-dim ads-connection-name">{connectionName(c)}</small> : null; })()}
                   </td>
                   <td>{a.monthly_budget === null ? <span className="badge badge-warn">Not set</span> : money(a.monthly_budget, a.currency, 0)}</td>
-                  <td><span className={`badge badge-${a.guardrails.mode === 'guarded' ? 'ok' : a.guardrails.mode === 'review' ? 'accent' : 'info'}`}>{MODE_LABEL[a.guardrails.mode]}</span></td>
+                  <td><span className={`badge badge-${a.guardrails.mode === 'guarded' || a.guardrails.mode === 'auto' ? 'ok' : a.guardrails.mode === 'review' ? 'accent' : 'info'}`}>{MODE_LABEL[a.guardrails.mode]}</span></td>
                   <td>{a.pending_approvals ? <span className="badge badge-warn">{a.pending_approvals}</span> : '—'}</td>
                   <td>
                     <div className="ads-cell-actions">
@@ -266,6 +266,7 @@ export function EditClientModal({ account, connections = [], canManage, onClose,
       <div className="form-grid">
         <label>What may the AI do?<select className="input" value={guard.mode} disabled={!canManage} onChange={e => setGuard({ ...guard, mode: e.target.value as AdsGuardrails['mode'] })}>
           <option value="guarded">Apply changes inside the limits below; ask me for the rest</option>
+          <option value="auto">Auto-approve everything — never ask me</option>
           <option value="review">Propose only — I approve every change</option>
           <option value="read_only">Read-only — no changes at all</option>
         </select></label>
@@ -277,10 +278,13 @@ export function EditClientModal({ account, connections = [], canManage, onClose,
           <label><input type="checkbox" checked={guard.allow_enable_campaigns} disabled={!canManage} onChange={e => setGuard({ ...guard, allow_enable_campaigns: e.target.checked })} /> Turn paused campaigns on (still within the budget)</label>
           <label><input type="checkbox" checked={guard.allow_bidding_changes} disabled={!canManage} onChange={e => setGuard({ ...guard, allow_bidding_changes: e.target.checked })} /> Change bid strategies and CPA/ROAS targets</label>
           <label><input type="checkbox" checked={guard.allow_removals} disabled={!canManage} onChange={e => setGuard({ ...guard, allow_removals: e.target.checked })} /> Remove campaigns, ads or keywords (permanent)</label>
+          {guard.mode === 'auto' && <label><input type="checkbox" checked={guard.auto_keep_budget} disabled={!canManage} onChange={e => setGuard({ ...guard, auto_keep_budget: e.target.checked })} /> Still ask me before projected spend goes over the monthly budget</label>}
           <label><input type="checkbox" checked={enabled} disabled={!canManage} onChange={e => setEnabled(e.target.checked)} /> Include this client in AI routines</label>
         </div>
       </div>
-      <p className="ads-hint">Always needs your approval, whatever the settings: conversion and account settings, new campaigns that start enabled, and any spend increase when no monthly budget is set.</p>
+      <p className="ads-hint">{guard.mode === 'auto'
+        ? `Every change the AI proposes is approved automatically; the limits above are noted on each change but don't hold it.${guard.auto_keep_budget ? ' Only changes that would take projected spend past the monthly budget (plus the tolerance), or raise spend when no monthly budget is set, wait for you.' : ''}`
+        : 'Unless you choose auto-approve, these always need your approval: conversion and account settings, new campaigns that start enabled, and any spend increase when no monthly budget is set.'}</p>
     </Modal>
   );
 }

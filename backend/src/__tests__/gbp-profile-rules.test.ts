@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLocalPost, buildProfilePatch, DEFAULT_PROFILE_RULES, evaluatePhoto, fieldsFromMask, fromGoogleRegularHours, fromGoogleSpecialHours,
+  buildLocalPost, buildProfilePatch, DEFAULT_PROFILE_RULES, evaluateDelete, evaluatePhoto, evaluatePost, evaluateProfileEdit, fieldsFromMask, fromGoogleRegularHours, fromGoogleSpecialHours,
   normalizeProfileRules, toGoogleRegularHours, toGoogleSpecialHours, validatePhoto,
 } from '../reviews/profile-rules.js';
 
@@ -84,6 +84,24 @@ describe('posts and photos', () => {
 describe('rules and labels', () => {
   it('falls back to approval for unknown modes', () => {
     expect(normalizeProfileRules({ profile: 'yolo', posts: 'auto', alert_google_updates: false })).toEqual({ profile: 'approval', posts: 'auto', photos: 'approval', alert_google_updates: false });
+    expect(normalizeProfileRules({ photos: 'auto_all' }).photos).toBe('auto_all');
+  });
+
+  it('publishes everything when a location auto-approves it, except text that still looks like a template', () => {
+    const all = normalizeProfileRules({ profile: 'auto_all', posts: 'auto_all', photos: 'auto_all' });
+    const within = normalizeProfileRules({ profile: 'auto', posts: 'auto', photos: 'auto' });
+    expect(evaluatePhoto(all, { category: 'LOGO' })).toEqual([]);
+    expect(evaluateDelete(all, 'photo_delete')).toEqual([]);
+    expect(evaluateDelete(all, 'post_delete')).toEqual([]);
+    expect(evaluateDelete(within, 'photo_delete').map(f => f.code)).toEqual(['delete']);
+    const offer = buildLocalPost({ topic: 'OFFER', event_title: 'Winter check', start_date: '2026-11-01', end_date: '2026-11-30' });
+    expect(evaluatePost(all, offer)).toEqual([]);
+    expect(evaluatePost(within, offer).map(f => f.code)).toEqual(['offer']);
+    expect(evaluatePost(all, buildLocalPost({ summary: 'Hi [NAME], winter checks are open' })).map(f => f.code)).toEqual(['placeholder']);
+    const current = { description: 'Roofers', primary_phone: '0113 000 0000', website: 'https://roof.example', regular_hours: [{ day: 'MONDAY', open: '09:00', close: '17:00' }], special_hours: [] };
+    const edit = { primary_phone: '0113 111 1111', website: 'https://roof.example/new', regular_hours: [] };
+    expect(evaluateProfileEdit(all, edit as never, current as never)).toEqual([]);
+    expect(evaluateProfileEdit(within, edit as never, current as never).map(f => f.code)).toEqual(['phone', 'website', 'closes_days']);
   });
 
   it('names Google\'s fields in plain words, once each', () => {

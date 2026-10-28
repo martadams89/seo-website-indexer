@@ -12,6 +12,7 @@ export const GOALS: Array<{ id: string; label: string }> = [
 
 export const MODE_LABEL: Record<AdsGuardrails['mode'], string> = {
   guarded: 'Autopilot within limits',
+  auto: 'Auto-approve everything',
   review: 'Approve every change',
   read_only: 'Read-only',
 };

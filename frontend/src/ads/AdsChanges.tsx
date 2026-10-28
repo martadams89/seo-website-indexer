@@ -79,8 +79,8 @@ export function AdsChangeCard({ change, accountLabel, currency: cur, canManage, 
       </header>
       <h3>{change.summary}</h3>
       {change.rationale && <p>{change.rationale}</p>}
-      {change.findings.filter(f => f.severity !== 'info').length > 0 && (
-        <ul className="ads-reasons">{change.findings.filter(f => f.severity !== 'info').map(f => <li key={f.code + f.message} className={f.severity}>{f.message}</li>)}</ul>
+      {change.findings.length > 0 && (
+        <ul className="ads-reasons">{change.findings.map(f => <li key={f.code + f.message} className={f.severity}>{f.message}</li>)}</ul>
       )}
       {(impact.daily_budget_before !== undefined && impact.daily_budget_before !== impact.daily_budget_after) && (
         <p className="ads-impact">Daily budgets {money(impact.daily_budget_before, cur)} → <b>{money(impact.daily_budget_after, cur)}</b>{impact.per_lead_daily_spend ? ` · Local Services ~${money(impact.per_lead_daily_spend, cur)}/day (per lead)` : ''} · projected month {money(impact.projected_month_spend, cur)}{impact.monthly_budget ? ` of ${money(impact.monthly_budget, cur)}` : ''}</p>

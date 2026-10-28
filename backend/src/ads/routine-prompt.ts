@@ -109,8 +109,16 @@ function clientBlock(account: AdsAccount, index: number): string {
   lines.push(account.ga4_property_id
     ? `   - GA4 property: ${account.ga4_property_id}${account.ga4_property_name ? ` (${account.ga4_property_name})` : ''}, read it with ga4_ads_performance`
     : '   - GA4 property: not linked (if you can identify it with ga4_list_properties, link it with ads_link_ga4_property)');
-  lines.push(`   - Guardrails (enforced by the server): ${account.guardrails.mode === 'read_only' ? 'read-only' : account.guardrails.mode === 'review' ? 'every change needs my approval' : `budget increases up to ${account.guardrails.max_budget_increase_pct}% and bid changes up to ±${account.guardrails.max_bid_change_pct}% per change apply automatically; projected spend may not exceed the monthly budget${account.guardrails.budget_tolerance_pct ? ` + ${account.guardrails.budget_tolerance_pct}%` : ''}`}`);
+  lines.push(`   - Guardrails (enforced by the server): ${guardrailText(account.guardrails)}`);
   return lines.join('\n');
+}
+
+function guardrailText(g: AdsAccount['guardrails']): string {
+  const budget = `projected spend may not exceed the monthly budget${g.budget_tolerance_pct ? ` + ${g.budget_tolerance_pct}%` : ''}`;
+  if (g.mode === 'read_only') return 'read-only';
+  if (g.mode === 'review') return 'every change needs my approval';
+  if (g.mode === 'auto') return `every change is approved automatically${g.auto_keep_budget ? `, except that ${budget}` : ''}; still make only changes the evidence supports`;
+  return `budget increases up to ${g.max_budget_increase_pct}% and bid changes up to ±${g.max_bid_change_pct}% per change apply automatically; ${budget}`;
 }
 
 const RESEARCH_TEXT: Record<ResearchDepth, string> = {

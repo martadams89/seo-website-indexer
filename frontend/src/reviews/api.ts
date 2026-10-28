@@ -10,6 +10,7 @@ export interface ReplyRules {
   allow_links: boolean;
   allow_contact_details: boolean;
   allow_replace_existing: boolean;
+  allow_delete: boolean;
   banned_phrases: string[];
   alert_max_rating: number;
 }
@@ -116,7 +117,7 @@ export interface ConnectionStatus {
   links: { access_form: string; quotas: string; enable_apis: string; business_profile: string };
 }
 
-export type AiMode = 'off' | 'approval' | 'auto';
+export type AiMode = 'off' | 'approval' | 'auto' | 'auto_all';
 export interface ProfileRules { profile: AiMode; posts: AiMode; photos: AiMode; alert_google_updates: boolean }
 
 export const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
@@ -279,6 +280,7 @@ export const reviewsApi = {
 export const AI_MODE_LABEL: Record<AiMode, string> = {
   approval: 'Wait for my approval',
   auto: 'Publish within the checks',
+  auto_all: 'Publish everything (auto-approve)',
   off: 'Not allowed',
 };
 

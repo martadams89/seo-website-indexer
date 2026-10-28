@@ -2928,6 +2928,25 @@ registerMcpProtocolRoute(app);
 await app.listen({ port: PORT, host: HOST });
 console.log(`\n🚀 Organic Command running at http://${HOST}:${PORT}\n`);
 
+// On `docker stop`/restart, stop taking new requests and let the ones in
+// flight finish (an AI app's token refresh, a Google callback) before exiting,
+// instead of dropping them mid-reply. Docker sends SIGKILL after 10 s.
+let shuttingDown = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received, finishing open requests…`);
+    setTimeout(() => process.exit(0), 8_000).unref(); // long-lived streams don't hold the exit
+    app.close()
+      .catch(() => undefined)
+      .finally(() => {
+        try { getDb().close(); } catch { /* already closed */ }
+        process.exit(0);
+      });
+  });
+}
+
 // Bound the SQLite log table on long-lived installs (30-day retention).
 try {
   const pruned = pruneOldLogs();

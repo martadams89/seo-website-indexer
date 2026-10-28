@@ -21,6 +21,12 @@
  * Access tokens are ordinary MCP tokens (hashed in mcp_tokens, linked to the
  * grant), so the MCP route authenticates them exactly like personal tokens.
  * Personal tokens keep working for clients that prefer a static header.
+ *
+ * Connections are built to survive restarts and clients that refresh late or
+ * twice: tokens last 30 days (access) and 90 days (refresh) after their last
+ * use, the refresh token just replaced keeps working for a few minutes
+ * (returning the same new one), and a person who already approved an app
+ * isn't asked again when it reconnects.
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -29,10 +35,15 @@ import { getUserById, recordAuditEvent, type User } from '../auth/users.js';
 import { accessibleWorkspaces } from '../auth/workspaces.js';
 import { publicOrigin } from '../utils/origin.js';
 import { safeFetch } from '../security/outbound-url.js';
-import { MCP_SCOPES, type McpScope } from './tokens.js';
+import { encrypt, decrypt } from '../utils/crypto.js';
+import { MCP_SCOPES, OAUTH_ACCESS_TTL_MS, OAUTH_REFRESH_TTL_MS, type McpScope } from './tokens.js';
 
-const ACCESS_TOKEN_TTL_S = 3600;
-const REFRESH_TOKEN_TTL_MS = 30 * 86_400_000;
+const ACCESS_TOKEN_TTL_S = OAUTH_ACCESS_TTL_MS / 1000;
+/**
+ * How long the refresh token just replaced still works. Covers a refresh whose
+ * reply never arrived and two refreshes racing; both get the same new token.
+ */
+const REFRESH_REUSE_MS = 10 * 60_000;
 const CODE_TTL_MS = 5 * 60_000;
 const REQUEST_TTL_MS = 15 * 60_000;
 const MAX_CLIENTS = 1000;
@@ -361,8 +372,8 @@ export function exchangeToken(client: ClientRow, body: Record<string, string>): 
     const scopes = JSON.parse(row.scopes) as string[];
     const grantId = randomUUID();
     const refresh = `seomcpr_${token(32)}`;
-    db.prepare('INSERT INTO mcp_oauth_grants(id,client_id,user_id,scopes,refresh_hash,refresh_expires_at,last_used_at) VALUES(?,?,?,?,?,?,datetime(\'now\'))')
-      .run(grantId, client.id, user.id, row.scopes, sha256(refresh), new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString());
+    db.prepare('INSERT INTO mcp_oauth_grants(id,client_id,user_id,scopes,refresh_hash,refresh_token_enc,refresh_expires_at,last_used_at) VALUES(?,?,?,?,?,?,?,datetime(\'now\'))')
+      .run(grantId, client.id, user.id, row.scopes, sha256(refresh), encrypt(refresh), new Date(Date.now() + OAUTH_REFRESH_TTL_MS).toISOString());
     db.prepare("UPDATE mcp_oauth_clients SET last_used_at=datetime('now') WHERE id=?").run(client.id);
     recordAuditEvent({ actorUserId: user.id, action: 'mcp.oauth.granted', detail: { client: client.name, clientId: client.id, scopes } });
     return {
@@ -372,10 +383,18 @@ export function exchangeToken(client: ClientRow, body: Record<string, string>): 
   }
   if (body.grant_type === 'refresh_token') {
     if (!body.refresh_token) return tokenError(400, 'invalid_request', 'refresh_token is required.');
-    const grant = db.prepare('SELECT * FROM mcp_oauth_grants WHERE refresh_hash=?').get(sha256(body.refresh_token)) as {
-      id: string; client_id: string; user_id: string; scopes: string; refresh_expires_at: string; revoked_at: string | null;
-    } | undefined;
-    if (!grant || grant.client_id !== client.id || grant.revoked_at || new Date(grant.refresh_expires_at).getTime() < Date.now()) {
+    type GrantRow = {
+      id: string; client_id: string; user_id: string; scopes: string; refresh_hash: string | null; refresh_token_enc: string | null;
+      refresh_expires_at: string; revoked_at: string | null; previous_refresh_hash: string | null; previous_refresh_until: string | null;
+    };
+    const presented = sha256(body.refresh_token);
+    const now = Date.now();
+    let grant = db.prepare('SELECT * FROM mcp_oauth_grants WHERE refresh_hash=?').get(presented) as GrantRow | undefined;
+    // The token this grant just replaced: hand back its replacement rather
+    // than disconnecting an app whose refresh reply was lost or that refreshed twice.
+    const replayed = grant ? undefined : db.prepare('SELECT * FROM mcp_oauth_grants WHERE previous_refresh_hash=?').get(presented) as GrantRow | undefined;
+    if (replayed?.previous_refresh_until && Date.parse(replayed.previous_refresh_until) > now) grant = replayed;
+    if (!grant || grant.client_id !== client.id || grant.revoked_at || new Date(grant.refresh_expires_at).getTime() < now) {
       return tokenError(400, 'invalid_grant', 'The refresh token is invalid, expired or revoked. Reconnect the connector.');
     }
     const user = getUserById(grant.user_id);
@@ -386,9 +405,20 @@ export function exchangeToken(client: ClientRow, body: Record<string, string>): 
       if (!narrowed.length) return tokenError(400, 'invalid_scope', 'Requested scopes exceed the original grant.');
       scopes = narrowed;
     }
-    const refresh = `seomcpr_${token(32)}`;
-    db.prepare("UPDATE mcp_oauth_grants SET refresh_hash=?, refresh_expires_at=?, last_used_at=datetime('now') WHERE id=?")
-      .run(sha256(refresh), new Date(Date.now() + REFRESH_TOKEN_TTL_MS).toISOString(), grant.id);
+    const refreshExpires = new Date(now + OAUTH_REFRESH_TTL_MS).toISOString();
+    const current = grant === replayed ? decrypt(grant.refresh_token_enc) : null;
+    let refresh: string;
+    if (current && sha256(current) === grant.refresh_hash) {
+      refresh = current;
+      db.prepare("UPDATE mcp_oauth_grants SET refresh_expires_at=?, last_used_at=datetime('now') WHERE id=?").run(refreshExpires, grant.id);
+    } else {
+      refresh = `seomcpr_${token(32)}`;
+      const replaced = grant === replayed
+        ? { hash: grant.previous_refresh_hash, until: grant.previous_refresh_until }
+        : { hash: presented, until: new Date(now + REFRESH_REUSE_MS).toISOString() };
+      db.prepare(`UPDATE mcp_oauth_grants SET refresh_hash=?, refresh_token_enc=?, refresh_expires_at=?, previous_refresh_hash=?, previous_refresh_until=?,
+        last_used_at=datetime('now') WHERE id=?`).run(sha256(refresh), encrypt(refresh), refreshExpires, replaced.hash, replaced.until, grant.id);
+    }
     const name = getClient(client.id)?.name ?? 'MCP client';
     return {
       status: 200,
@@ -400,13 +430,15 @@ export function exchangeToken(client: ClientRow, body: Record<string, string>): 
 
 export function revokeGrant(grantId: string): void {
   const db = getDb();
-  db.prepare("UPDATE mcp_oauth_grants SET revoked_at=datetime('now'), refresh_hash=NULL WHERE id=? AND revoked_at IS NULL").run(grantId);
+  db.prepare(`UPDATE mcp_oauth_grants SET revoked_at=datetime('now'), refresh_hash=NULL, refresh_token_enc=NULL, previous_refresh_hash=NULL
+    WHERE id=? AND revoked_at IS NULL`).run(grantId);
   db.prepare("UPDATE mcp_tokens SET revoked_at=datetime('now') WHERE oauth_grant_id=? AND revoked_at IS NULL").run(grantId);
 }
 
 function revokeToken(client: ClientRow, raw: string): void {
   const db = getDb();
-  const grant = db.prepare('SELECT id FROM mcp_oauth_grants WHERE refresh_hash=? AND client_id=?').get(sha256(raw), client.id) as { id: string } | undefined;
+  const hash = sha256(raw);
+  const grant = db.prepare('SELECT id FROM mcp_oauth_grants WHERE (refresh_hash=? OR previous_refresh_hash=?) AND client_id=?').get(hash, hash, client.id) as { id: string } | undefined;
   if (grant) { revokeGrant(grant.id); return; }
   db.prepare(`UPDATE mcp_tokens SET revoked_at=datetime('now') WHERE token_hash=? AND oauth_grant_id IN
     (SELECT id FROM mcp_oauth_grants WHERE client_id=?)`).run(sha256(raw), client.id);
@@ -426,6 +458,21 @@ export function listManualClients(userId: string): Array<{ id: string; name: str
     .map(r => ({ id: r.id, name: r.name, redirect_uris: JSON.parse(r.redirect_uris) as string[], token_endpoint_auth_method: r.token_endpoint_auth_method, created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
 }
 
+/**
+ * The access this person gave the app last time, while that connection is
+ * still live. An app reconnecting (after a restart on its side, or a lost
+ * token) is approved with the same access instead of asking again.
+ */
+export function previousGrantScopes(clientId: string, userId: string): McpScope[] | null {
+  const row = getDb().prepare(`SELECT scopes FROM mcp_oauth_grants WHERE client_id=? AND user_id=? AND revoked_at IS NULL
+    AND julianday(refresh_expires_at) > julianday('now') ORDER BY created_at DESC LIMIT 1`).get(clientId, userId) as { scopes: string } | undefined;
+  if (!row) return null;
+  let stored: unknown;
+  try { stored = JSON.parse(row.scopes); } catch { return null; }
+  const scopes = MCP_SCOPES.filter(s => Array.isArray(stored) && stored.includes(s));
+  return scopes.length ? scopes : null;
+}
+
 export function revokeConnectedApp(userId: string, grantId: string): boolean {
   const row = getDb().prepare('SELECT id FROM mcp_oauth_grants WHERE id=? AND user_id=? AND revoked_at IS NULL').get(grantId, userId);
   if (!row) return false;
@@ -434,9 +481,9 @@ export function revokeConnectedApp(userId: string, grantId: string): boolean {
 }
 
 /**
- * Change what a connected app may do, without disconnecting it. Its current
- * access token is ended, so its next request renews with the new access
- * (an AI chat that's already open keeps the tool list it started with).
+ * Change what a connected app may do, without disconnecting it. The tokens it
+ * holds carry the new access from their next request (the tool list is built
+ * per request; an AI chat that's already open keeps the list it started with).
  */
 export function updateConnectedAppScopes(userId: string, grantId: string, wanted: unknown): string[] | null {
   const row = getDb().prepare('SELECT id FROM mcp_oauth_grants WHERE id=? AND user_id=? AND revoked_at IS NULL').get(grantId, userId);
@@ -446,7 +493,7 @@ export function updateConnectedAppScopes(userId: string, grantId: string, wanted
   const list = MCP_SCOPES.filter(s => scopes.has(s));
   const db = getDb();
   db.prepare('UPDATE mcp_oauth_grants SET scopes=? WHERE id=?').run(JSON.stringify(list), grantId);
-  db.prepare("UPDATE mcp_tokens SET revoked_at=datetime('now') WHERE oauth_grant_id=? AND revoked_at IS NULL").run(grantId);
+  db.prepare('UPDATE mcp_tokens SET scopes=? WHERE oauth_grant_id=? AND revoked_at IS NULL').run(JSON.stringify(list), grantId);
   return list;
 }
 
@@ -538,6 +585,7 @@ export function registerMcpOAuthApiRoutes(app: FastifyInstance, currentUser: (re
       client_domain: isMetadataClientId(request.client_id) ? new URL(request.client_id).host : null,
       redirect_host: host,
       requested_scopes: normalizeRequestedScopes(request.scope),
+      previously_granted: previousGrantScopes(request.client_id, user.id),
       scopes: MCP_SCOPES.map(id => ({ id, ...SCOPE_INFO[id] })),
       user: { email: user.email, name: user.name },
       workspaces: accessibleWorkspaces(user).map(w => w.name),

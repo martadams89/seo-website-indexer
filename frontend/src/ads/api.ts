@@ -1,7 +1,7 @@
 // ads/api.ts — Google Ads contracts and calls for the dashboard.
 import { apiFetch } from '../api/client';
 
-export type GuardrailMode = 'read_only' | 'review' | 'guarded';
+export type GuardrailMode = 'read_only' | 'review' | 'guarded' | 'auto';
 
 export interface AdsGuardrails {
   mode: GuardrailMode;
@@ -12,6 +12,7 @@ export interface AdsGuardrails {
   allow_removals: boolean;
   allow_enable_campaigns: boolean;
   allow_bidding_changes: boolean;
+  auto_keep_budget: boolean;
 }
 
 export interface AdsBrief {

@@ -254,7 +254,7 @@ export const REVIEWS_TOOLS: ToolDef[] = [
   {
     name: 'reviews_delete_reply',
     title: 'Ask to delete a reply',
-    description: 'Request deletion of a published reply. Deleting always waits for a person to approve it on the dashboard.',
+    description: 'Request deletion of a published reply. Deleting waits for a person to approve it on the dashboard unless the location allows deleting replies.',
     scope: 'reviews:write',
     inputShape: { reviewId: z.string(), rationale: z.string().min(5).max(2000).describe('Why the reply should be removed.') },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },

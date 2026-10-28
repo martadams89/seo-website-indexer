@@ -183,6 +183,23 @@ describe('evaluateChange', () => {
     expect(evaluate([budgetOp(10, 51_000_000)], { guardrails: { mode: 'read_only' } }).verdict).toBe('blocked');
   });
 
+  it('auto-approves everything for a client that chose it, noting what the limits would have held', () => {
+    const big = evaluate([budgetOp(10, 70_000_000), { adGroupCriterionOperation: { remove: `${C}/adGroupCriteria/5~6` } }], { guardrails: { mode: 'auto' } }); // +40%
+    expect(big.verdict).toBe('pending');
+    expect(big.findings.map(f => [f.code, f.severity])).toEqual([['budget_increase_over_limit', 'info'], ['removal', 'info']]);
+    expect(big.findings[0].message).toMatch(/^Auto-approved: /);
+    const conversion = { conversionActionOperation: { update: { resourceName: `${C}/conversionActions/1`, status: 'REMOVED' }, updateMask: 'status' } };
+    expect(evaluate([conversion], { guardrails: { mode: 'auto' } }).verdict).toBe('pending');
+  });
+
+  it('still holds an auto-approved change that breaks the monthly budget, unless the client lets that go too', () => {
+    const over = [budgetOp(10, 200_000_000)]; // 800 + 230 × 21 days > 3000
+    expect(evaluate(over, { guardrails: { mode: 'auto' } })).toMatchObject({ verdict: 'needs_approval' });
+    expect(evaluate(over, { guardrails: { mode: 'auto' } }).findings.filter(f => f.severity === 'approval').map(f => f.code)).toEqual(['over_monthly_budget']);
+    expect(evaluate(over, { guardrails: { mode: 'auto' }, monthlyBudget: null }).findings.filter(f => f.severity === 'approval').map(f => f.code)).toEqual(['no_monthly_budget']);
+    expect(evaluate(over, { guardrails: { mode: 'auto', auto_keep_budget: false } }).verdict).toBe('pending');
+  });
+
   it('caps the number of operations per change', () => {
     const ops = Array.from({ length: 6 }, () => ({ adGroupCriterionOperation: { create: { adGroup: `${C}/adGroups/1`, keyword: { text: 'x', matchType: 'EXACT' } } } }));
     expect(evaluate(ops, { guardrails: { max_operations: 5 } }).findings.map(f => f.code)).toContain('too_many_operations');
@@ -196,6 +213,8 @@ describe('guardrail settings', () => {
     expect(g.max_budget_increase_pct).toBe(0);
     expect(g.max_operations).toBe(1000);
     expect(g.allow_removals).toBe(false);
+    expect(g.auto_keep_budget).toBe(true);
+    expect(normalizeGuardrails({ mode: 'auto', auto_keep_budget: false })).toMatchObject({ mode: 'auto', auto_keep_budget: false });
   });
 
   it('works out the month position in the account time zone', () => {

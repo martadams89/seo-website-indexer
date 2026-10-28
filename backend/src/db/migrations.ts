@@ -8,6 +8,18 @@ export interface Migration {
 
 const migrations: Migration[] = [
   {
+    id: '20261028_01_mcp_refresh_reuse',
+    description: 'MCP OAuth: keep the refresh token just replaced valid briefly, so a refresh whose reply was lost (or two at once) doesn\'t disconnect the AI app',
+    up(db) {
+      db.exec(`
+        ALTER TABLE mcp_oauth_grants ADD COLUMN previous_refresh_hash TEXT;
+        ALTER TABLE mcp_oauth_grants ADD COLUMN previous_refresh_until TEXT;
+        ALTER TABLE mcp_oauth_grants ADD COLUMN refresh_token_enc TEXT;
+        CREATE INDEX idx_mcp_oauth_grants_previous ON mcp_oauth_grants(previous_refresh_hash);
+      `);
+    },
+  },
+  {
     id: '20261027_02_scheduled_business_posts',
     description: 'Business Profile posts scheduled for later: the time to publish, and the queue the scheduler reads',
     up(db) {

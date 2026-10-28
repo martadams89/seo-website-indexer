@@ -140,6 +140,8 @@ export function monthPosition(now: Date, timeZone?: string | null): { day: numbe
 // ── Evaluation ───────────────────────────────────────────────────────────────
 
 const BIDDING_PATHS = /^(bidding_strategy|bidding_strategy_type|manual_cpc|manual_cpm|manual_cpv|maximize_conversions|maximize_conversion_value|target_cpa|target_roas|target_spend|target_impression_share|percent_cpc|commission|target_cpm|fixed_cpm)/;
+/** Checks an auto-approving client keeps when it still wants to stay inside the monthly budget. */
+const BUDGET_CHECKS = new Set(['over_monthly_budget', 'no_monthly_budget']);
 const SENSITIVE_TYPES = new Set([
   'customerOperation', 'conversionActionOperation', 'customerConversionGoalOperation', 'campaignConversionGoalOperation',
   'conversionGoalCampaignConfigOperation', 'conversionValueRuleOperation', 'conversionValueRuleSetOperation',
@@ -174,6 +176,8 @@ const pct = (before: number, after: number) => before > 0 ? ((after - before) / 
  * Apply the client's guardrails to a set of operations.
  *   • read_only blocks everything; review sends everything to a person.
  *   • guarded lets a change through only if every rule passes.
+ *   • auto lets everything through, noting what the rules would have held;
+ *     with auto_keep_budget the monthly-budget checks still hold.
  * Projected spend uses Google's monthly charging limit (daily budget × days):
  * month-to-date spend plus the enabled campaigns' daily budgets for every
  * remaining day, today included. Per-lead campaigns (Local Services) are the
@@ -321,6 +325,12 @@ export function evaluateChange(input: {
     findings.unshift({ severity: 'block', code: 'read_only', message: 'This client is set to read-only; no changes can be made.' });
   } else if (guardrails.mode === 'review') {
     findings.unshift({ severity: 'approval', code: 'review_mode', message: 'This client is in review mode: every change waits for a person to approve it.' });
+  } else if (guardrails.mode === 'auto') {
+    for (const f of findings) {
+      if (f.severity !== 'approval' || (guardrails.auto_keep_budget && BUDGET_CHECKS.has(f.code))) continue;
+      f.severity = 'info';
+      f.message = `Auto-approved: ${f.message}`;
+    }
   }
 
   const verdict = findings.some(f => f.severity === 'block') ? 'blocked'

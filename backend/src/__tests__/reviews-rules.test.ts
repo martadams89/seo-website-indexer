@@ -35,6 +35,14 @@ describe('review reply rules', () => {
     expect(evaluateReply({ rules: DEFAULT_RULES, rating: 5, text: '', existingReply: null, action: 'delete' }).decision).toBe('blocked');
   });
 
+  it('deletes a reply without approval when the location allows it, but never in review mode', () => {
+    const del = (rules: Record<string, unknown>) => evaluateReply({ rules: normalizeRules(rules), rating: 5, text: '', existingReply: 'Thanks!', action: 'delete' }).decision;
+    expect(del({ allow_delete: true })).toBe('publish');
+    expect(del({ allow_delete: true, mode: 'review' })).toBe('needs_approval');
+    expect(del({ allow_delete: true, mode: 'read_only' })).toBe('blocked');
+    expect(DEFAULT_RULES.allow_delete).toBe(false);
+  });
+
   it('normalises stored rules safely', () => {
     expect(normalizeRules({ mode: 'yolo', auto_min_rating: 9, max_length: 5, banned_phrases: [' a ', 'a', ''] })).toMatchObject({ mode: 'guarded', auto_min_rating: 5, max_length: 50, banned_phrases: ['a'] });
   });

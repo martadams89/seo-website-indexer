@@ -661,7 +661,7 @@ export const ADS_TOOLS: ToolDef[] = [
   {
     name: 'ads_recommendations',
     title: 'Apply or dismiss recommendations',
-    description: 'Apply or dismiss Google recommendations by resource name (from ads_list_recommendations). Applying budget, bidding or broad-match recommendations always needs approval.',
+    description: 'Apply or dismiss Google recommendations by resource name (from ads_list_recommendations). Applying budget, bidding or broad-match recommendations needs approval unless the client auto-approves changes.',
     scope: 'ads:write',
     annotations: WRITE,
     inputShape: { account: ACCOUNT, action: z.enum(['apply', 'dismiss']), resourceNames: z.array(z.string()).min(1).max(100), rationale: RATIONALE },
