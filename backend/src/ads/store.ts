@@ -12,10 +12,14 @@ import { GOOGLE_ADS_SCOPE } from '../auth/google-oauth.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type GuardrailMode = 'read_only' | 'review' | 'guarded';
+export type GuardrailMode = 'read_only' | 'review' | 'guarded' | 'auto';
 
 export interface AdsGuardrails {
-  /** read_only: no changes. review: every change waits for a person. guarded: changes inside the limits apply straight away. */
+  /**
+   * read_only: no changes. review: every change waits for a person. guarded:
+   * changes inside the limits apply straight away. auto: every change is
+   * approved automatically; the limits are noted on it but don't hold it.
+   */
   mode: GuardrailMode;
   /** Largest daily-budget increase one change may make without approval (percent). */
   max_budget_increase_pct: number;
@@ -31,6 +35,8 @@ export interface AdsGuardrails {
   allow_enable_campaigns: boolean;
   /** Changing bid strategies or CPA/ROAS targets without approval. */
   allow_bidding_changes: boolean;
+  /** auto mode: a change that takes projected spend past the monthly budget (or raises spend with none set) still waits for a person. */
+  auto_keep_budget: boolean;
 }
 
 export const DEFAULT_GUARDRAILS: AdsGuardrails = {
@@ -42,6 +48,7 @@ export const DEFAULT_GUARDRAILS: AdsGuardrails = {
   allow_removals: false,
   allow_enable_campaigns: true,
   allow_bidding_changes: false,
+  auto_keep_budget: true,
 };
 
 export interface AdsBrief {
@@ -144,7 +151,7 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
 /** Fill in defaults and clamp limits so a malformed or partial value is always safe. */
 export function normalizeGuardrails(raw: unknown): AdsGuardrails {
   const value = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof AdsGuardrails, unknown>>;
-  const mode: GuardrailMode = value.mode === 'read_only' || value.mode === 'review' || value.mode === 'guarded' ? value.mode : DEFAULT_GUARDRAILS.mode;
+  const mode: GuardrailMode = value.mode === 'read_only' || value.mode === 'review' || value.mode === 'guarded' || value.mode === 'auto' ? value.mode : DEFAULT_GUARDRAILS.mode;
   const bool = (v: unknown, fallback: boolean) => typeof v === 'boolean' ? v : fallback;
   return {
     mode,
@@ -155,6 +162,7 @@ export function normalizeGuardrails(raw: unknown): AdsGuardrails {
     allow_removals: bool(value.allow_removals, DEFAULT_GUARDRAILS.allow_removals),
     allow_enable_campaigns: bool(value.allow_enable_campaigns, DEFAULT_GUARDRAILS.allow_enable_campaigns),
     allow_bidding_changes: bool(value.allow_bidding_changes, DEFAULT_GUARDRAILS.allow_bidding_changes),
+    auto_keep_budget: bool(value.auto_keep_budget, DEFAULT_GUARDRAILS.auto_keep_budget),
   };
 }
 

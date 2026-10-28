@@ -230,6 +230,7 @@ function LocationSettingsModal({ location, connections, canManage, onClose, onSa
           <label className="ads-inline-check"><input type="checkbox" checked={rules.allow_links} onChange={e => setRules(r => ({ ...r, allow_links: e.target.checked }))} /> Allow links</label>
           <label className="ads-inline-check"><input type="checkbox" checked={rules.allow_contact_details} onChange={e => setRules(r => ({ ...r, allow_contact_details: e.target.checked }))} /> Allow phone numbers and emails</label>
           <label className="ads-inline-check"><input type="checkbox" checked={rules.allow_replace_existing} onChange={e => setRules(r => ({ ...r, allow_replace_existing: e.target.checked }))} /> Allow replacing a published reply</label>
+          <label className="ads-inline-check"><input type="checkbox" checked={rules.allow_delete} onChange={e => setRules(r => ({ ...r, allow_delete: e.target.checked }))} /> Allow deleting a published reply</label>
           <label className="ads-inline-check"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Sync this location</label>
         </div>
         <label className="reviews-wide">Phrases that always need approval (one per line)
@@ -241,14 +242,14 @@ function LocationSettingsModal({ location, connections, canManage, onClose, onSa
         {([['profile', 'Profile edits (description and hours)'], ['posts', 'New posts'], ['photos', 'New photos']] as const).map(([key, label]) => (
           <label key={key}>{label}
             <select className="input" value={profileRules[key]} onChange={e => setProfileRules(r => ({ ...r, [key]: e.target.value as AiMode }))}>
-              {(['approval', 'auto', 'off'] as const).map(m => <option key={m} value={m}>{AI_MODE_LABEL[m]}</option>)}
+              {(['approval', 'auto', 'auto_all', 'off'] as const).map(m => <option key={m} value={m}>{AI_MODE_LABEL[m]}</option>)}
             </select>
           </label>
         ))}
         <div className="reviews-checks">
           <label className="ads-inline-check"><input type="checkbox" checked={profileRules.alert_google_updates} onChange={e => setProfileRules(r => ({ ...r, alert_google_updates: e.target.checked }))} /> Alert me when Google changes the profile</label>
         </div>
-        <small className="text-dim reviews-wide">Phone and website changes, offers, deletions and new logo, cover or profile photos always wait for approval.</small>
+        <small className="text-dim reviews-wide"><b>Publish within the checks</b> still holds phone and website changes, offers, deletions and new logo, cover or profile photos for approval. <b>Publish everything</b> approves those automatically too; only text that still looks like a template (for example [NAME]) waits.</small>
       </fieldset>
       <fieldset className="reviews-fieldset" disabled={!canManage}>
         <legend>How replies should sound</legend>

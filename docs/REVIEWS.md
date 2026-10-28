@@ -67,10 +67,11 @@ Edit a location on **Locations & rules**.
 | Allow links | Off | Replies with a URL need approval. |
 | Allow phone numbers and emails | On | Turn off to check every reply that shares contact details. |
 | Allow replacing a published reply | Off | Replacing an existing reply needs approval. |
+| Allow deleting a published reply | Off | Deleting a reply needs approval. Never applies in *Approve every reply* mode. |
 | Phrases that always need approval | none | For example "refund" or "compensation". |
 | Alert me about new reviews rated | 3 stars or fewer | Sends a notification through the workspace's channels. |
 
-Replies that still look like a template (`[Name]`, `{{first_name}}`) always need approval, and deleting a published reply always does.
+Replies that still look like a template (`[Name]`, `{{first_name}}`) always need approval.
 
 The **brief** shapes how replies sound: business name, voice, sign-off, where unhappy customers should go, language and things never to say. Assistants read it with `reviews_get_brief`; they can add notes but can't change the rules.
 
@@ -78,12 +79,12 @@ The **brief** shapes how replies sound: business name, voice, sign-off, where un
 
 | Rule | Default | Choices |
 | --- | --- | --- |
-| Profile edits (description and hours) | Wait for my approval | *Wait for my approval*, *Publish within the checks*, *Not allowed*. |
+| Profile edits (description and hours) | Wait for my approval | *Wait for my approval*, *Publish within the checks*, *Publish everything (auto-approve)*, *Not allowed*. |
 | New posts | Wait for my approval | Same choices. |
 | New photos | Wait for my approval | Same choices. |
 | Alert me when Google changes the profile | On | Sends a *Business Profile changes* notification. |
 
-Some changes always wait for a person, whatever the mode: phone and website changes, hours that would close a day that is open now, removing special hours, offers, new logo, cover or profile photos, and any deletion. Text that still looks like a template also waits. Input Google would refuse (a description over 750 characters, a post with a phone number, an event without dates, a photo that isn't a public `https` address) is rejected with the reason before anything is recorded.
+With *Publish within the checks*, some changes still wait for a person: phone and website changes, hours that would close a day that is open now, removing special hours, offers, new logo, cover or profile photos, and any deletion. *Publish everything* approves those too, per kind: on **New photos** it covers logo, cover and profile photos and photo deletions; on **New posts**, offers and post deletions; on **Profile edits**, phone, website and hours changes. Text that still looks like a template waits in every mode. Input Google would refuse (a description over 750 characters, a post with a phone number, an event without dates, a photo that isn't a public `https` address) is rejected with the reason before anything is recorded.
 
 ## Google-suggested edits
 
@@ -128,16 +129,16 @@ An assistant only sees the tools its connection is allowed to use. If it says it
 | `business_list_photos` | read | Photos and videos with category, views and the address each was added from. |
 | `business_list_changes` | read | Profile edits, posts and photos made or proposed through the app. |
 | `reviews_reply` | reviews:write | Publish a reply within the rules, or queue it for approval (`publish: false` always queues). |
-| `reviews_delete_reply` | reviews:write | Ask to delete a reply (always needs approval). |
+| `reviews_delete_reply` | reviews:write | Ask to delete a reply (needs approval unless the location allows deleting replies). |
 | `reviews_update_brief` | reviews:write | Save notes about how replies should sound. |
 | `reviews_link_location` | reviews:write | Link a discovered location. |
 | `business_update_profile` | reviews:write | Change the description, phone, website, weekly hours, or add and remove special hours. |
 | `business_create_post` | reviews:write | Post an update, event or offer, with an optional photo and button, now or at a set time (`publishAt`, ISO 8601 with a time zone). |
 | `business_cancel_scheduled_post` | reviews:write | Cancel a scheduled post, or one waiting for approval, before it goes out. |
-| `business_delete_post` | reviews:write | Ask to delete a post (always needs approval). |
+| `business_delete_post` | reviews:write | Ask to delete a post (needs approval unless posts are set to *Publish everything*). |
 | `business_add_photo` | reviews:write | Add one photo or video from a direct link. |
 | `business_add_media` | reviews:write | Add up to 25 photos and videos in one go, with a result per item. |
-| `business_delete_photo` | reviews:write | Ask to delete a photo (always needs approval). |
+| `business_delete_photo` | reviews:write | Ask to delete a photo (needs approval unless photos are set to *Publish everything*). |
 
 Workspace viewers stay read-only whatever their token allows, and editors need the **Manage Google Business Profile** permission to reply, post, edit or approve.
 

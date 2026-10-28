@@ -301,8 +301,10 @@ export function registerAdsRoutes(app: FastifyInstance): void {
       updateAdsAccount(acc.id, {
         monthlyBudget: answers?.monthlyBudget === undefined ? undefined : answers.monthlyBudget === null ? null : Number(answers.monthlyBudget),
         brief: answers?.brief === undefined ? undefined : answers.brief,
-        // The routine mode is enforced on the server: "propose" puts the client in review mode.
-        guardrails: acc.guardrails.mode === 'read_only' ? undefined : { mode: settings.mode === 'propose' ? 'review' : 'guarded' },
+        // The routine mode is enforced on the server: "propose" puts the client in review mode;
+        // autopilot keeps a client that auto-approves everything as it is.
+        guardrails: acc.guardrails.mode === 'read_only' ? undefined
+          : { mode: settings.mode === 'propose' ? 'review' : acc.guardrails.mode === 'auto' ? 'auto' : 'guarded' },
       });
     }
     const connectorName = (body.connectorName ?? '').trim().slice(0, 100) || 'SEO Website Indexer';

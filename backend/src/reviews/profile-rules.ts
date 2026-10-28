@@ -15,8 +15,13 @@ import type { LocationStats } from './store.js';
 
 // ── Rules ────────────────────────────────────────────────────────────────────
 
-/** off: assistants can't do it. approval: it waits for a person. auto: inside the other checks it publishes. */
-export type AiMode = 'off' | 'approval' | 'auto';
+/**
+ * off: assistants can't do it. approval: it waits for a person. auto: inside
+ * the other checks it publishes. auto_all: it publishes, including what
+ * otherwise always waits (phone and website, offers, deletions, logo, cover
+ * and profile photos); only text that still looks like a template waits.
+ */
+export type AiMode = 'off' | 'approval' | 'auto' | 'auto_all';
 
 export interface ProfileRules {
   /** Description and opening hours (phone and website changes always need approval). */
@@ -29,7 +34,7 @@ export interface ProfileRules {
 
 export const DEFAULT_PROFILE_RULES: ProfileRules = { profile: 'approval', posts: 'approval', photos: 'approval', alert_google_updates: true };
 
-const MODES: AiMode[] = ['off', 'approval', 'auto'];
+const MODES: AiMode[] = ['off', 'approval', 'auto', 'auto_all'];
 
 export function normalizeProfileRules(raw: unknown): ProfileRules {
   const v = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -249,12 +254,13 @@ export function evaluateProfileEdit(rules: ProfileRules, edit: ProfileEdit, curr
   const add = (severity: ReplyFinding['severity'], code: string, message: string) => findings.push({ severity, code, message });
   if (rules.profile === 'off') add('blocked', 'profile_off', 'This location doesn\'t let AI assistants edit its profile. A person can edit it on the dashboard.');
   if (rules.profile === 'approval') add('approval', 'profile_approval', 'Profile edits at this location wait for a person to approve them.');
-  if (edit.primary_phone !== undefined) add('approval', 'phone', 'Changing the phone number always needs a person\'s approval.');
-  if (edit.website !== undefined) add('approval', 'website', 'Changing the website always needs a person\'s approval.');
+  if (edit.description !== undefined && PLACEHOLDER_RE.test(String(edit.description))) add('approval', 'placeholder', 'The description looks like it still contains a template placeholder.');
+  if (rules.profile === 'auto_all') return findings;
+  if (edit.primary_phone !== undefined) add('approval', 'phone', 'Changing the phone number needs a person\'s approval unless the location publishes every profile edit.');
+  if (edit.website !== undefined) add('approval', 'website', 'Changing the website needs a person\'s approval unless the location publishes every profile edit.');
   if (edit.description !== undefined) {
     const text = String(edit.description);
     if (URL_IN_TEXT_RE.test(text)) add('approval', 'description_link', 'Google\'s guidelines don\'t allow links in the business description, so it may refuse this edit.');
-    if (PLACEHOLDER_RE.test(text)) add('approval', 'placeholder', 'The description looks like it still contains a template placeholder.');
     if (!text.trim() && current.description) add('approval', 'description_cleared', 'This removes the business description.');
   }
   if (edit.regular_hours !== undefined) {
@@ -351,7 +357,7 @@ export function evaluatePost(rules: ProfileRules, post: LocalPost): ReplyFinding
   if (rules.posts === 'off') findings.push({ severity: 'blocked', code: 'posts_off', message: 'This location doesn\'t let AI assistants publish posts. A person can post on the dashboard.' });
   if (rules.posts === 'approval') findings.push({ severity: 'approval', code: 'posts_approval', message: 'Posts at this location wait for a person to approve them.' });
   if (PLACEHOLDER_RE.test(`${post.summary ?? ''} ${post.event?.title ?? ''}`)) findings.push({ severity: 'approval', code: 'placeholder', message: 'The post looks like it still contains a template placeholder.' });
-  if (post.topicType === 'OFFER') findings.push({ severity: 'approval', code: 'offer', message: 'Offers commit the business to a deal, so they always need a person\'s approval.' });
+  if (post.topicType === 'OFFER' && rules.posts !== 'auto_all') findings.push({ severity: 'approval', code: 'offer', message: 'Offers commit the business to a deal, so they need a person\'s approval unless the location publishes every post.' });
   return findings;
 }
 
@@ -386,15 +392,16 @@ export function evaluatePhoto(rules: ProfileRules, photo: { category: PhotoCateg
   const findings: ReplyFinding[] = [];
   if (rules.photos === 'off') findings.push({ severity: 'blocked', code: 'photos_off', message: 'This location doesn\'t let AI assistants add photos. A person can add them on the dashboard.' });
   if (rules.photos === 'approval') findings.push({ severity: 'approval', code: 'photos_approval', message: 'Photos at this location wait for a person to approve them.' });
-  if (['COVER', 'PROFILE', 'LOGO'].includes(photo.category)) findings.push({ severity: 'approval', code: 'identity_photo', message: `A new ${photo.category.toLowerCase()} photo changes how the business looks in Search and Maps, so it needs approval.` });
+  if (['COVER', 'PROFILE', 'LOGO'].includes(photo.category) && rules.photos !== 'auto_all') findings.push({ severity: 'approval', code: 'identity_photo', message: `A new ${photo.category.toLowerCase()} photo changes how the business looks in Search and Maps, so it needs approval.` });
   return findings;
 }
 
-/** Deleting a post or photo always waits for a person, unless the location blocks it outright. */
+/** Deleting a post or photo waits for a person, unless the location publishes everything (or blocks it outright). */
 export function evaluateDelete(rules: ProfileRules, kind: 'post_delete' | 'photo_delete'): ReplyFinding[] {
   const mode = kind === 'post_delete' ? rules.posts : rules.photos;
   if (mode === 'off') return [{ severity: 'blocked', code: `${kind}_off`, message: `This location doesn't let AI assistants manage its ${kind === 'post_delete' ? 'posts' : 'photos'}.` }];
-  return [{ severity: 'approval', code: 'delete', message: 'Deleting always needs a person\'s approval.' }];
+  if (mode === 'auto_all') return [];
+  return [{ severity: 'approval', code: 'delete', message: 'Deleting needs a person\'s approval unless the location publishes everything.' }];
 }
 
 // ── Checklist ────────────────────────────────────────────────────────────────

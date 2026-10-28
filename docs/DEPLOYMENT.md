@@ -81,7 +81,7 @@ Add it to the container environment as `APP_SECRET`. Do not commit the value to 
 ### Security notes for a public install
 
 - The dashboard API requires a session cookie and an `X-Requested-With` header on every change; workspace roles and capabilities are enforced by the API.
-- The MCP endpoint accepts only OAuth access tokens (one hour, refreshable for 30 days, revocable under **Connected apps**) or hashed personal tokens. Prefer OAuth or a header over a `?token=` URL, which can end up in proxy logs.
+- The MCP endpoint accepts only OAuth access tokens or hashed personal tokens. OAuth access tokens last 30 days from their last use and refresh tokens 90; every request is checked against the database, so disconnecting an app under **Connected apps** ends it at once. A refresh token stays valid for 10 minutes after it is replaced, returning the same new token, so a refresh cut off by a restart doesn't disconnect the app. On `docker stop` or a restart the server finishes requests already in flight before it exits. Prefer OAuth or a header over a `?token=` URL, which can end up in proxy logs.
 - OAuth uses PKCE (S256 only) and exact redirect-URI matching (loopback redirects may change port); client registration only accepts `https` redirects (or `http` on localhost and app-specific schemes) and is rate-limited. Set `MCP_OAUTH_REDIRECT_ALLOWLIST` to the AI apps you actually use so look-alike apps can't register — see below.
 
 ### Redirect allowlist examples

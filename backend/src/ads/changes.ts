@@ -348,11 +348,18 @@ export async function proposeRecommendations(input: {
   const findings: GuardrailFinding[] = [];
   const missing = names.filter(n => !types.has(n));
   if (missing.length) throw new AdsApiError(`These recommendations no longer exist: ${missing.join(', ')}`, 'NOT_FOUND');
-  if (account.guardrails.mode === 'read_only') findings.push({ severity: 'block', code: 'read_only', message: 'This client is set to read-only; no changes can be made.' });
-  else if (account.guardrails.mode === 'review') findings.push({ severity: 'approval', code: 'review_mode', message: 'This client is in review mode: every change waits for a person to approve it.' });
+  const { mode, auto_keep_budget: keepBudget } = account.guardrails;
+  if (mode === 'read_only') findings.push({ severity: 'block', code: 'read_only', message: 'This client is set to read-only; no changes can be made.' });
+  else if (mode === 'review') findings.push({ severity: 'approval', code: 'review_mode', message: 'This client is in review mode: every change waits for a person to approve it.' });
   if (input.action === 'apply') {
     for (const [name, type] of types) {
-      if (SPEND_RECOMMENDATION.test(type)) findings.push({ severity: 'approval', code: 'spend_recommendation', message: `${type} recommendations change budgets, bidding or match types and need approval (${name}).` });
+      if (!SPEND_RECOMMENDATION.test(type)) continue;
+      // An auto-approving client still holds budget raises when it keeps to its monthly budget: their effect on spend can't be projected.
+      if (mode === 'auto' && !(keepBudget && /BUDGET/.test(type))) {
+        findings.push({ severity: 'info', code: 'spend_recommendation', message: `Auto-approved: ${type} changes budgets, bidding or match types (${name}).` });
+      } else {
+        findings.push({ severity: 'approval', code: 'spend_recommendation', message: `${type} recommendations change budgets, bidding or match types and need approval (${name}).` });
+      }
     }
   }
   const status = findings.some(f => f.severity === 'block') ? 'blocked' : findings.some(f => f.severity === 'approval') ? 'needs_approval' : 'pending';

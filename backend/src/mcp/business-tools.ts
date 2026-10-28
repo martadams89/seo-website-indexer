@@ -110,7 +110,7 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_update_profile',
     title: 'Edit a Business Profile',
-    description: 'Change the description (up to 750 characters, no links), phone, website, the weekly opening hours, or special hours for holidays. Only pass what should change. regular_hours replaces the whole weekly schedule (days left out show as closed). Use special_hours_add and special_hours_remove to change single dates. The location\'s profile rules decide whether it publishes or waits for approval; phone and website changes always wait.',
+    description: 'Change the description (up to 750 characters, no links), phone, website, the weekly opening hours, or special hours for holidays. Only pass what should change. regular_hours replaces the whole weekly schedule (days left out show as closed). Use special_hours_add and special_hours_remove to change single dates. The location\'s profile rules decide whether it publishes or waits for approval; phone and website changes wait unless the location publishes every profile edit.',
     scope: 'reviews:write',
     inputShape: {
       location: LOCATION,
@@ -164,7 +164,7 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_create_post',
     title: 'Publish a Business Profile post',
-    description: 'Post an update (STANDARD), EVENT or OFFER to the profile, optionally with a photo (public https URL) and a button, now or at a set time (publishAt). Text up to 1,500 characters and no phone numbers (Google rejects them; use the CALL button). Events and offers need a title and start/end dates. Offers always wait for approval; otherwise the location\'s profile rules decide. A scheduled post that needs approval waits for it, then publishes at its time (or straight away if the time has passed by then).',
+    description: 'Post an update (STANDARD), EVENT or OFFER to the profile, optionally with a photo (public https URL) and a button, now or at a set time (publishAt). Text up to 1,500 characters and no phone numbers (Google rejects them; use the CALL button). Events and offers need a title and start/end dates. Offers wait for approval unless the location publishes every post; otherwise the location\'s profile rules decide. A scheduled post that needs approval waits for it, then publishes at its time (or straight away if the time has passed by then).',
     scope: 'reviews:write',
     inputShape: {
       location: LOCATION,
@@ -210,7 +210,7 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_delete_post',
     title: 'Ask to delete a post',
-    description: 'Request deletion of a post (name from business_list_posts). Deleting always waits for a person to approve it.',
+    description: 'Request deletion of a post (name from business_list_posts). Deleting waits for a person to approve it unless the location publishes every post.',
     scope: 'reviews:write',
     inputShape: { location: LOCATION, postName: z.string().describe('"accounts/…/locations/…/localPosts/…" from business_list_posts.'), rationale: z.string().min(5).max(2000) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -232,7 +232,7 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_add_photo',
     title: 'Add a photo or video to a Business Profile',
-    description: 'Add one photo or video from a direct https link (Google downloads it). Photos: JPG or PNG, 10 KB–5 MB, at least 250×250 px (720×720 or larger is best). Videos: up to 30 seconds, 75 MB, 720p or higher. The link is checked first, and an address already added is skipped. New cover, profile and logo photos always wait for approval; otherwise the location\'s profile rules decide. For several, use business_add_media.',
+    description: 'Add one photo or video from a direct https link (Google downloads it). Photos: JPG or PNG, 10 KB–5 MB, at least 250×250 px (720×720 or larger is best). Videos: up to 30 seconds, 75 MB, 720p or higher. The link is checked first, and an address already added is skipped. New cover, profile and logo photos wait for approval unless the location publishes every photo; otherwise the location\'s profile rules decide. For several, use business_add_media.',
     scope: 'reviews:write',
     inputShape: {
       location: LOCATION,
@@ -282,7 +282,7 @@ export const BUSINESS_TOOLS: ToolDef[] = [
   {
     name: 'business_delete_photo',
     title: 'Ask to delete a photo',
-    description: 'Request deletion of a photo (name from business_list_photos). Deleting always waits for a person to approve it.',
+    description: 'Request deletion of a photo (name from business_list_photos). Deleting waits for a person to approve it unless the location publishes every photo.',
     scope: 'reviews:write',
     inputShape: { location: LOCATION, photoName: z.string().describe('"accounts/…/locations/…/media/…" from business_list_photos.'), rationale: z.string().min(5).max(2000) },
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },

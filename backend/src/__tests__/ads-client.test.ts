@@ -166,6 +166,10 @@ describe('client brief and routine prompt', () => {
     expect(prompt).toContain('https://seo.example.com/mcp');
     const propose = buildRoutinePrompt({ settings: { ...settings, mode: 'propose' }, accounts: [account], connectorName: 'Indexer', endpoint: 'x', dashboardUrl: 'y' });
     expect(propose.prompt).toContain('do NOT apply it');
+    expect(prompt).toContain('budget increases up to 20% and bid changes up to ±25% per change apply automatically');
+    const auto = { ...account, guardrails: normalizeGuardrails({ mode: 'auto' }) };
+    expect(buildRoutinePrompt({ settings, accounts: [auto], connectorName: 'Indexer', endpoint: 'x', dashboardUrl: 'y' }).prompt)
+      .toContain('every change is approved automatically, except that projected spend may not exceed the monthly budget');
   });
 
   it('rejects invalid routine settings', () => {

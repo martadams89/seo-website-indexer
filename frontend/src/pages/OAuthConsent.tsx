@@ -9,7 +9,9 @@ type ConsentRequest = Awaited<ReturnType<typeof api.getOAuthRequest>>;
 /**
  * Consent screen for MCP clients (chat apps, IDEs, agent CLIs). The
  * person is already signed in (AuthGate), sees which app is asking and where
- * it will be sent back to, and chooses the permissions to grant.
+ * it will be sent back to, and chooses the permissions to grant. An app they
+ * approved before that's still connected is sent straight back with the same
+ * access, so reconnecting it is one click in the app.
  */
 export default function OAuthConsentPage() {
   const [params] = useSearchParams();
@@ -18,13 +20,26 @@ export default function OAuthConsentPage() {
   const [scopes, setScopes] = useState<string[]>(['mcp:read']);
   const [loadError, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reconnecting, setReconnecting] = useState('');
   const error = requestId ? loadError : 'This page needs a connection request. Start the connection again from your AI app.';
 
   useEffect(() => {
     if (!requestId) return;
+    let cancelled = false;
     api.getOAuthRequest(requestId)
-      .then(r => { setRequest(r); setScopes(['mcp:read', ...r.requested_scopes.filter(s => s !== 'mcp:read')]); })
-      .catch(e => setError(String(e).replace('Error: ', '')));
+      .then(async r => {
+        if (cancelled) return;
+        if (r.previously_granted) {
+          setReconnecting(r.client_name);
+          const { redirect } = await api.decideOAuthRequest(requestId, true, r.previously_granted);
+          window.location.assign(redirect);
+          return;
+        }
+        setRequest(r);
+        setScopes(['mcp:read', ...r.requested_scopes.filter(s => s !== 'mcp:read')]);
+      })
+      .catch(e => { if (!cancelled) setError(String(e).replace('Error: ', '')); });
+    return () => { cancelled = true; };
   }, [requestId]);
 
   async function decide(approve: boolean) {
@@ -45,7 +60,11 @@ export default function OAuthConsentPage() {
       <section className="consent-card" aria-labelledby="consent-title">
         <span className="eyebrow"><ShieldCheck size={13} /> Connect an AI assistant</span>
         {error && <div className="alert alert-error"><AlertTriangle size={14} /><div className="alert-content">{error}</div></div>}
-        {!request && !error && <div className="consent-loading"><Loader2 className="spin" size={18} /> Loading request…</div>}
+        {!request && !error && (
+          <div className="consent-loading">
+            <Loader2 className="spin" size={18} /> {reconnecting ? `Reconnecting ${reconnecting} with the access you gave it before…` : 'Loading request…'}
+          </div>
+        )}
         {request && (
           <>
             <h1 id="consent-title"><strong>{request.client_name}</strong> wants to access SEO Website Indexer</h1>
