@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.51.0](https://github.com/martadams89/seo-website-indexer/compare/v1.50.1...v1.51.0) (2026-10-28)
+
+
+### ✨ Features
+
+* AI app connections that survive restarts, and auto-approve for Business Profile and Google Ads ([#536](https://github.com/martadams89/seo-website-indexer/issues/536)) ([5492fa2](https://github.com/martadams89/seo-website-indexer/commit/5492fa26e730253e680c97a5898609c810ddd30b))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.8 ([#532](https://github.com/martadams89/seo-website-indexer/issues/532)) ([a8758d0](https://github.com/martadams89/seo-website-indexer/commit/a8758d0678c11946ed7d2348f47a7939da46da48))
+* **deps:** update dependency lucide-react to ^1.63.0 ([#534](https://github.com/martadams89/seo-website-indexer/issues/534)) ([e146b50](https://github.com/martadams89/seo-website-indexer/commit/e146b50dded7e7ffe1ebdcc7c919d8e36c5eec45))
+* **deps:** update dependency react-router-dom to ^7.18.5 ([#533](https://github.com/martadams89/seo-website-indexer/issues/533)) ([75ed02d](https://github.com/martadams89/seo-website-indexer/commit/75ed02d4d02e64206c48059caf9abd2590b317db))
+
 ## [1.50.1](https://github.com/martadams89/seo-website-indexer/compare/v1.50.0...v1.50.1) (2026-10-27)
 
 
