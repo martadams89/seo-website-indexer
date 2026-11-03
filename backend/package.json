@@ -18,7 +18,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@simplewebauthn/server": "^14.0.3",
     "better-sqlite3": "^13.0.3",
-    "fastify": "^5.12.7",
+    "fastify": "^5.12.8",
     "google-auth-library": "^11.3.2",
     "node-cron": "^4.6.0",
     "nodemailer": "^10.3.1",
