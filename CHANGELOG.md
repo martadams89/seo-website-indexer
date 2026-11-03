@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.51.4](https://github.com/martadams89/seo-website-indexer/compare/v1.51.3...v1.51.4) (2026-11-02)
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.2.0 ([#550](https://github.com/martadams89/seo-website-indexer/issues/550)) ([18a90db](https://github.com/martadams89/seo-website-indexer/commit/18a90dbb7efa913b9d4eb3f16e5576693a9af419))
+* **deps:** update dependency globals to ^17.14.0 ([#551](https://github.com/martadams89/seo-website-indexer/issues/551)) ([7ea8a4a](https://github.com/martadams89/seo-website-indexer/commit/7ea8a4ace95f61926291d12424964f3f4f217c2c))
+* **deps:** update renovatebot/github-action action to v46.3.12 ([#549](https://github.com/martadams89/seo-website-indexer/issues/549)) ([4007d74](https://github.com/martadams89/seo-website-indexer/commit/4007d74fab0c9c9ae310ff3e9ccc91547503a34f))
+
 ## [1.51.3](https://github.com/martadams89/seo-website-indexer/compare/v1.51.2...v1.51.3) (2026-10-31)
 
 
