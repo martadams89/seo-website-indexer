@@ -1,6 +1,6 @@
 {
   "name": "seo-website-indexer-backend",
-  "version": "1.51.5",
+  "version": "1.51.6",
   "description": "Self-hosted SEO and GEO operations platform",
   "type": "module",
   "main": "dist/server.js",
@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/cors": "^11.4.0",
+    "@fastify/cors": "^11.3.1",
     "@fastify/rate-limit": "^11.2.2",
     "@fastify/static": "^10.1.8",
     "@modelcontextprotocol/sdk": "^1.32.2",
