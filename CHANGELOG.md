@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.51.5](https://github.com/martadams89/seo-website-indexer/compare/v1.51.4...v1.51.5) (2026-11-03)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/rate-limit to ^11.2.2 ([#554](https://github.com/martadams89/seo-website-indexer/issues/554)) ([d65d086](https://github.com/martadams89/seo-website-indexer/commit/d65d086804e6470dca3c5616ceb23ebe22b673bb))
+* **deps:** update dependency fastify to ^5.12.8 ([#555](https://github.com/martadams89/seo-website-indexer/issues/555)) ([dad5da4](https://github.com/martadams89/seo-website-indexer/commit/dad5da4252059dd2cd0433fb23d4cbae9a26aaf6))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.2.1 ([#553](https://github.com/martadams89/seo-website-indexer/issues/553)) ([737ab4e](https://github.com/martadams89/seo-website-indexer/commit/737ab4eb56fcd6fc1357dd014348aa00574789f5))
+
 ## [1.51.4](https://github.com/martadams89/seo-website-indexer/compare/v1.51.3...v1.51.4) (2026-11-02)
 
 
