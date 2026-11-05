@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.51.6](https://github.com/martadams89/seo-website-indexer/compare/v1.51.5...v1.51.6) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/cors to ^11.4.0 ([#559](https://github.com/martadams89/seo-website-indexer/issues/559)) ([8edf2f8](https://github.com/martadams89/seo-website-indexer/commit/8edf2f83e5e9075925ba1372ec3d4158ba309f8f))
+* **deps:** update dependency google-auth-library to ^11.3.3 ([#557](https://github.com/martadams89/seo-website-indexer/issues/557)) ([7f667ee](https://github.com/martadams89/seo-website-indexer/commit/7f667ee7f64b8e44236d321324432c2f4be7f743))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency vitest to ^5.1.0 ([#558](https://github.com/martadams89/seo-website-indexer/issues/558)) ([3c7ea59](https://github.com/martadams89/seo-website-indexer/commit/3c7ea59a1dd9b6f40403528fad519463693c1f40))
+
 ## [1.51.5](https://github.com/martadams89/seo-website-indexer/compare/v1.51.4...v1.51.5) (2026-11-03)
 
 
