@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.51.8](https://github.com/martadams89/seo-website-indexer/compare/v1.51.7...v1.51.8) (2026-11-07)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/cors to ^11.4.1 ([#565](https://github.com/martadams89/seo-website-indexer/issues/565)) ([c7da3ab](https://github.com/martadams89/seo-website-indexer/commit/c7da3ab68a81877bdc5e43ec0244208f968bcaad))
+* **deps:** update dependency @simplewebauthn/server to ^14.1.0 ([#569](https://github.com/martadams89/seo-website-indexer/issues/569)) ([a38bed3](https://github.com/martadams89/seo-website-indexer/commit/a38bed3c94e1163afb452e47694080eaaf8b5bed))
+* **deps:** update dependency lucide-react to ^1.70.0 ([#566](https://github.com/martadams89/seo-website-indexer/issues/566)) ([b1ab911](https://github.com/martadams89/seo-website-indexer/commit/b1ab911250dfaa8614d425ce2df73df885cf6e5a))
+* **deps:** update dependency parse5 to ^8.1.0 ([#567](https://github.com/martadams89/seo-website-indexer/issues/567)) ([5192b97](https://github.com/martadams89/seo-website-indexer/commit/5192b97a1665292606604c14e58f1b0b8ffb17ba))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency jsdom to v31 ([#570](https://github.com/martadams89/seo-website-indexer/issues/570)) ([364139b](https://github.com/martadams89/seo-website-indexer/commit/364139b2da149abec4d131bf4e63ff4057205270))
+
 ## [1.51.7](https://github.com/martadams89/seo-website-indexer/compare/v1.51.6...v1.51.7) (2026-11-05)
 
 
