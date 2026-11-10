@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.51.10](https://github.com/martadams89/seo-website-indexer/compare/v1.51.9...v1.51.10) (2026-11-10)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency google-auth-library to ^11.3.4 ([#579](https://github.com/martadams89/seo-website-indexer/issues/579)) ([d775b56](https://github.com/martadams89/seo-website-indexer/commit/d775b56f59cdadff245237c8efb4e58def44e72f))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @vitejs/plugin-react to ^6.3.0 ([#575](https://github.com/martadams89/seo-website-indexer/issues/575)) ([f49b997](https://github.com/martadams89/seo-website-indexer/commit/f49b997f24a58f9e901de084bbf8e65c2c1fc1e3))
+* **deps:** update dependency typescript-eslint to ^8.72.2 ([#577](https://github.com/martadams89/seo-website-indexer/issues/577)) ([254eddc](https://github.com/martadams89/seo-website-indexer/commit/254eddc3e0894fba2d31801bf358c0fa18ca7f8e))
+* **deps:** update renovatebot/github-action action to v46.3.13 ([#574](https://github.com/martadams89/seo-website-indexer/issues/574)) ([aa45e99](https://github.com/martadams89/seo-website-indexer/commit/aa45e99232c5211ae0a9a526b6eb08b9a5721eea))
+
 ## [1.51.9](https://github.com/martadams89/seo-website-indexer/compare/v1.51.8...v1.51.9) (2026-11-08)
 
 
