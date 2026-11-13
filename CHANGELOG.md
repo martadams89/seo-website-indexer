@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.51.13](https://github.com/martadams89/seo-website-indexer/compare/v1.51.12...v1.51.13) (2026-11-12)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency better-sqlite3 to ^13.1.1 ([#587](https://github.com/martadams89/seo-website-indexer/issues/587)) ([eef1ba1](https://github.com/martadams89/seo-website-indexer/commit/eef1ba14232e0f7e397b8f5361f6edf9278abb4a))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency node to v26.13.1 ([#586](https://github.com/martadams89/seo-website-indexer/issues/586)) ([6d1e602](https://github.com/martadams89/seo-website-indexer/commit/6d1e6027dcd794a16b39fd6d830b1a6d034f991b))
+
 ## [1.51.12](https://github.com/martadams89/seo-website-indexer/compare/v1.51.11...v1.51.12) (2026-11-11)
 
 
