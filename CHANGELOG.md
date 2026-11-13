@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.51.14](https://github.com/martadams89/seo-website-indexer/compare/v1.51.13...v1.51.14) (2026-11-13)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/cors to ^11.4.2 ([#590](https://github.com/martadams89/seo-website-indexer/issues/590)) ([adfca46](https://github.com/martadams89/seo-website-indexer/commit/adfca4671ebb0672ad04329f3204791866552118))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency jsdom to ^31.0.1 ([#589](https://github.com/martadams89/seo-website-indexer/issues/589)) ([b5361a1](https://github.com/martadams89/seo-website-indexer/commit/b5361a12d8f30aff3528e63d6ffbb05da73d3b16))
+
 ## [1.51.13](https://github.com/martadams89/seo-website-indexer/compare/v1.51.12...v1.51.13) (2026-11-12)
 
 
