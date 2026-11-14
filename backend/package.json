@@ -14,7 +14,7 @@
   "dependencies": {
     "@fastify/cors": "^11.4.3",
     "@fastify/rate-limit": "^11.2.2",
-    "@fastify/static": "^10.1.10",
+    "@fastify/static": "^10.1.11",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@simplewebauthn/server": "^14.1.0",
     "better-sqlite3": "^13.1.1",
