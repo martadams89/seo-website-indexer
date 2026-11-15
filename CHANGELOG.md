@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.51.16](https://github.com/martadams89/seo-website-indexer/compare/v1.51.15...v1.51.16) (2026-11-15)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency better-sqlite3 to ^13.2.0 ([#596](https://github.com/martadams89/seo-website-indexer/issues/596)) ([bdc273f](https://github.com/martadams89/seo-website-indexer/commit/bdc273ff63ee3b570c2f3b1e4cc167f67165bad3))
+* **deps:** update dependency lucide-react to ^1.73.0 ([#597](https://github.com/martadams89/seo-website-indexer/issues/597)) ([b39ceea](https://github.com/martadams89/seo-website-indexer/commit/b39ceeaa3416d37220726472dbdfcb4e01a6018d))
+
 ## [1.51.15](https://github.com/martadams89/seo-website-indexer/compare/v1.51.14...v1.51.15) (2026-11-14)
 
 
