@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.51.15](https://github.com/martadams89/seo-website-indexer/compare/v1.51.14...v1.51.15) (2026-11-14)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/cors to ^11.4.3 ([#592](https://github.com/martadams89/seo-website-indexer/issues/592)) ([f3bec8c](https://github.com/martadams89/seo-website-indexer/commit/f3bec8c8d7e6796891a0817279ce37964e9e5280))
+* **deps:** update dependency @fastify/static to ^10.1.11 ([#593](https://github.com/martadams89/seo-website-indexer/issues/593)) ([abbc301](https://github.com/martadams89/seo-website-indexer/commit/abbc301e26d837e21063be1de20ad5135362d6b1))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint to ^10.15.0 ([#594](https://github.com/martadams89/seo-website-indexer/issues/594)) ([c844516](https://github.com/martadams89/seo-website-indexer/commit/c8445161b58f6bf6e5334c3d0ee3d43bd0cd9a4e))
+
 ## [1.51.14](https://github.com/martadams89/seo-website-indexer/compare/v1.51.13...v1.51.14) (2026-11-13)
 
 
