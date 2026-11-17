@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.51.17](https://github.com/martadams89/seo-website-indexer/compare/v1.51.16...v1.51.17) (2026-11-16)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency nodemailer to ^10.6.0 ([#601](https://github.com/martadams89/seo-website-indexer/issues/601)) ([c8a3172](https://github.com/martadams89/seo-website-indexer/commit/c8a317202498e8ba25c01bb052fdb021ed840606))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency eslint-plugin-react-refresh to ^0.5.8 ([#599](https://github.com/martadams89/seo-website-indexer/issues/599)) ([51e2b12](https://github.com/martadams89/seo-website-indexer/commit/51e2b127bce4dd80507e77ad3f91063a83275255))
+* **deps:** update renovatebot/github-action action to v46.3.14 ([#600](https://github.com/martadams89/seo-website-indexer/issues/600)) ([e3caf60](https://github.com/martadams89/seo-website-indexer/commit/e3caf6059403c50224ee59afde1f1e2a3840cae8))
+
 ## [1.51.16](https://github.com/martadams89/seo-website-indexer/compare/v1.51.15...v1.51.16) (2026-11-15)
 
 
