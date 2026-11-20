@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.51.21](https://github.com/martadams89/seo-website-indexer/compare/v1.51.20...v1.51.21) (2026-11-20)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/static to ^10.1.12 ([#613](https://github.com/martadams89/seo-website-indexer/issues/613)) ([bc87c58](https://github.com/martadams89/seo-website-indexer/commit/bc87c581f25548ca40fa8fff1fd4a01a5e8a1424))
+* **deps:** update dependency lucide-react to ^1.77.0 ([#614](https://github.com/martadams89/seo-website-indexer/issues/614)) ([befda3e](https://github.com/martadams89/seo-website-indexer/commit/befda3e6ee50d18373a16433c7ff5eb3877c4f05))
+
 ## [1.51.20](https://github.com/martadams89/seo-website-indexer/compare/v1.51.19...v1.51.20) (2026-11-19)
 
 
