@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.51.22](https://github.com/martadams89/seo-website-indexer/compare/v1.51.21...v1.51.22) (2026-11-21)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency @fastify/rate-limit to ^11.3.0 ([#617](https://github.com/martadams89/seo-website-indexer/issues/617)) ([9930394](https://github.com/martadams89/seo-website-indexer/commit/9930394dc94e3e19a8cac79afc2dcd83b7f9db16))
+* **deps:** update dependency nodemailer to ^10.6.1 ([#616](https://github.com/martadams89/seo-website-indexer/issues/616)) ([8f8600d](https://github.com/martadams89/seo-website-indexer/commit/8f8600d251947718998daab549cac4baa807b43c))
+
 ## [1.51.21](https://github.com/martadams89/seo-website-indexer/compare/v1.51.20...v1.51.21) (2026-11-20)
 
 
