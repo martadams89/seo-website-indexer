@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.51.25](https://github.com/martadams89/seo-website-indexer/compare/v1.51.24...v1.51.25) (2026-11-25)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency react-router-dom to ^7.18.7 ([#627](https://github.com/martadams89/seo-website-indexer/issues/627)) ([c5dd091](https://github.com/martadams89/seo-website-indexer/commit/c5dd091f0d2cd19b4b9d8cb6e9cd95fa5e3667c2))
+
+
+### 🧹 Maintenance
+
+* **deps:** update dependency @types/react to ^19.3.2 ([#626](https://github.com/martadams89/seo-website-indexer/issues/626)) ([554da2c](https://github.com/martadams89/seo-website-indexer/commit/554da2c97e0ff4d505cd1c8a11cbeff9b339a8e8))
+
 ## [1.51.24](https://github.com/martadams89/seo-website-indexer/compare/v1.51.23...v1.51.24) (2026-11-24)
 
 
