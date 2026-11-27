@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.51.27](https://github.com/martadams89/seo-website-indexer/compare/v1.51.26...v1.51.27) (2026-11-26)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** update dependency lucide-react to ^1.81.0 ([#633](https://github.com/martadams89/seo-website-indexer/issues/633)) ([302b91b](https://github.com/martadams89/seo-website-indexer/commit/302b91b3ae4944538b0699976b39f90edc002e7f))
+
 ## [1.51.26](https://github.com/martadams89/seo-website-indexer/compare/v1.51.25...v1.51.26) (2026-11-26)
 
 
